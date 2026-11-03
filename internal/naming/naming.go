@@ -91,6 +91,36 @@ func Parse(fileName, caption string) Parsed {
 	return p
 }
 
+// UploadName is the file name and caption posted to the channel for one imported video.
+// Parse(fileName, caption) returns the same title, year, id, episode and label.
+func UploadName(p Parsed, ext string) (fileName, caption string) {
+	if p.Title == "" {
+		p.Title = "Untitled"
+	}
+	caption = p.Title
+	if p.Year > 0 {
+		caption = fmt.Sprintf("%s (%d)", p.Title, p.Year)
+	}
+	name := caption
+	if p.Episode {
+		name = fmt.Sprintf("%s S%02dE%02d", caption, p.Season, p.Number)
+	}
+	if p.TMDBID > 0 {
+		name += fmt.Sprintf(" [tmdbid-%d]", p.TMDBID)
+	}
+	if !p.Episode && p.Label != "" {
+		name += " " + p.Label
+	}
+	ext = strings.ToLower(ext)
+	if ext == "" {
+		ext = ".mkv"
+	}
+	if !strings.HasPrefix(ext, ".") {
+		ext = "." + ext
+	}
+	return name + ext, caption
+}
+
 // RelPath returns the .strm path inside the library, using forward slashes. A non-empty
 // suffix separates files that would otherwise collide.
 func (p Parsed) RelPath(messageID int, suffix string) string {

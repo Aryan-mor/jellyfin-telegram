@@ -17,9 +17,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/autoupload"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/blockstore"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/downloads"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fladder"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
@@ -31,9 +33,11 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/stack"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
 const (
@@ -211,13 +215,18 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 
 		BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
 	}, log)
+	dl := startDownloads(ctx, cfg, envPath, cat, pool, seerrTarget, log)
+	radarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.RadarrPort))
+	sonarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.SonarrPort))
 	options := front.Options{
 		Gateway:    gw,
 		Setup:      wizard.Handler(),
-		Panel:      settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil),
+		Panel:      settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
 		Fladder:    fladderTarget,
+		Radarr:     radarrURL,
+		Sonarr:     sonarrURL,
 	}
 	if cfg.JellyfinURL != "" {
 		target, err := url.Parse(cfg.JellyfinURL)
@@ -227,6 +236,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		options.Jellyfin = target
 	}
 	entry.Set(front.Handler(options))
+	go dl.Run(ctx)
 	log.Info("serving", "addr", cfg.GatewayListen)
 
 	var prober *jellyfin.Prober
@@ -292,13 +302,77 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	return result
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool) http.Handler {
+func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, seerrTarget *url.URL, log *slog.Logger) *downloads.Service {
+	pace := tguser.Pace{
+		MBPerSec: cfg.UploadMBPerSec, RestMinutes: cfg.UploadRestMinutes,
+		LongEveryGB: cfg.UploadLongRestEveryGB, LongRestMinutes: cfg.UploadLongRestMinutes,
+		DailyGB: cfg.UploadDailyGB, Hours: cfg.UploadHours,
+	}
+	users, err := tguser.New(filepath.Join(cfg.DataDir, "users"), cfg.APIID, cfg.APIHash, cfg.ChannelID, pace, log)
+	if err != nil {
+		log.Warn("user sessions are off", "err", err)
+		users = nil
+	} else {
+		users.Bind(ctx)
+		if err := users.Connect(ctx); err != nil {
+			log.Warn("user sessions did not start", "err", err)
+		}
+	}
+	seerrBase, seerrKey := "", ""
+	if seerrTarget != nil {
+		seerrBase = seerrTarget.String()
+		seerrKey, _ = seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
+	}
+	host, _, _ := seerrJellyfin(cfg)
+	// Docker reads a relative -v path as a volume name, so both folders must be absolute.
+	downloadsDir, err := filepath.Abs(cfg.DownloadsDir)
+	if err != nil {
+		log.Warn("downloads are off", "err", err)
+		return nil
+	}
+	stackDir, err := filepath.Abs(filepath.Join(cfg.DataDir, "stack"))
+	if err != nil {
+		log.Warn("downloads are off", "err", err)
+		return nil
+	}
+	runner := &stack.Runner{
+		Downloads: downloadsDir, ConfigDir: stackDir,
+		SeerrURL: seerrBase, SeerrKey: seerrKey, PublicBase: publicBase(cfg), JellyfinHost: host,
+		MaxDBGB: cfg.BitmagnetDBMaxGB, Log: log,
+	}
+	svc := downloads.New(cfg.DownloadsEnabled)
+	svc.EnvPath = envPath
+	svc.Users = users
+	svc.Runner = runner
+	svc.Cat = cat
+	svc.Defaults = pace
+	svc.MinFree = cfg.DownloadsMinFreeGB
+	svc.Log = log
+	worker := &autoupload.Worker{
+		Cat: cat, Verify: pool, Dir: downloadsDir,
+		MinFree: uint64(cfg.DownloadsMinFreeGB) << 30, Log: log,
+	}
+	if users != nil {
+		worker.Sessions = users
+	}
+	svc.Worker = worker
+	return svc
+}
+
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service) http.Handler {
 	return panel.New(panel.Options{
 		Code:    code,
 		EnvPath: envPath,
 		Seerr:   seerr,
 		Fladder: fladder,
-		Verify:  verifyTelegram(dataDir, log),
+		Downloads: func(ctx context.Context) (any, error) {
+			if dl == nil {
+				return nil, nil
+			}
+			return dl.Status(ctx)
+		},
+		DownloadDo: downloadActions(dl),
+		Verify:     verifyTelegram(dataDir, log),
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
 			for _, st := range pool.Statuses() {
@@ -317,6 +391,59 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			return checkChannelUnchanged(context.Background(), cat, id)
 		},
 	})
+}
+
+func downloadActions(dl *downloads.Service) func(*http.Request, string, map[string]any) (any, error) {
+	return func(r *http.Request, action string, body map[string]any) (any, error) {
+		if dl == nil || dl.Users == nil {
+			return nil, errors.New("downloads are not available")
+		}
+		switch action {
+		case "enable":
+			on, _ := body["enabled"].(bool)
+			if err := dl.SetEnabled(r.Context(), on); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		case "login":
+			if phone, _ := body["phone"].(string); phone != "" {
+				return dl.Users.BeginLogin(r.Context(), phone)
+			}
+			if pass, _ := body["password"].(string); pass != "" {
+				return dl.Users.SubmitPassword(r.Context(), pass)
+			}
+			code, _ := body["code"].(string)
+			return dl.Users.SubmitCode(r.Context(), code)
+		case "logout":
+			return nil, dl.Users.Logout(r.Context(), int64(number(body["user_id"])))
+		case "pace":
+			p := tguser.Pace{
+				MBPerSec: int(number(body["mb_per_sec"])), RestMinutes: int(number(body["rest_minutes"])),
+				LongEveryGB: int(number(body["long_every_gb"])), LongRestMinutes: int(number(body["long_rest_minutes"])),
+				DailyGB: int(number(body["daily_gb"])),
+			}
+			if hours, ok := body["hours"].(string); ok {
+				p.Hours = hours
+			}
+			if id := int64(number(body["user_id"])); id != 0 {
+				return nil, dl.Users.SetPace(id, p, true)
+			}
+			return nil, dl.SetDefaults(p)
+		default:
+			return nil, errors.New("unknown action")
+		}
+	}
+}
+
+func number(v any) float64 {
+	switch n := v.(type) {
+	case float64:
+		return n
+	case int:
+		return float64(n)
+	default:
+		return 0
+	}
 }
 
 func managedCredentialsFile(cfg config.Config) string {

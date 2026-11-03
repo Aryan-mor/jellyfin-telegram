@@ -58,6 +58,26 @@ type Config struct {
 	SeerrManaged bool
 	// FladderManaged means this program runs the Fladder web client, with Seerr filled in.
 	FladderManaged bool
+
+	// DownloadsEnabled turns on Radarr, Sonarr, qBittorrent, Bitmagnet and the channel uploader.
+	// It stays off until a person turns it on, and only after a healthy admin session exists.
+	DownloadsEnabled bool
+	// DownloadsDir is the bind-mounted volume shared by qBittorrent, Radarr and Sonarr.
+	// Empty resolves to DATA_DIR/downloads.
+	DownloadsDir string
+	// DownloadsMinFreeGB pauses qBittorrent when the volume has less than this much free.
+	DownloadsMinFreeGB int
+	// BitmagnetDBMaxGB stops the DHT crawler once Postgres reaches this size. Search stays on.
+	BitmagnetDBMaxGB int
+
+	// Upload limits apply to each user session. Zero MB/s means no speed cap.
+	// UploadHours is empty for all day, or a window such as 01-08.
+	UploadMBPerSec        int
+	UploadRestMinutes     int
+	UploadLongRestEveryGB int
+	UploadLongRestMinutes int
+	UploadDailyGB         int
+	UploadHours           string
 }
 
 // NeedsSetup reports that no Telegram details were given at all, as on a first run.
@@ -164,7 +184,68 @@ func Load(envPath string) (Config, error) {
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
 	}
+	c.DownloadsEnabled = strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")
+	c.DownloadsDir = get("DOWNLOADS_DIR", "")
+	if c.DownloadsDir == "" {
+		c.DownloadsDir = filepath.Join(c.DataDir, "downloads")
+	}
+	c.DownloadsMinFreeGB = getInt("DOWNLOADS_MIN_FREE_GB", 20, fail)
+	if c.DownloadsMinFreeGB < 0 {
+		fail("DOWNLOADS_MIN_FREE_GB must not be negative")
+	}
+	c.BitmagnetDBMaxGB = getInt("BITMAGNET_DB_MAX_GB", 40, fail)
+	if c.BitmagnetDBMaxGB < 0 {
+		fail("BITMAGNET_DB_MAX_GB must not be negative")
+	}
+	c.UploadMBPerSec = getInt("UPLOAD_MB_PER_SEC", 8, fail)
+	c.UploadRestMinutes = getInt("UPLOAD_REST_MINUTES", 5, fail)
+	c.UploadLongRestEveryGB = getInt("UPLOAD_LONG_REST_EVERY_GB", 20, fail)
+	c.UploadLongRestMinutes = getInt("UPLOAD_LONG_REST_MINUTES", 60, fail)
+	c.UploadDailyGB = getInt("UPLOAD_DAILY_GB", 50, fail)
+	for _, n := range []int{c.UploadMBPerSec, c.UploadRestMinutes, c.UploadLongRestEveryGB, c.UploadLongRestMinutes, c.UploadDailyGB} {
+		if n < 0 {
+			fail("upload limits must not be negative")
+			break
+		}
+	}
+	c.UploadHours = get("UPLOAD_HOURS", "")
+	if _, _, err := ParseHours(c.UploadHours); err != nil {
+		fail("UPLOAD_HOURS: %v", err)
+	}
 	return c, errors.Join(errs...)
+}
+
+// ParseHours reads a local-time window such as 01-08. An empty string is the whole day.
+// The end hour is exclusive. A window that passes midnight, such as 22-06, is allowed.
+func ParseHours(s string) (start, end int, err error) {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return 0, 0, nil
+	}
+	a, b, ok := strings.Cut(s, "-")
+	if !ok {
+		return 0, 0, errors.New("use a window such as 01-08, or leave it empty")
+	}
+	start, err = strconv.Atoi(strings.TrimSpace(a))
+	if err != nil {
+		return 0, 0, errors.New("use a window such as 01-08, or leave it empty")
+	}
+	end, err = strconv.Atoi(strings.TrimSpace(b))
+	if err != nil || start < 0 || start > 23 || end < 1 || end > 24 || start == end {
+		return 0, 0, errors.New("hours must look like 01-08, with the end hour excluded")
+	}
+	return start, end, nil
+}
+
+// WithinHours reports whether hour falls inside the window from ParseHours.
+func WithinHours(start, end, hour int) bool {
+	if start == 0 && end == 0 {
+		return true
+	}
+	if start < end {
+		return hour >= start && hour < end
+	}
+	return hour >= start || hour < end
 }
 
 // ValidateServe adds the checks that only matter when running the gateway.

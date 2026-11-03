@@ -53,6 +53,7 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     <button type="button" data-tab="api">Telegram API</button>
     <button type="button" data-tab="channel">Channel</button>
     <button type="button" data-tab="away">Away from home</button>
+    <button type="button" data-tab="downloads">Downloads</button>
   </nav>
 
   <section id="tab-bots">
@@ -123,12 +124,48 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     </ol>
     <div id="urls"></div>
   </section>
+
+  <section id="tab-downloads" hidden>
+    <h2>Downloads</h2>
+    <p>Seerr can ask Radarr and Sonarr to download a film or an episode. qBittorrent fetches it, a Telegram account you sign in here posts it to the channel, and the file on disk is deleted after Jellyfin has probed it. A file larger than the account can send is refused, not split. The account session is stored in <code>data/users</code> and is not encrypted, so keep that folder like a password.</p>
+    <p>Sign-in works from this computer or over Tailscale only. More accounts move the queue faster. One file still uploads through one account.</p>
+    <div class="row"><div><strong id="dl-switch-label">Off</strong><small id="dl-dir"></small></div><button id="dl-toggle" type="button">Turn on</button></div>
+    <div id="dl-msg" class="note"></div>
+    <h2>Accounts</h2>
+    <div id="dl-sessions"></div>
+    <label for="dl-phone">Phone number</label>
+    <input id="dl-phone" autocomplete="off" placeholder="+15551212">
+    <label for="dl-code">Code from Telegram</label>
+    <input id="dl-code" autocomplete="one-time-code">
+    <label for="dl-password">Two-step password, if Telegram asks</label>
+    <input id="dl-password" type="password" autocomplete="off">
+    <button id="dl-login" type="button">Continue</button>
+    <h2>Pace</h2>
+    <p>These limits apply to every account that does not set its own. They are cautious guesses. Telegram has not published a limit. A flood wait doubles that account's rest until the end of the day.</p>
+    <label for="dl-mb">Megabytes per second (0 means no cap)</label>
+    <input id="dl-mb" inputmode="numeric" value="8">
+    <label for="dl-rest">Minutes between files</label>
+    <input id="dl-rest" inputmode="numeric" value="5">
+    <label for="dl-every">Long rest after this many GB</label>
+    <input id="dl-every" inputmode="numeric" value="20">
+    <label for="dl-long">Long rest, minutes</label>
+    <input id="dl-long" inputmode="numeric" value="60">
+    <label for="dl-daily">Daily GB per account</label>
+    <input id="dl-daily" inputmode="numeric" value="50">
+    <label for="dl-hours">Hours, such as 01-08. Empty means all day.</label>
+    <input id="dl-hours" autocomplete="off" placeholder="01-08">
+    <button id="dl-save-pace" type="button">Save pace</button>
+    <h2>Stack</h2>
+    <div id="dl-stack"></div>
+    <h2>Queue</h2>
+    <div id="dl-queue"></div>
+  </section>
 </main>
 <script>
 const embedded = "__PANEL_CODE__";
 const code = new URLSearchParams(location.search).get('code') || embedded;
 const $ = id => document.getElementById(id);
-const tabs = ['bots', 'api', 'channel', 'away'];
+const tabs = ['bots', 'api', 'channel', 'away', 'downloads'];
 const api = async (path, body) => {
   const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const data = await res.json().catch(() => ({}));
@@ -190,6 +227,7 @@ function draw(s) {
   $('link-seerr').hidden = !s.seerr;
   $('link-fladder').hidden = !s.fladder;
   $('link-fladder-releases').hidden = !s.fladder;
+  drawDownloads(s.downloads);
   if (!(s.addresses || []).length) {
     const p = document.createElement('p');
     p.textContent = 'No address yet. The list appears when the program has finished starting.';
@@ -233,6 +271,88 @@ window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 $('add-btn').onclick = () => changeBots({add: $('add').value.trim()});
 $('save-api').onclick = () => save({api_id:$('api_id').value, api_hash:$('api_hash').value}, $('save-api'), 'api-msg');
 $('save-channel').onclick = () => save({channel:$('channel').value, language:$('language').value}, $('save-channel'), 'channel-msg');
+
+function paceBody() {
+  return {mb_per_sec:Number($('dl-mb').value||0), rest_minutes:Number($('dl-rest').value||0), long_every_gb:Number($('dl-every').value||0), long_rest_minutes:Number($('dl-long').value||0), daily_gb:Number($('dl-daily').value||0), hours:$('dl-hours').value.trim()};
+}
+function drawDownloads(d) {
+  if (!d) return;
+  $('dl-switch-label').textContent = d.enabled ? 'On' : 'Off';
+  $('dl-toggle').textContent = d.enabled ? 'Turn off' : 'Turn on';
+  const free = d.free_bytes ? (d.free_bytes/1024/1024/1024).toFixed(1) + ' GiB free' : '';
+  $('dl-dir').textContent = [d.dir, free].filter(Boolean).join(' · ');
+  if (d.pace && document.activeElement && !document.activeElement.id.startsWith('dl-')) {
+    $('dl-mb').value = d.pace.MBPerSec ?? d.pace.mb_per_sec ?? '';
+    $('dl-rest').value = d.pace.RestMinutes ?? d.pace.rest_minutes ?? '';
+    $('dl-every').value = d.pace.LongEveryGB ?? d.pace.long_every_gb ?? '';
+    $('dl-long').value = d.pace.LongRestMinutes ?? d.pace.long_rest_minutes ?? '';
+    $('dl-daily').value = d.pace.DailyGB ?? d.pace.daily_gb ?? '';
+    $('dl-hours').value = d.pace.Hours ?? d.pace.hours ?? '';
+  }
+  const sessions = $('dl-sessions');
+  sessions.replaceChildren();
+  for (const ses of d.sessions || []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const left = document.createElement('div');
+    const name = document.createElement('div');
+    name.textContent = ses.username ? '@'+ses.username : (ses.phone || ('user '+ses.user_id));
+    const meta = document.createElement('small');
+    const cap = Math.round((ses.max_bytes||0)/1000/1000);
+    meta.textContent = [ses.premium ? 'Premium' : 'Standard', ses.admin ? 'admin' : 'not an admin', cap ? cap+' MB' : '', ses.connected ? 'connected' : 'not connected', ses.error || ''].filter(Boolean).join(' · ');
+    left.append(name, meta);
+    const btn = document.createElement('button');
+    btn.className = 'quiet'; btn.type = 'button'; btn.textContent = 'Sign out';
+    btn.onclick = async () => { try { await api('/panel/downloads/logout', {user_id:ses.user_id}); draw(await api('/panel/state')); } catch (e) { say('dl-msg', e.message, 'bad'); } };
+    row.append(left, btn);
+    sessions.append(row);
+  }
+  const stack = $('dl-stack');
+  stack.replaceChildren();
+  const lines = [];
+  if (d.error) lines.push(d.error);
+  if (d.radarr_user) lines.push('Radarr at /radarr/  user '+d.radarr_user+'  password '+d.radarr_password);
+  if (d.sonarr_user) lines.push('Sonarr at /sonarr/  user '+d.sonarr_user+'  password '+d.sonarr_password);
+  if (d.enabled || (d.containers || []).length) lines.push(d.crawler ? 'Bitmagnet is crawling the DHT.' : 'Bitmagnet search is on. The DHT crawler is paused because the database reached its cap.');
+  for (const c of d.containers || []) lines.push(c.name+' '+(c.running ? 'running' : 'stopped'));
+  for (const line of lines) { const p = document.createElement('p'); p.textContent = line; stack.append(p); }
+  const queue = $('dl-queue');
+  queue.replaceChildren();
+  for (const item of d.queue || []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const left = document.createElement('div');
+    left.textContent = item.name || '';
+    const meta = document.createElement('small');
+    meta.textContent = [item.state, item.error].filter(Boolean).join(' · ');
+    left.append(meta);
+    row.append(left);
+    queue.append(row);
+  }
+  if (!(d.queue || []).length) { const p = document.createElement('p'); p.textContent = 'Nothing queued.'; queue.append(p); }
+}
+$('dl-toggle').onclick = async () => {
+  const on = $('dl-toggle').textContent === 'Turn on';
+  try { await api('/panel/automation', {enabled:on}); say('dl-msg', on ? 'Starting. Playback is not interrupted.' : 'Stopped. Files already in the channel still play.', 'ok'); draw(await api('/panel/state')); }
+  catch (e) { say('dl-msg', e.message, 'bad'); }
+};
+$('dl-login').onclick = async () => {
+  const body = {};
+  if ($('dl-password').value) body.password = $('dl-password').value;
+  else if ($('dl-code').value) body.code = $('dl-code').value.trim();
+  else body.phone = $('dl-phone').value.trim();
+  try {
+    const res = await api('/panel/downloads/login', body);
+    if (res.step === 'code') say('dl-msg', 'Enter the code Telegram sent.', 'ok');
+    else if (res.step === 'password') say('dl-msg', 'Enter the two-step password.', 'ok');
+    else { say('dl-msg', 'Signed in.', 'ok'); $('dl-code').value = ''; $('dl-password').value = ''; }
+    draw(await api('/panel/state'));
+  } catch (e) { say('dl-msg', e.message, 'bad'); }
+};
+$('dl-save-pace').onclick = async () => {
+  try { await api('/panel/downloads/pace', paceBody()); say('dl-msg', 'Pace saved.', 'ok'); }
+  catch (e) { say('dl-msg', e.message, 'bad'); }
+};
 show(location.hash.slice(1) || 'bots');
 api('/panel/state').then(draw).catch(e => say('bot-msg', e.message, 'bad'));
 </script>

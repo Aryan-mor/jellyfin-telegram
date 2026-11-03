@@ -106,3 +106,30 @@ func TestSanitize(t *testing.T) {
 		t.Errorf("long name not capped with its extension kept: %d runes, %q", len([]rune(long)), long[len(long)-8:])
 	}
 }
+
+func TestUploadNameRoundTrip(t *testing.T) {
+	samples := []Parsed{
+		{Title: "Sintel", Year: 2010, TMDBID: 45745, Label: "1080p"},
+		{Title: "千と千尋の神隠し", Year: 2001, TMDBID: 129, Label: "1080p"},
+		{Title: "Das Leben der Anderen", Year: 2006, TMDBID: 582, Label: "720p"},
+		{Title: "جدایی نادر از سیمین", Year: 2011, TMDBID: 45269},
+		{Title: "Breaking Bad", Year: 2008, TMDBID: 1396, Episode: true, Season: 1, Number: 2},
+		{Title: "Dark", Year: 2017, Episode: true, Season: 2, Number: 10, Label: "1080p"},
+	}
+	for _, p := range samples {
+		name, caption := UploadName(p, ".mkv")
+		got := Parse(name, caption)
+		if got.Title != p.Title || got.Year != p.Year || got.TMDBID != p.TMDBID || got.Episode != p.Episode || got.Season != p.Season || got.Number != p.Number {
+			t.Errorf("Parse(%q, %q) = %+v", name, caption, got)
+		}
+		if p.Episode && got.Label != "" {
+			t.Errorf("episode name kept a label: %q", name)
+		}
+		if !p.Episode && got.Label != p.Label {
+			t.Errorf("label: got %q want %q from %q", got.Label, p.Label, name)
+		}
+		if caption != p.Title && !strings.Contains(caption, p.Title) {
+			t.Errorf("caption %q", caption)
+		}
+	}
+}

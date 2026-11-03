@@ -4,6 +4,7 @@
 package panel
 
 import (
+	"context"
 	"crypto/subtle"
 	_ "embed"
 	"encoding/json"
@@ -53,6 +54,10 @@ type Options struct {
 	// Seerr and Fladder are true when those apps are served on this gateway.
 	Seerr   bool
 	Fladder bool
+	// Downloads reports the automatic download stack. Nil hides that tab's actions.
+	Downloads func(context.Context) (any, error)
+	// DownloadDo runs one panel action: login, logout, enable or pace.
+	DownloadDo func(r *http.Request, action string, body map[string]any) (any, error)
 }
 
 // New serves /panel and /panel/.
@@ -63,6 +68,10 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /panel/state", p.guard(p.handleState))
 	mux.HandleFunc("POST /panel/settings", p.guard(p.handleSettings))
 	mux.HandleFunc("POST /panel/bots", p.guard(p.handleBots))
+	mux.HandleFunc("POST /panel/automation", p.guard(p.handleAutomation))
+	mux.HandleFunc("POST /panel/downloads/login", p.guard(p.handleDownloadLogin))
+	mux.HandleFunc("POST /panel/downloads/logout", p.guard(p.handleDownloadLogout))
+	mux.HandleFunc("POST /panel/downloads/pace", p.guard(p.handleDownloadPace))
 	return mux
 }
 
@@ -123,15 +132,106 @@ type state struct {
 	Addresses []address `json:"addresses"`
 	Seerr     bool      `json:"seerr"`
 	Fladder   bool      `json:"fladder"`
+	Downloads any       `json:"downloads,omitempty"`
 }
 
-func (p *panel) handleState(w http.ResponseWriter, _ *http.Request) {
+func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
 	s, err := p.snapshot()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
+	if p.o.Downloads != nil {
+		d, err := p.o.Downloads(r.Context())
+		if err != nil {
+			s.Downloads = map[string]any{"error": err.Error()}
+		} else {
+			s.Downloads = d
+		}
+	}
 	writeJSON(w, http.StatusOK, s)
+}
+
+func (p *panel) handleAutomation(w http.ResponseWriter, r *http.Request) {
+	if p.o.DownloadDo == nil {
+		writeError(w, http.StatusNotFound, "downloads are not available")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	out, err := p.o.DownloadDo(r, "enable", body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *panel) handleDownloadLogin(w http.ResponseWriter, r *http.Request) {
+	if !trustedClient(r) {
+		writeError(w, http.StatusForbidden, "Sign in to a Telegram account from this computer or over Tailscale. The panel is plain HTTP, and this step gives full access to the account.")
+		return
+	}
+	p.downloadAction(w, r, "login")
+}
+
+func (p *panel) handleDownloadLogout(w http.ResponseWriter, r *http.Request) {
+	if !trustedClient(r) {
+		writeError(w, http.StatusForbidden, "Sign out of a Telegram account from this computer or over Tailscale.")
+		return
+	}
+	p.downloadAction(w, r, "logout")
+}
+
+func (p *panel) handleDownloadPace(w http.ResponseWriter, r *http.Request) {
+	p.downloadAction(w, r, "pace")
+}
+
+func (p *panel) downloadAction(w http.ResponseWriter, r *http.Request, action string) {
+	if p.o.DownloadDo == nil {
+		writeError(w, http.StatusNotFound, "downloads are not available")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	out, err := p.o.DownloadDo(r, action, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if out == nil {
+		out = map[string]any{"ok": true}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func trustedClient(r *http.Request) bool {
+	// A tunnel running on this machine connects from loopback but speaks for someone else, and says
+	// so in these headers. A person at this computer sends none of them.
+	for _, h := range []string{"X-Forwarded-For", "Forwarded", "X-Real-Ip"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	v4 := ip.To4()
+	return v4 != nil && v4[0] == 100 && v4[1]&0xC0 == 64
 }
 
 // Pointer fields stay unchanged when the tab that owns them does not send them.

@@ -70,6 +70,10 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("migrate: %w", err)
 	}
+	if _, err := db.Exec(uploadSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply upload schema: %w", err)
+	}
 	return &Catalog{db: db}, nil
 }
 
