@@ -88,6 +88,58 @@ func (c *Client) AdminUserID(ctx context.Context) (string, error) {
 	return "", errors.New("no administrator found")
 }
 
+// EnsureAdmin makes a Jellyfin administrator that can sign in with password. Seerr's first-run
+// setup accepts a user and a password, not an API key.
+func (c *Client) EnsureAdmin(ctx context.Context, name, password string) error {
+	var users []struct {
+		ID     string          `json:"Id"`
+		Name   string          `json:"Name"`
+		Policy json.RawMessage `json:"Policy"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/Users", nil, &users); err != nil {
+		return err
+	}
+	var id string
+	var policy json.RawMessage
+	for _, u := range users {
+		if strings.EqualFold(u.Name, name) {
+			id, policy = u.ID, u.Policy
+			break
+		}
+	}
+	if id == "" {
+		var created struct {
+			ID     string          `json:"Id"`
+			Policy json.RawMessage `json:"Policy"`
+		}
+		if err := c.post(ctx, "/Users/New", map[string]string{"Name": name, "Password": password}, &created); err != nil {
+			return err
+		}
+		id, policy = created.ID, created.Policy
+	} else if err := c.post(ctx, "/Users/"+url.PathEscape(id)+"/Password", map[string]any{
+		"Id": id, "NewPw": password, "ResetPassword": false,
+	}, nil); err != nil {
+		return err
+	}
+	pol := map[string]any{}
+	if len(policy) > 0 {
+		if err := json.Unmarshal(policy, &pol); err != nil {
+			return err
+		}
+	}
+	pol["IsAdministrator"] = true
+	pol["EnableAllFolders"] = true
+	return c.post(ctx, "/Users/"+url.PathEscape(id)+"/Policy", pol, nil)
+}
+
+func (c *Client) post(ctx context.Context, path string, body, out any) error {
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	return c.send(ctx, http.MethodPost, path, nil, raw, out)
+}
+
 // RefreshLibrary starts a library scan and returns at once.
 func (c *Client) RefreshLibrary(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/Library/Refresh", nil, nil)

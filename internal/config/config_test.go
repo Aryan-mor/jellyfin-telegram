@@ -18,7 +18,7 @@ func clearEnv(t *testing.T) {
 	for _, e := range os.Environ() {
 		key, _, _ := strings.Cut(e, "=")
 		if strings.HasPrefix(key, "TELEGRAM_") || strings.HasPrefix(key, "GATEWAY_") ||
-			strings.HasPrefix(key, "JELLYFIN_") || strings.HasPrefix(key, "SUBTITLE") ||
+			strings.HasPrefix(key, "JELLYFIN_") || strings.HasPrefix(key, "SEERR_") || strings.HasPrefix(key, "FLADDER_") || strings.HasPrefix(key, "SUBTITLE") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
 			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" {
 			t.Setenv(key, "")
@@ -66,6 +66,9 @@ func TestLoadValid(t *testing.T) {
 	}
 	if c.JellyfinEnabled() {
 		t.Error("jellyfin should be off")
+	}
+	if !c.JellyfinManaged || !c.SeerrManaged || !c.FladderManaged {
+		t.Error("a private Jellyfin, Seerr and Fladder are the default")
 	}
 }
 
@@ -125,6 +128,27 @@ func TestEnsureGatewayTokenPersists(t *testing.T) {
 	c.GatewayToken = "fixed"
 	if got, _ := c.EnsureGatewayToken(); got != "fixed" {
 		t.Errorf("explicit token ignored: %q", got)
+	}
+}
+
+func TestSeerrFollowsPrivateJellyfin(t *testing.T) {
+	c, err := load(t, validEnv+"SEERR_MANAGED=false\n")
+	if err != nil || !c.JellyfinManaged || c.SeerrManaged {
+		t.Fatalf("skip seerr: %+v, %v", c, err)
+	}
+	c, err = load(t, validEnv+"JELLYFIN_MANAGED=false\nGATEWAY_PUBLIC_URL=http://127.0.0.1:8097\n")
+	if err != nil || c.JellyfinManaged || c.SeerrManaged {
+		t.Fatalf("no server: %+v, %v", c, err)
+	}
+	c, err = load(t, validEnv+`JELLYFIN_URL=http://127.0.0.1:8096
+JELLYFIN_API_KEY=abc
+GATEWAY_PUBLIC_URL=http://127.0.0.1:8097
+`)
+	if err != nil || c.JellyfinManaged || !c.SeerrManaged || !c.FladderManaged {
+		t.Fatalf("existing Jellyfin should still start Seerr and Fladder: %+v, %v", c, err)
+	}
+	if err := c.ValidateServe(); err != nil {
+		t.Fatal(err)
 	}
 }
 

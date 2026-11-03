@@ -60,6 +60,10 @@ type Status struct {
 	URLs     []string `json:"urls,omitempty"`
 	User     string   `json:"user,omitempty"`
 	Password string   `json:"password,omitempty"`
+	// Seerr is true when requests are served under /seerr/.
+	Seerr bool `json:"seerr,omitempty"`
+	// Fladder is true when the web client is served under /fladder/.
+	Fladder bool `json:"fladder,omitempty"`
 }
 
 // Wizard serves the page. Every request must carry a code printed on this machine's console. The

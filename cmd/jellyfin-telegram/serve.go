@@ -12,12 +12,15 @@ import (
 	"os/exec"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/blockstore"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/fladder"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
@@ -25,6 +28,8 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
@@ -73,18 +78,29 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 			return err
 		}
 	}
-	err = run(ctx, cfg, wizard, &entry, srvErr, log)
+	err = run(ctx, cfg, envPath, wizard, &entry, srvErr, log)
 	if err != nil {
 		wizard.SetStatus(setup.Status{Stage: "Could not start", Error: err.Error()})
 	}
 	return err
 }
 
-func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *front.Switch, srvErr <-chan error, log *slog.Logger) error {
+func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.Wizard, entry *front.Switch, srvErr <-chan error, log *slog.Logger) error {
 	// Cancelled on every return, including a failed start. Otherwise the process exits and the
 	// Jellyfin child keeps the port.
 	ctx, stopChildren := context.WithCancel(ctx)
+	var child sync.WaitGroup
 	var serverDone chan struct{}
+	armDone := func() {
+		if serverDone != nil {
+			return
+		}
+		serverDone = make(chan struct{})
+		go func() {
+			child.Wait()
+			close(serverDone)
+		}()
+	}
 	defer func() {
 		stopChildren()
 		if serverDone != nil {
@@ -147,11 +163,12 @@ func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *fr
 		cfg.JellyfinDataDir = server.DataDir
 		cfg.FFprobePath = server.Paths.FFprobe
 		server.Prepare()
-		serverDone = make(chan struct{})
+		child.Add(1)
 		go func() {
-			defer close(serverDone)
+			defer child.Done()
 			server.Run(ctx)
 		}()
+		armDone()
 		wizard.SetStatus(setup.Status{Stage: "Starting Jellyfin", Percent: 90})
 		if err := server.WaitReady(ctx, managedStartTimeout); err != nil {
 			return err
@@ -162,6 +179,30 @@ func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *fr
 		cfg.JellyfinAPIKey = creds.APIKey
 	}
 
+	var seerrTarget *url.URL
+	if cfg.SeerrManaged {
+		base, err := startSeerr(ctx, cfg, creds, wizard, log, &child, armDone)
+		if err != nil {
+			return err
+		}
+		seerrTarget, err = url.Parse(base)
+		if err != nil {
+			return err
+		}
+	}
+
+	var fladderTarget *url.URL
+	if cfg.FladderManaged {
+		base, err := startFladder(ctx, cfg, wizard, log, &child, armDone)
+		if err != nil {
+			return err
+		}
+		fladderTarget, err = url.Parse(base)
+		if err != nil {
+			return err
+		}
+	}
+
 	engine := gateway.NewEngine(store, pool, log)
 	gw := gateway.Handler(engine, cat, gateway.Options{
 		Token:     token,
@@ -170,7 +211,14 @@ func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *fr
 
 		BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
 	}, log)
-	options := front.Options{Gateway: gw, Setup: wizard.Handler(), StreamBase: streamBase}
+	options := front.Options{
+		Gateway:    gw,
+		Setup:      wizard.Handler(),
+		Panel:      settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil),
+		StreamBase: streamBase,
+		Seerr:      seerrTarget,
+		Fladder:    fladderTarget,
+	}
 	if cfg.JellyfinURL != "" {
 		target, err := url.Parse(cfg.JellyfinURL)
 		if err != nil {
@@ -193,14 +241,25 @@ func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *fr
 	}
 
 	addresses := reachableAddresses(cfg.GatewayListen)
-	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password})
+	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password, Seerr: seerrTarget != nil, Fladder: fladderTarget != nil})
 	fmt.Printf("\nJellyfin is ready at:\n")
 	for _, a := range addresses {
 		fmt.Printf("    %s\n", a)
 	}
 	if creds.Password != "" {
-		fmt.Printf("\nSign in with user %q. The password is in %s\n\n", creds.User, managedCredentialsFile(cfg))
+		fmt.Printf("\nSign in with user %q. The password is in %s\n", creds.User, managedCredentialsFile(cfg))
 	}
+	if seerrTarget != nil {
+		fmt.Printf("\nSeerr is at the same addresses, under /seerr/\n")
+		fmt.Printf("Sign in there with the same Jellyfin user.\n")
+	}
+	if fladderTarget != nil {
+		fmt.Printf("\nFladder is at the same addresses, under /fladder/\n")
+		if seerrTarget != nil {
+			fmt.Printf("Seerr is already filled in.\n")
+		}
+	}
+	fmt.Printf("\nSettings panel:\n    %s/panel\n\n", cfg.LoopbackURL())
 
 	idx := indexer.New(pool, cat, lib, store, log)
 	loopDone := make(chan struct{})
@@ -231,6 +290,33 @@ func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *fr
 		}
 	}
 	return result
+}
+
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool) http.Handler {
+	return panel.New(panel.Options{
+		Code:    code,
+		EnvPath: envPath,
+		Seerr:   seerr,
+		Fladder: fladder,
+		Verify:  verifyTelegram(dataDir, log),
+		Bots: func() []panel.LiveBot {
+			out := make([]panel.LiveBot, 0)
+			for _, st := range pool.Statuses() {
+				msg := ""
+				if st.Err != nil {
+					msg = st.Err.Error()
+				}
+				out = append(out, panel.LiveBot{
+					ID: st.ID, Name: st.Username, OK: st.Ready && st.IsAdmin, Admin: st.IsAdmin, Error: msg,
+				})
+			}
+			return out
+		},
+		URLs: func() []string { return reachableAddresses(listen) },
+		SameChannel: func(id int64) error {
+			return checkChannelUnchanged(context.Background(), cat, id)
+		},
+	})
 }
 
 func managedCredentialsFile(cfg config.Config) string {
@@ -274,6 +360,133 @@ func finishManaged(ctx context.Context, cfg config.Config, server *managed.Serve
 		Language:  cfg.SubtitleLanguage,
 	}
 	return b.Run(ctx)
+}
+
+// startSeerr pulls the pinned image, runs it, and points it at the private Jellyfin.
+func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credentials, wizard *setup.Wizard, log *slog.Logger, child *sync.WaitGroup, armDone func()) (string, error) {
+	root, err := filepath.Abs(filepath.Join(cfg.DataDir, "seerr"))
+	if err != nil {
+		return "", err
+	}
+	key, err := seerr.EnsureAPIKey(root)
+	if err != nil {
+		return "", err
+	}
+	wizard.SetStatus(setup.Status{Stage: "Downloading Seerr", Percent: 92})
+	if err := seerr.Pull(ctx, log); err != nil {
+		return "", err
+	}
+	srv := &seerr.Server{Root: root, APIKey: key, Log: log}
+	srv.Prepare(ctx)
+	child.Add(1)
+	go func() {
+		defer child.Done()
+		srv.Run(ctx)
+	}()
+	armDone()
+	wizard.SetStatus(setup.Status{Stage: "Starting Seerr", Percent: 96})
+	if err := srv.WaitReady(ctx, managedStartTimeout); err != nil {
+		return "", err
+	}
+	wizard.SetStatus(setup.Status{Stage: "Setting up Seerr", Percent: 98})
+	host, port, err := seerrJellyfin(cfg)
+	if err != nil {
+		return "", err
+	}
+	user, pass := creds.User, creds.Password
+	if pass == "" {
+		user, pass, err = seerr.LoginAccount(root)
+		if err != nil {
+			return "", err
+		}
+		if err := jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey).EnsureAdmin(ctx, user, pass); err != nil {
+			return "", fmt.Errorf("prepare the Jellyfin user for Seerr: %w", err)
+		}
+	}
+	public := publicBase(cfg)
+	err = seerr.Setup{
+		URL:               srv.URL(),
+		APIKey:            key,
+		JellyfinHost:      host,
+		JellyfinPort:      port,
+		JellyfinUser:      user,
+		JellyfinPassword:  pass,
+		JellyfinPublicURL: public,
+		ApplicationURL:    strings.TrimRight(public, "/") + "/seerr",
+		Language:          cfg.SubtitleLanguage,
+	}.Run(ctx)
+	if err != nil {
+		return "", err
+	}
+	return srv.URL(), nil
+}
+
+// startFladder runs the web client. Jellyfin and Seerr addresses are the ones a browser opens.
+func startFladder(ctx context.Context, cfg config.Config, wizard *setup.Wizard, log *slog.Logger, child *sync.WaitGroup, armDone func()) (string, error) {
+	root, err := filepath.Abs(filepath.Join(cfg.DataDir, "fladder"))
+	if err != nil {
+		return "", err
+	}
+	wizard.SetStatus(setup.Status{Stage: "Downloading Fladder", Percent: 99})
+	if err := fladder.Pull(ctx, log); err != nil {
+		return "", err
+	}
+	public := strings.TrimRight(publicBase(cfg), "/")
+	seerrURL := ""
+	if cfg.SeerrManaged {
+		seerrURL = public + "/seerr"
+	}
+	srv := &fladder.Server{Root: root, JellyfinURL: public, SeerrURL: seerrURL, Log: log}
+	srv.Prepare(ctx)
+	child.Add(1)
+	go func() {
+		defer child.Done()
+		srv.Run(ctx)
+	}()
+	armDone()
+	if err := srv.WaitReady(ctx, managedStartTimeout); err != nil {
+		return "", err
+	}
+	return srv.URL(), nil
+}
+
+// seerrJellyfin is the address Seerr's container uses to call Jellyfin. A loopback address in
+// the settings is this machine, which a container reaches under Docker's host name.
+func seerrJellyfin(cfg config.Config) (string, int, error) {
+	if cfg.JellyfinURL == "" {
+		return seerr.JellyfinHost(runtime.GOOS), managedPort, nil
+	}
+	u, err := url.Parse(cfg.JellyfinURL)
+	if err != nil {
+		return "", 0, fmt.Errorf("JELLYFIN_URL: %w", err)
+	}
+	port := 8096
+	if p := u.Port(); p != "" {
+		n, err := strconv.Atoi(p)
+		if err != nil {
+			return "", 0, fmt.Errorf("JELLYFIN_URL: %w", err)
+		}
+		port = n
+	}
+	host := u.Hostname()
+	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
+		host = seerr.JellyfinHost(runtime.GOOS)
+	}
+	return host, port, nil
+}
+
+// publicBase is an address a browser on another device can open. Seerr stores one, for the
+// Play on Jellyfin link.
+func publicBase(cfg config.Config) string {
+	if cfg.GatewayPublicURL != "" {
+		return cfg.GatewayPublicURL
+	}
+	for _, a := range reachableAddresses(cfg.GatewayListen) {
+		if !strings.Contains(a, "://localhost") && !strings.Contains(a, "://127.") {
+			return a
+		}
+	}
+	return cfg.LoopbackURL()
 }
 
 // verifyTelegram tries the values from the setup page with real connections.

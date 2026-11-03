@@ -69,7 +69,7 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
 
   <section id="progress" hidden>
     <h1 id="stage">Starting</h1>
-    <p>You can leave this page open. The first start downloads about 200 MB.</p>
+    <p>You can leave this page open. The first start downloads Jellyfin and Seerr. Seerr needs Docker.</p>
     <div class="bar"><i id="fill"></i></div>
     <div id="perror" class="result bad"></div>
   </section>
@@ -85,6 +85,9 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
       <small>Keep this password. You can change it in Jellyfin.</small>
     </div>
     <button id="open">Open Jellyfin</button>
+    <p id="seerr" hidden><a href="/seerr/">Request movies and shows</a>. Sign in with the same Jellyfin user.</p>
+    <p id="fladder" hidden><a href="/fladder/">Open Fladder</a>. Jellyfin and Seerr are already filled in.</p>
+    <p><a id="panel" href="">Add bots, or open Jellyfin away from home</a></p>
   </section>
 </main>
 <script>
@@ -140,7 +143,10 @@ function finish(s) {
   urls.replaceChildren();
   for (const u of s.urls || []) { const r = document.createElement('div'); r.className = 'row'; const c = document.createElement('code'); c.textContent = u; r.append(c); urls.append(r); }
   if (s.password) { $('login').hidden = false; $('user').textContent = s.user; $('password').textContent = s.password; }
+  if (s.seerr) $('seerr').hidden = false;
+  if (s.fladder) $('fladder').hidden = false;
   $('open').onclick = () => { location.href = '/'; };
+  $('panel').href = '/panel?code=' + encodeURIComponent(code);
 }
 
 api('/setup/status').then(s => { if (s.stage || s.ready) { $('form').hidden = true; $('progress').hidden = false; poll(); } }).catch(() => {});

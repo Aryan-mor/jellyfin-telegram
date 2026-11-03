@@ -37,8 +37,14 @@ type Options struct {
 	Gateway http.Handler
 	// Setup serves the setup page. It may be nil.
 	Setup http.Handler
+	// Panel serves the settings page. It may be nil.
+	Panel http.Handler
 	// Jellyfin is the server behind this one. Nil serves streams only.
 	Jellyfin *url.URL
+	// Seerr is the request app, served under /seerr/. Nil leaves that path to Jellyfin.
+	Seerr *url.URL
+	// Fladder is the web client, served under /fladder/. Nil leaves that path to Jellyfin.
+	Fladder *url.URL
 	// StreamBase is the address written into .strm files.
 	StreamBase string
 }
@@ -58,6 +64,24 @@ func Handler(o Options) http.Handler {
 	if o.Setup != nil {
 		mux.Handle("/setup", o.Setup)
 		mux.Handle("/setup/", o.Setup)
+	}
+	if o.Panel != nil {
+		mux.Handle("/panel", o.Panel)
+		mux.Handle("/panel/", o.Panel)
+	}
+	if o.Seerr != nil {
+		proxy := seerrProxy(o.Seerr)
+		mux.Handle("/seerr/", proxy)
+		mux.HandleFunc("/seerr", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/seerr/", http.StatusTemporaryRedirect)
+		})
+	}
+	if o.Fladder != nil {
+		proxy := passThrough(o.Fladder)
+		mux.Handle("/fladder/", proxy)
+		mux.HandleFunc("/fladder", func(w http.ResponseWriter, r *http.Request) {
+			http.Redirect(w, r, "/fladder/", http.StatusTemporaryRedirect)
+		})
 	}
 	if o.Jellyfin == nil {
 		return mux

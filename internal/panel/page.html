@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>jellyfin-telegram</title>
+<style>
+:root { color-scheme: light dark; --bg:#f6f6f8; --card:#fff; --text:#1c1c22; --muted:#62626e; --line:#d8d8e0; --accent:#6a4fd6; --ok:#17803d; --bad:#c0262d; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111116; --card:#1b1b22; --text:#ededf2; --muted:#a0a0ad; --line:#33333e; --accent:#a48cff; --ok:#4ac377; --bad:#ff7b80; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:32px 16px; }
+main { max-width:680px; margin:0 auto; }
+h1 { font-size:22px; margin:0 0 12px; }
+h2 { font-size:18px; margin:0 0 8px; }
+p { margin:0 0 12px; color:var(--muted); }
+ol { margin:0 0 16px; padding-left:1.2em; color:var(--text); }
+li { margin:0 0 8px; }
+li span { color:var(--muted); }
+.apps { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
+.apps a { display:inline-block; margin:0; padding:8px 14px; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; text-decoration:none; }
+.apps a.quiet { background:transparent; color:inherit; border:1px solid var(--line); }
+nav { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
+nav button { margin:0; background:transparent; color:inherit; border:1px solid var(--line); }
+nav button[aria-selected="true"] { background:var(--accent); color:#fff; border-color:transparent; }
+section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; }
+small { display:block; color:var(--muted); font-weight:400; margin-bottom:6px; }
+label { display:block; font-weight:600; margin:16px 0 4px; }
+input { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+a { color:var(--accent); }
+button { margin-top:8px; padding:8px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+button.quiet { background:transparent; color:var(--bad); border:1px solid var(--line); }
+button:disabled { opacity:.55; cursor:default; }
+.row { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
+.row:last-child { border-bottom:0; }
+code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; word-break:break-all; }
+.ok { color:var(--ok); } .bad { color:var(--bad); }
+.note { margin-top:12px; }
+[hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1>jellyfin-telegram</h1>
+  <p>On this computer, open <code>/panel</code>. From a phone on the same Wi-Fi, open <code id="share-url"></code>.</p>
+  <div class="apps">
+    <a href="/">Jellyfin</a>
+    <a id="link-seerr" href="/seerr/" hidden>Seerr</a>
+    <a id="link-fladder" href="/fladder/" hidden>Fladder</a>
+    <a id="link-fladder-releases" class="quiet" href="https://github.com/DonutWare/Fladder/releases" target="_blank" rel="noreferrer" hidden>Download other Fladder versions</a>
+  </div>
+  <nav>
+    <button type="button" data-tab="bots" aria-selected="true">Bots</button>
+    <button type="button" data-tab="api">Telegram API</button>
+    <button type="button" data-tab="channel">Channel</button>
+    <button type="button" data-tab="away">Away from home</button>
+  </nav>
+
+  <section id="tab-bots">
+    <h2>Bots</h2>
+    <p>A bot is an account that reads the videos. The token is its password. This program never shows the full token again.</p>
+    <ol>
+      <li>Open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> in Telegram.</li>
+      <li>Send <code>/newbot</code>.</li>
+      <li>Choose a display name, then a username that ends in <code>bot</code>.</li>
+      <li>BotFather replies with a token. Paste that token below. Do not post it in the channel.</li>
+      <li>Open the private channel, tap its name, then Administrators, then Add Administrator, and choose the bot.</li>
+      <li>Leave “Post messages” on. The program uses that permission to store extracted subtitles back in the channel. A bot that is not an admin cannot read the videos.</li>
+      <li>Repeat for each extra bot. The bots download at the same time, so more bots make playback faster.</li>
+    </ol>
+    <p>A saved bot connects the next time the program starts.</p>
+    <div id="bots"></div>
+    <label for="add">Add a bot</label>
+    <input id="add" autocomplete="off" spellcheck="false" placeholder="123456789:AAE...">
+    <button id="add-btn" type="button">Add bot</button>
+    <div id="bot-msg" class="note"></div>
+  </section>
+
+  <section id="tab-api" hidden>
+    <h2>Telegram API</h2>
+    <p>The API ID and API hash are required. They are not the bot token. Telegram does not offer a public ID you can download or copy from someone else. Each person creates a pair, free, with their own phone number. This program speaks Telegram’s own protocol, and that protocol refuses a connection without this pair.</p>
+    <ol>
+      <li>Open <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a> and sign in with the phone number of your Telegram account.</li>
+      <li>Open API development tools.</li>
+      <li>Create an application if you do not have one. The name can be <code>jellyfin-telegram</code>. The platform can be Desktop. The description can be short.</li>
+      <li>Copy the numeric <code>App api_id</code> and the <code>App api_hash</code> into the fields below.</li>
+      <li>The hash is a secret, like a password. Later, leave the hash field empty to keep the one already saved.</li>
+    </ol>
+    <label for="api_id">API ID</label>
+    <input id="api_id" inputmode="numeric" autocomplete="off">
+    <label for="api_hash">API hash</label>
+    <small>Leave this empty to keep the saved hash.</small>
+    <input id="api_hash" type="password" autocomplete="off" placeholder="Unchanged if empty">
+    <button id="save-api" type="button">Save API</button>
+    <div id="api-msg" class="note"></div>
+  </section>
+
+  <section id="tab-channel" hidden>
+    <h2>Channel and language</h2>
+    <ol>
+      <li>In Telegram, create a private channel. A public channel is not used.</li>
+      <li>Post the videos there. A useful file name looks like <code>Title.Year.mkv</code>. Or put <code>Title (Year)</code> on the first line of the caption, so Jellyfin does not guess the wrong film.</li>
+      <li>Open any message in that channel, choose Copy Link, and paste it below. It looks like <code>https://t.me/c/1234567890/5</code>.</li>
+      <li>The library belongs to one channel. A different channel is refused, because the stream files already point at messages in the first one.</li>
+      <li>The language is the subtitle language: a short code such as <code>en</code>, <code>de</code>, <code>fr</code>, <code>fa</code> or <code>ja</code>. Leave it empty to skip subtitles.</li>
+    </ol>
+    <label for="channel">Channel link</label>
+    <input id="channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5">
+    <label for="language">Language</label>
+    <input id="language" maxlength="12" autocomplete="off">
+    <button id="save-channel" type="button">Save channel</button>
+    <div id="channel-msg" class="note"></div>
+  </section>
+
+  <section id="tab-away" hidden>
+    <h2>Away from home</h2>
+    <p>At home, open an address tagged “At home”. Away from home, use Tailscale. It is a private network between your own devices. Nothing is published on the public internet.</p>
+    <ol>
+      <li>Install <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">Tailscale</a> on this computer.</li>
+      <li>Install it on the phone or the TV.</li>
+      <li>Sign both devices in to the same Tailscale account.</li>
+      <li>Open the address tagged “Away from home” below.</li>
+      <li>Do not turn on Tailscale Funnel. Funnel would publish Jellyfin to the whole internet, and it is a poor fit for video. No router port has to be opened.</li>
+    </ol>
+    <div id="urls"></div>
+  </section>
+</main>
+<script>
+const embedded = "__PANEL_CODE__";
+const code = new URLSearchParams(location.search).get('code') || embedded;
+const $ = id => document.getElementById(id);
+const tabs = ['bots', 'api', 'channel', 'away'];
+const api = async (path, body) => {
+  const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || 'Something went wrong');
+  return data;
+};
+const say = (id, text, cls) => { const n = $(id); n.textContent = text; n.className = 'note ' + (cls || ''); };
+
+function show(name) {
+  if (!tabs.includes(name)) name = 'bots';
+  for (const tab of tabs) {
+    $('tab-' + tab).hidden = tab !== name;
+    document.querySelector('[data-tab="' + tab + '"]').setAttribute('aria-selected', tab === name ? 'true' : 'false');
+  }
+  if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+}
+
+function draw(s) {
+  $('api_id').value = s.api_id || '';
+  $('language').value = s.language || '';
+  if (!$('channel').value) $('channel').placeholder = 'Current channel id ' + s.channel_id;
+  const bots = $('bots');
+  bots.replaceChildren();
+  for (const b of s.bots || []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const left = document.createElement('div');
+    const name = document.createElement('div');
+    name.textContent = b.name;
+    const meta = document.createElement('small');
+    let detail = 'token ending ' + b.hint;
+    if (!b.connected) detail += ' · connects after a restart';
+    else if (b.ok) detail += ' · admin';
+    else detail += b.error ? ' · ' + b.error : ' · not an admin';
+    meta.textContent = detail;
+    left.append(name, meta);
+    const btn = document.createElement('button');
+    btn.className = 'quiet';
+    btn.type = 'button';
+    btn.textContent = 'Remove';
+    btn.onclick = () => changeBots({remove: b.id}, btn);
+    row.append(left, btn);
+    bots.append(row);
+  }
+  const urls = $('urls');
+  urls.replaceChildren();
+  for (const a of s.addresses || []) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const c = document.createElement('code');
+    c.textContent = a.url;
+    const tag = document.createElement('small');
+    tag.textContent = a.away ? 'Away from home' : 'At home';
+    row.append(c, tag);
+    urls.append(row);
+  }
+  const phone = (s.addresses || []).find(a => !a.away && !/localhost|127\.0\.0\.1/.test(a.url));
+  $('share-url').textContent = phone ? phone.url.replace(/\/$/, '') + '/panel?code=' + code : '';
+  $('link-seerr').hidden = !s.seerr;
+  $('link-fladder').hidden = !s.fladder;
+  $('link-fladder-releases').hidden = !s.fladder;
+  if (!(s.addresses || []).length) {
+    const p = document.createElement('p');
+    p.textContent = 'No address yet. The list appears when the program has finished starting.';
+    urls.append(p);
+  }
+}
+
+async function changeBots(body, btn) {
+  if (btn) btn.disabled = true;
+  say('bot-msg', 'Checking with Telegram…');
+  try {
+    await api('/panel/bots', body);
+    say('bot-msg', 'Saved. Restart jellyfin-telegram to connect the new list.', 'ok');
+    $('add').value = '';
+    draw(await api('/panel/state'));
+  } catch (e) {
+    say('bot-msg', e.message, 'bad');
+    if (btn) btn.disabled = false;
+  }
+}
+
+async function save(body, btn, msg) {
+  btn.disabled = true;
+  say(msg, 'Checking with Telegram…');
+  try {
+    await api('/panel/settings', body);
+    say(msg, 'Saved. Restart jellyfin-telegram to use it.', 'ok');
+    $('api_hash').value = '';
+    $('channel').value = '';
+    draw(await api('/panel/state'));
+  } catch (e) {
+    say(msg, e.message, 'bad');
+  }
+  btn.disabled = false;
+}
+
+document.querySelectorAll('nav button').forEach(btn => {
+  btn.onclick = () => show(btn.dataset.tab);
+});
+window.addEventListener('hashchange', () => show(location.hash.slice(1)));
+$('add-btn').onclick = () => changeBots({add: $('add').value.trim()});
+$('save-api').onclick = () => save({api_id:$('api_id').value, api_hash:$('api_hash').value}, $('save-api'), 'api-msg');
+$('save-channel').onclick = () => save({channel:$('channel').value, language:$('language').value}, $('save-channel'), 'channel-msg');
+show(location.hash.slice(1) || 'bots');
+api('/panel/state').then(draw).catch(e => say('bot-msg', e.message, 'bad'));
+</script>
+</body>
+</html>
