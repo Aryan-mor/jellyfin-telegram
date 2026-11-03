@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Set up jellyfin-telegram</title>
+<style>
+:root { color-scheme: light dark; --bg:#f6f6f8; --card:#fff; --text:#1c1c22; --muted:#62626e; --line:#d8d8e0; --accent:#6a4fd6; --ok:#17803d; --bad:#c0262d; }
+@media (prefers-color-scheme: dark) { :root { --bg:#111116; --card:#1b1b22; --text:#ededf2; --muted:#a0a0ad; --line:#33333e; --accent:#a48cff; --ok:#4ac377; --bad:#ff7b80; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:32px 16px; }
+main { max-width:560px; margin:0 auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px; }
+h1 { font-size:22px; margin:0 0 4px; }
+p { margin:0 0 16px; color:var(--muted); }
+label { display:block; font-weight:600; margin:18px 0 4px; }
+small { display:block; color:var(--muted); font-weight:400; margin-bottom:6px; }
+input, textarea { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+textarea { min-height:84px; font-family:ui-monospace,Consolas,monospace; font-size:14px; }
+a { color:var(--accent); }
+button { margin-top:22px; padding:10px 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
+button:disabled { opacity:.55; cursor:default; }
+details { margin-top:18px; color:var(--muted); }
+summary { cursor:pointer; }
+.result { margin-top:16px; font-size:15px; }
+.ok { color:var(--ok); } .bad { color:var(--bad); }
+.bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:12px 0; }
+.bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
+code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; word-break:break-all; }
+.row { margin:8px 0; }
+[hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <section id="form">
+    <h1>Set up jellyfin-telegram</h1>
+    <p>Enter your Telegram details. Everything else is automatic.</p>
+
+    <label for="api_id">API ID and hash</label>
+    <small>From <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>, under API development tools.</small>
+    <input id="api_id" inputmode="numeric" placeholder="API ID" autocomplete="off">
+    <div style="height:8px"></div>
+    <input id="api_hash" placeholder="API hash" autocomplete="off">
+
+    <label for="channel">Your channel</label>
+    <small>In Telegram, open any message in the channel, choose Copy Link, and paste it here.</small>
+    <input id="channel" placeholder="https://t.me/c/1234567890/5" autocomplete="off">
+
+    <label for="bots">Bots</label>
+    <small>Create them with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> and make each one an admin of the channel. One token per line. More bots mean faster playback.</small>
+    <textarea id="bots" placeholder="123456789:AAE..." autocomplete="off" spellcheck="false"></textarea>
+
+    <label for="language">Your language</label>
+    <small>A code such as en, de, fr, fa or ja. Used to find subtitles. Leave empty to skip them.</small>
+    <input id="language" maxlength="12" autocomplete="off">
+
+    <details>
+      <summary>I already run Jellyfin</summary>
+      <small style="margin-top:8px">Leave these empty to get a private Jellyfin set up for you.</small>
+      <label for="jellyfin_url">Jellyfin address</label>
+      <input id="jellyfin_url" placeholder="http://127.0.0.1:8096" autocomplete="off">
+      <label for="jellyfin_key">API key</label>
+      <input id="jellyfin_key" autocomplete="off">
+    </details>
+
+    <button id="go">Check and continue</button>
+    <div id="result" class="result"></div>
+  </section>
+
+  <section id="progress" hidden>
+    <h1 id="stage">Starting</h1>
+    <p>You can leave this page open. The first start downloads about 200 MB.</p>
+    <div class="bar"><i id="fill"></i></div>
+    <div id="perror" class="result bad"></div>
+  </section>
+
+  <section id="done" hidden>
+    <h1>Ready</h1>
+    <p>Open Jellyfin at one of these addresses, in a browser or any Jellyfin app.</p>
+    <div id="urls"></div>
+    <div id="login" hidden>
+      <label>Sign in with</label>
+      <div class="row">User <code id="user"></code></div>
+      <div class="row">Password <code id="password"></code></div>
+      <small>Keep this password. You can change it in Jellyfin.</small>
+    </div>
+    <button id="open">Open Jellyfin</button>
+  </section>
+</main>
+<script>
+const code = new URLSearchParams(location.search).get('code') || '';
+const $ = id => document.getElementById(id);
+const api = async (path, body) => {
+  const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || 'Something went wrong');
+  return data;
+};
+const values = () => ({api_id:$('api_id').value, api_hash:$('api_hash').value, channel:$('channel').value, bots:$('bots').value, language:$('language').value, jellyfin_url:$('jellyfin_url').value, jellyfin_key:$('jellyfin_key').value});
+const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; return d; };
+
+$('go').onclick = async () => {
+  const out = $('result'), btn = $('go');
+  out.replaceChildren(line('Checking with Telegram. This can take a minute.'));
+  btn.disabled = true;
+  try {
+    const r = await api('/setup/verify', values());
+    out.replaceChildren();
+    let usable = 0;
+    for (const b of r.bots) {
+      if (b.ok) usable++;
+      out.append(line((b.ok ? 'OK  ' : 'Problem  ') + b.name + (b.error ? ': ' + b.error : ''), b.ok ? 'ok' : 'bad'));
+    }
+    if (!usable) throw new Error('No bot can read the channel. Make each bot an admin of it.');
+    out.append(line('Channel "' + r.channel + '": ' + r.videos + ' videos found', 'ok'));
+    await api('/setup/save', values());
+    $('form').hidden = true;
+    $('progress').hidden = false;
+    poll();
+  } catch (e) {
+    out.append(line(e.message, 'bad'));
+    btn.disabled = false;
+  }
+};
+
+async function poll() {
+  try {
+    const s = await api('/setup/status');
+    if (s.error) { $('perror').textContent = s.error; }
+    if (s.ready) return finish(s);
+    if (s.stage) $('stage').textContent = s.stage;
+    $('fill').style.width = (s.percent || 0) + '%';
+  } catch (e) { /* the server is busy; try again */ }
+  setTimeout(poll, 1000);
+}
+
+function finish(s) {
+  $('form').hidden = true; $('progress').hidden = true; $('done').hidden = false;
+  const urls = $('urls');
+  urls.replaceChildren();
+  for (const u of s.urls || []) { const r = document.createElement('div'); r.className = 'row'; const c = document.createElement('code'); c.textContent = u; r.append(c); urls.append(r); }
+  if (s.password) { $('login').hidden = false; $('user').textContent = s.user; $('password').textContent = s.password; }
+  $('open').onclick = () => { location.href = '/'; };
+}
+
+api('/setup/status').then(s => { if (s.stage || s.ready) { $('form').hidden = true; $('progress').hidden = false; poll(); } }).catch(() => {});
+</script>
+</body>
+</html>

@@ -22,6 +22,19 @@ The service runs as one binary on Windows and Linux. It needs no CGO, FUSE or da
 
 ## Setup
 
+Run the binary with an empty folder. It opens a setup page, then downloads official Jellyfin
+12.4, starts it on loopback, and serves Jellyfin, the setup page and the streams on
+`GATEWAY_LISTEN` (port 8097). From another device, open the address printed when it is ready.
+That address is also the one a phone away from home should use. The private Jellyfin port is
+not reachable from the network.
+
+Windows may ask to allow the new program through the firewall the first time another device
+connects. Away from home, a mesh VPN such as Tailscale reaches that same port with no extra
+setting. Opening the port on the public internet is a separate choice and is left off.
+
+To use a Jellyfin you already run, set `JELLYFIN_URL` and `JELLYFIN_API_KEY` instead. Set
+`JELLYFIN_MANAGED=false` to start with no Jellyfin at all.
+
 1. Build the binary.
 
    ```shell
@@ -52,15 +65,21 @@ The service runs as one binary on Windows and Linux. It needs no CGO, FUSE or da
    jellyfin-telegram serve
    ```
 
-6. In Jellyfin, add a Movies library pointing at `LIBRARY_DIR/Movies` and a Shows library
-   pointing at `LIBRARY_DIR/Shows`.
+   With no `JELLYFIN_URL`, this is the whole setup: the page asks for the channel and the
+   bots, then Jellyfin is installed, the Movies and Shows libraries are created, and the
+   sign-in password is written to `DATA_DIR/jellyfin/credentials.json`.
 
-7. To fill in runtime, codecs and audio tracks automatically, create an API key under
-   Dashboard > API Keys, then set `JELLYFIN_URL` and `JELLYFIN_API_KEY`.
+When you point at your own Jellyfin instead:
 
-8. In the options of both libraries, turn off saving subtitles into media folders
-   (`SaveSubtitlesWithMedia`). Otherwise a subtitle added to a season folder Jellyfin has
-   already read stays invisible until Jellyfin restarts.
+1. Add `LIBRARY_DIR/Movies` as another folder of the existing Movies library, and
+   `LIBRARY_DIR/Shows` as another folder of the existing Shows library. A separate library
+   hides these videos from the rest of the collection.
+2. Create an API key under Dashboard > API Keys and set `JELLYFIN_URL` and `JELLYFIN_API_KEY`,
+   so new files get a runtime and codecs.
+3. Turn off saving subtitles into media folders (`SaveSubtitlesWithMedia`) on both libraries.
+   Otherwise a subtitle added to a season folder Jellyfin has already read stays invisible
+   until Jellyfin restarts. The managed server does this itself. Subtitles already sitting
+   next to a file stay where they are.
 
 ### Running Jellyfin in Docker
 

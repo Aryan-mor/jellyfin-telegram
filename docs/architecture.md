@@ -14,6 +14,9 @@
 | `internal/jellyfin` | API client and the prober that prepares new items |
 | `internal/subtitles` | Identifies tracks from the file head and finds online subtitles |
 | `internal/lang` | Language codes, names, scripts, encodings and text detection for any language |
+| `internal/managed` | Downloads a pinned Jellyfin build, runs it on loopback, completes its first-run wizard |
+| `internal/front` | One port for streams, the setup page and a reverse proxy to that Jellyfin |
+| `internal/setup` | Browser wizard that writes `.env` after checking the bots against the channel |
 
 ## Reading a video
 
@@ -84,6 +87,12 @@ and the URL being visible to clients.
 **`gotd/td`, used directly.** It is pure Go, so the service cross-compiles with CGO off. It
 needs no native TDLib build per platform, and `gotgproto` would only add a beta wrapper.
 
+**A private Jellyfin, not a fork.** Setup has to be one program and one port. The binary
+downloads a pinned official build, listens with it on loopback, and reverse-proxies
+everything else. A fork would mean rebuilding Jellyfin on every release. Stream addresses in
+API answers are rewritten to the host the client actually used, so the same port works on the
+LAN and through a tunnel. Public port mapping stays off.
+
 **Sessions on disk.** Each bot keeps a session in `DATA_DIR/sessions`, so a restart does not
 log every bot in again.
 
@@ -131,6 +140,11 @@ a metadata refresh.
 - Stopping playback stopped ffmpeg and all Telegram reads.
 
 With one tab, seeking to 3 positions resumed playback in 1.3 to 1.6 s each.
+
+The same check on Jellyfin 12.4, served by the managed copy through the one port: one Chrome
+tab, DirectPlay of the H.264 MP4, `video.seekable` covering the whole duration, and
+`Playing/Seek` moving the picture from 30 minutes to 15 minutes. A range request to the
+gateway returned `206` with `Accept-Ranges: bytes`.
 
 Several open tabs of the web client share one session, so their position reports mix and
 commands reach only one tab. Use a single tab when testing, or seeking appears broken.
