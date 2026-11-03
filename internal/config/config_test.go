@@ -19,6 +19,7 @@ func clearEnv(t *testing.T) {
 		key, _, _ := strings.Cut(e, "=")
 		if strings.HasPrefix(key, "TELEGRAM_") || strings.HasPrefix(key, "GATEWAY_") ||
 			strings.HasPrefix(key, "JELLYFIN_") || strings.HasPrefix(key, "SEERR_") || strings.HasPrefix(key, "FLADDER_") || strings.HasPrefix(key, "SUBTITLE") ||
+			strings.HasPrefix(key, "UPLOAD_") || strings.HasPrefix(key, "DOWNLOADS_") || strings.HasPrefix(key, "BITMAGNET_") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
 			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" {
 			t.Setenv(key, "")
@@ -69,6 +70,28 @@ func TestLoadValid(t *testing.T) {
 	}
 	if !c.JellyfinManaged || !c.SeerrManaged || !c.FladderManaged {
 		t.Error("a private Jellyfin, Seerr and Fladder are the default")
+	}
+	if c.DownloadsEnabled || c.UploadMBPerSec != 8 || c.UploadDailyGB != 50 || c.DownloadsMinFreeGB != 20 || c.BitmagnetDBMaxGB != 40 {
+		t.Errorf("download defaults = %+v", c)
+	}
+	if c.DownloadsDir != filepath.Join("./data", "downloads") {
+		t.Errorf("downloads dir = %s", c.DownloadsDir)
+	}
+}
+
+func TestParseHours(t *testing.T) {
+	start, end, err := ParseHours("01-08")
+	if err != nil || start != 1 || end != 8 {
+		t.Fatalf("%d %d %v", start, end, err)
+	}
+	if !WithinHours(1, 8, 1) || WithinHours(1, 8, 8) || !WithinHours(22, 6, 23) || !WithinHours(22, 6, 2) {
+		t.Fatal("window")
+	}
+	if _, _, err := ParseHours("nope"); err == nil {
+		t.Fatal("expected an error")
+	}
+	if s, e, err := ParseHours(""); err != nil || s != 0 || e != 0 || !WithinHours(0, 0, 15) {
+		t.Fatal(err)
 	}
 }
 

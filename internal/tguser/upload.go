@@ -1,0 +1,256 @@
+package tguser
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+	"mime"
+	"os"
+	"path"
+	"strings"
+	"time"
+
+	"github.com/gotd/td/telegram/uploader"
+	"github.com/gotd/td/tg"
+)
+
+// Upload sends path to the channel as a document and returns the new message id.
+// Parts stay on this one account. Extra sessions speed up the queue, not this file.
+func (m *Manager) Upload(ctx context.Context, userID int64, filePath, name, caption string, onProgress func(done, total int64)) (int, error) {
+	lv, def, err := m.get(userID)
+	if err != nil {
+		return 0, err
+	}
+	if !lv.busy.CompareAndSwap(false, true) {
+		return 0, errors.New("this account is already uploading")
+	}
+	defer lv.busy.Store(false)
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return 0, err
+	}
+	lv.total.Store(info.Size())
+	lv.done.Store(0)
+	defer func() {
+		lv.done.Store(0)
+		lv.total.Store(0)
+	}()
+	bps := int64(lv.meta.pace(def).MBPerSec) * 1000 * 1000
+	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		return sendFile(ctx, api, m.channelID, lv.meta.AccessHash, filePath, name, caption, info.Size(), bps, func(done, total int64) {
+			lv.done.Store(done)
+			lv.total.Store(total)
+			if onProgress != nil {
+				onProgress(done, total)
+			}
+		})
+	})
+	if err != nil {
+		if fatalAuth(err) {
+			lv.errText.Store(err.Error())
+			lv.meta.Error = err.Error()
+			_ = lv.store.writeMeta(lv.meta)
+			lv.connected.Store(false)
+		}
+		return 0, err
+	}
+	id, _ := val.(int)
+	if id == 0 {
+		return 0, errors.New("telegram did not report the new message id")
+	}
+	return id, nil
+}
+
+// FindMessage looks through healthy sessions for a document already posted with this name and size.
+// A crash after send and before the row is saved must not post the file again.
+func (m *Manager) FindMessage(ctx context.Context, name string, size int64) (int, bool, error) {
+	searched := false
+	var last error
+	for _, view := range m.Healthy() {
+		lv, _, err := m.get(view.UserID)
+		if err != nil || lv.busy.Load() {
+			continue
+		}
+		val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+			return searchFile(ctx, api, m.channelID, lv.meta.AccessHash, name, size)
+		})
+		if err != nil {
+			if fatalAuth(err) {
+				lv.errText.Store(err.Error())
+			}
+			last = err
+			continue
+		}
+		searched = true
+		if id, _ := val.(int); id != 0 {
+			return id, true, nil
+		}
+	}
+	if !searched {
+		// A negative answer must mean the channel was searched. Otherwise the file could be posted twice.
+		if last == nil {
+			last = errors.New("no session was free to search the channel")
+		}
+		return 0, false, last
+	}
+	return 0, false, nil
+}
+
+func sendFile(ctx context.Context, api *tg.Client, channelID, accessHash int64, filePath, name, caption string, size, bps int64, progress func(done, total int64)) (int, error) {
+	f, err := os.Open(filePath)
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+	var reader io.Reader = f
+	if bps > 0 {
+		reader = &steady{r: f, bps: bps}
+	}
+	up := uploader.NewUploader(api).WithPartSize(PartSize).WithThreads(1).WithProgress(progressFunc(progress))
+	file, err := up.Upload(ctx, uploader.NewUpload(name, reader, size))
+	if err != nil {
+		return 0, fmt.Errorf("upload: %w", err)
+	}
+	var randomID [8]byte
+	if _, err := rand.Read(randomID[:]); err != nil {
+		return 0, err
+	}
+	ext := strings.ToLower(path.Ext(name))
+	kind := mime.TypeByExtension(ext)
+	if kind == "" {
+		kind = "application/octet-stream"
+	}
+	res, err := api.MessagesSendMedia(ctx, &tg.MessagesSendMediaRequest{
+		Peer: &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
+		Media: &tg.InputMediaUploadedDocument{
+			File:      file,
+			MimeType:  kind,
+			ForceFile: true,
+			Attributes: []tg.DocumentAttributeClass{
+				&tg.DocumentAttributeFilename{FileName: name},
+			},
+		},
+		Message:  caption,
+		RandomID: int64(binary.LittleEndian.Uint64(randomID[:])),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("messages.sendMedia: %w", err)
+	}
+	if id := sentID(res); id != 0 {
+		return id, nil
+	}
+	return 0, errors.New("telegram did not report the new message id")
+}
+
+type progressFunc func(done, total int64)
+
+func (p progressFunc) Chunk(_ context.Context, state uploader.ProgressState) error {
+	if p != nil {
+		p(state.Uploaded, state.Total)
+	}
+	return nil
+}
+
+// steady spreads reads so the average stays near bps.
+type steady struct {
+	r    io.Reader
+	bps  int64
+	last time.Time
+	sent int64
+}
+
+func (s *steady) Read(p []byte) (int, error) {
+	if s.last.IsZero() {
+		s.last = time.Now()
+	}
+	n, err := s.r.Read(p)
+	s.sent += int64(n)
+	if s.bps > 0 {
+		want := time.Duration(s.sent) * time.Second / time.Duration(s.bps)
+		if wait := want - time.Since(s.last); wait > 0 {
+			time.Sleep(wait)
+		}
+	}
+	return n, err
+}
+
+func searchFile(ctx context.Context, api *tg.Client, channelID, accessHash int64, name string, size int64) (int, error) {
+	res, err := api.MessagesSearch(ctx, &tg.MessagesSearchRequest{
+		Peer:   &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
+		Q:      name,
+		Filter: &tg.InputMessagesFilterDocument{},
+		Limit:  20,
+	})
+	if err != nil {
+		return 0, err
+	}
+	for _, raw := range searchMessages(res) {
+		msg, ok := raw.(*tg.Message)
+		if !ok {
+			continue
+		}
+		media, ok := msg.Media.(*tg.MessageMediaDocument)
+		if !ok {
+			continue
+		}
+		doc, ok := media.Document.(*tg.Document)
+		if !ok || doc.Size != size {
+			continue
+		}
+		for _, attr := range doc.Attributes {
+			file, ok := attr.(*tg.DocumentAttributeFilename)
+			if ok && file.FileName == name {
+				return msg.ID, nil
+			}
+		}
+	}
+	return 0, nil
+}
+
+func searchMessages(res tg.MessagesMessagesClass) []tg.MessageClass {
+	switch v := res.(type) {
+	case *tg.MessagesMessages:
+		return v.Messages
+	case *tg.MessagesMessagesSlice:
+		return v.Messages
+	case *tg.MessagesChannelMessages:
+		return v.Messages
+	default:
+		return nil
+	}
+}
+
+func sentID(res tg.UpdatesClass) int {
+	switch v := res.(type) {
+	case *tg.Updates:
+		for _, u := range v.Updates {
+			switch n := u.(type) {
+			case *tg.UpdateNewChannelMessage:
+				if m, ok := n.Message.(*tg.Message); ok {
+					return m.ID
+				}
+			case *tg.UpdateMessageID:
+				return n.ID
+			}
+		}
+	case *tg.UpdateShortSentMessage:
+		return v.ID
+	}
+	return 0
+}
+
+func fatalAuth(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, needle := range []string{"SESSION_REVOKED", "AUTH_KEY_UNREGISTERED", "AUTH_KEY_INVALID", "USER_DEACTIVATED", "SESSION_EXPIRED"} {
+		if strings.Contains(msg, needle) {
+			return true
+		}
+	}
+	return false
+}

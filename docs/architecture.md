@@ -19,6 +19,10 @@
 | `internal/fladder` | Runs the Fladder web client with this Jellyfin and Seerr already filled in |
 | `internal/front` | One port for streams, the setup page, Seerr under `/seerr/`, Fladder under `/fladder/`, and a reverse proxy to Jellyfin |
 | `internal/setup` | Browser wizard that writes `.env` after checking the bots against the channel |
+| `internal/tguser` | User-account sessions that post a finished download into the channel. Separate from the bot pool |
+| `internal/stack` | qBittorrent, Radarr, Sonarr, Bitmagnet and Postgres, started on demand and configured over their APIs |
+| `internal/autoupload` | Polls Radarr and Sonarr, uploads one file per session, and deletes the disk copy after a probe |
+| `internal/downloads` | Panel switch. A failure here is logged and does not stop playback |
 
 ## Reading a video
 
@@ -256,6 +260,23 @@ Measured with 4 real files, on Jellyfin 10.11.8:
 | Replacing the gateway token | 0 cache deletions, 0 extractions, old token refused |
 | Playing in Web with an embedded track selected | No extraction |
 
+## Downloads
+
+Off by default. The panel turns it on only when at least one signed-in user is an admin who can post, Docker is installed, and the download folder is writable with enough free space. The stack runs in a goroutine after the player is already serving, and an error there is shown in the panel.
+
+qBittorrent, Radarr and Sonarr share one bind-mounted folder (`torrents/`, `media/movies`, `media/tv`) so an import can hardlink. Their databases stay on named volumes. Bitmagnet and Postgres share the Docker network `jellyfin-telegram`. Seerr reaches Radarr and Sonarr through the published loopback ports. `/radarr/` and `/sonarr/` are reverse-proxied on the same port as Jellyfin. qBittorrent's WebUI and Bitmagnet's HTTP port stay on loopback. The DHT port and qBittorrent's peer port are published, because otherwise nothing arrives.
+
+The uploader polls Radarr and Sonarr every minute. Each file is posted by one user session, under that session's own pace and daily cap. A bot then reads the message back and compares the size and the first and last block with the local file. The local file and the torrent are deleted only after the catalog row is probed, so Seerr still sees the title as available. A crash after the send is caught by searching the channel for the same name and size before posting again. That search runs once per interrupted file, never for a fresh one, and a failed search stops the upload instead of counting as "not found".
+
+Rules the uploader keeps:
+
+- **Nothing is deleted on a doubt.** A file already in the channel under the same name and size is still read back and compared. A real difference sets the row to `mismatch`, which nothing moves on from. A network error only retries.
+- **Size limits.** The cap is megabytes per minute of runtime in Radarr and Sonarr, so it is divided by 150 minutes for films and 60 for episodes, and it is rewritten whenever the largest account changes. A file that still exceeds what every account can send is marked `too_big` and stays on disk.
+- **The torrent is found from the grab history** before the file is deleted, and only a record naming that movie or episode counts. A file holding several episodes unmonitors all of them.
+- **The disk guard runs on every pass**, including when setting up the apps fails. It stops the torrents below the free-space minimum and later starts only those, remembered by a marker file in the download folder.
+- **Sessions reconnect** with a growing delay after a dropped connection, but not after a revoked session or a lost admin right. A panel request that arrives with forwarding headers is not treated as this computer.
+- **Containers are removed when the program ends**, so nothing keeps downloading unwatched.
+
 ## Not verified yet
 
 - Dragging the seek bar by hand. Seeking was tested with the remote seek command in one tab.
@@ -268,3 +289,11 @@ Measured with 4 real files, on Jellyfin 10.11.8:
 - Versions of one episode, which are written with a `tg<id>` suffix.
 - Long sessions, where `FLOOD_PREMIUM_WAIT` may appear after tens of gigabytes.
 - A whole library. Extraction has run on 3 files.
+- The real upload speed of a user session, which may change the default pace.
+- Whether a hardlink works on the download bind mount. If it does not, Radarr copies and the file uses twice the space until the upload finishes.
+- `max_ratio=0` with the stop action in this qBittorrent build.
+- The history query Radarr and Sonarr answer for the torrent id, and `episode?episodeFileId=` on Sonarr. Both are checked against the record's own ids, but not yet against a live server.
+- Bitmagnet v0.10.1 starting with these worker keys. The tag exists, the keys were taken from its documentation.
+- Seerr, inside its container, reaching Radarr and Sonarr on the loopback ports through `host.docker.internal`.
+- A bot reading a Premium upload larger than 2 GB.
+- The download stack on Linux. It is built with `CGO_ENABLED=0`, and the containers are the same images.

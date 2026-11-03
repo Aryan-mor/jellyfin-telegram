@@ -78,6 +78,16 @@ To use a Jellyfin you already run, set `JELLYFIN_URL` and `JELLYFIN_API_KEY` ins
    opening Jellyfin from another network with Tailscale. Saved bots are connected on the
    next start.
 
+   The Downloads tab can turn on a private Radarr, Sonarr, qBittorrent and Bitmagnet. Seerr then
+   requests a film or episode, qBittorrent downloads it, and a Telegram account you sign in on that
+   tab posts it to the channel. Playback still goes through the same `.strm` file. The copy on disk
+   is deleted after Jellyfin has probed the message. A file larger than that account can send is
+   refused and is not split. Sign-in is accepted from this computer or over Tailscale, because the
+   panel is plain HTTP and the session is full access to the account. The session file is not
+   encrypted. More accounts drain the queue faster. One file still uses one account. Turning the
+   feature off removes the containers and leaves playback alone. Your home IP is visible to peers
+   and to the DHT. There is no VPN in this setup.
+
 When you point at your own Jellyfin instead:
 
 1. Add `LIBRARY_DIR/Movies` as another folder of the existing Movies library, and

@@ -45,6 +45,10 @@ type Options struct {
 	Seerr *url.URL
 	// Fladder is the web client, served under /fladder/. Nil leaves that path to Jellyfin.
 	Fladder *url.URL
+	// Radarr and Sonarr are the download apps, served under /radarr/ and /sonarr/.
+	// Their own url base is that path, so the request is forwarded unchanged.
+	Radarr *url.URL
+	Sonarr *url.URL
 	// StreamBase is the address written into .strm files.
 	StreamBase string
 }
@@ -83,6 +87,8 @@ func Handler(o Options) http.Handler {
 			http.Redirect(w, r, "/fladder/", http.StatusTemporaryRedirect)
 		})
 	}
+	mount(mux, "/radarr", o.Radarr)
+	mount(mux, "/sonarr", o.Sonarr)
 	if o.Jellyfin == nil {
 		return mux
 	}
@@ -169,6 +175,16 @@ func trustLocalProxy(pr *httputil.ProxyRequest) {
 	if v := pr.In.Header.Get("X-Forwarded-For"); v != "" {
 		pr.Out.Header.Set("X-Forwarded-For", v)
 	}
+}
+
+func mount(mux *http.ServeMux, prefix string, target *url.URL) {
+	if target == nil {
+		return
+	}
+	mux.Handle(prefix+"/", passThrough(target))
+	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, prefix+"/", http.StatusTemporaryRedirect)
+	})
 }
 
 func fromLoopback(r *http.Request) bool {

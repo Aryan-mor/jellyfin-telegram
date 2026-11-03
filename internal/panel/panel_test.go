@@ -179,3 +179,63 @@ func TestADifferentChannelIsRefused(t *testing.T) {
 		t.Fatal("channel was changed")
 	}
 }
+
+func TestLoginIsLocalOrTailscaleOnly(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{
+		Code: "secret", EnvPath: path,
+		DownloadDo: func(*http.Request, string, map[string]any) (any, error) {
+			t.Fatal("login should not run")
+			return nil, nil
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/panel/downloads/login?code=secret", strings.NewReader(`{"phone":"+1"}`))
+	req.RemoteAddr = "192.168.1.9:1234"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("status %d body %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestEnableNeedsASession(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{
+		Code: "secret", EnvPath: path,
+		DownloadDo: func(_ *http.Request, action string, _ map[string]any) (any, error) {
+			if action == "enable" {
+				return nil, os.ErrInvalid
+			}
+			return map[string]any{"ok": true}, nil
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/panel/automation?code=secret", strings.NewReader(`{"enabled":true}`))
+	req.RemoteAddr = "127.0.0.1:9"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status %d", rec.Code)
+	}
+}
+
+func TestATunnelOnThisMachineIsNotTrusted(t *testing.T) {
+	local := httptest.NewRequest(http.MethodPost, "/panel/downloads/login", nil)
+	local.RemoteAddr = "127.0.0.1:5000"
+	if !trustedClient(local) {
+		t.Fatal("this computer was refused")
+	}
+	for _, header := range []string{"X-Forwarded-For", "Forwarded", "X-Real-Ip"} {
+		tunnel := httptest.NewRequest(http.MethodPost, "/panel/downloads/login", nil)
+		tunnel.RemoteAddr = "127.0.0.1:5000"
+		tunnel.Header.Set(header, "203.0.113.9")
+		if trustedClient(tunnel) {
+			t.Errorf("a request relayed with %s passed the login check", header)
+		}
+	}
+}
