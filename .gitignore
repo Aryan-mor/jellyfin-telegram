@@ -1,0 +1,11 @@
+# Secrets and sessions
+.env
+data/
+
+# Generated library
+library/
+
+# Build output
+/jellyfin-telegram
+/jellyfin-telegram.exe
+/bin/
