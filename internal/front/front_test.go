@@ -49,7 +49,8 @@ func rig(t *testing.T) (*httptest.Server, *seen) {
 	}
 	gateway := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "gateway:"+r.URL.Path) })
 	setup := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, "setup") })
-	srv := httptest.NewServer(Handler(Options{Gateway: gateway, Setup: setup, Jellyfin: target, StreamBase: streamBase}))
+	panel := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { fmt.Fprint(w, "panel:"+r.URL.Path) })
+	srv := httptest.NewServer(Handler(Options{Gateway: gateway, Setup: setup, Panel: panel, Jellyfin: target, StreamBase: streamBase}))
 	t.Cleanup(srv.Close)
 	return srv, got
 }
@@ -71,6 +72,8 @@ func TestOnePortRoutesEverything(t *testing.T) {
 		"/healthz":     "gateway:/healthz",
 		"/setup":       "setup",
 		"/setup/x":     "setup",
+		"/panel":       "panel:/panel",
+		"/panel/state": "panel:/panel/state",
 		"/web/index":   "jellyfin",
 	} {
 		res, err := http.Get(srv.URL + path)

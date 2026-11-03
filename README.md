@@ -19,6 +19,8 @@ The service runs as one binary on Windows and Linux. It needs no CGO, FUSE or da
 - One or more bots, each an admin of that channel, from [@BotFather](https://t.me/BotFather)
 - `api_id` and `api_hash` from [my.telegram.org](https://my.telegram.org)
 - Jellyfin 10.11.8 or 12.4 (the versions tested)
+- Docker. Seerr and the Fladder web client start with Jellyfin. Set `SEERR_MANAGED=false`
+  or `FLADDER_MANAGED=false` to skip one.
 
 ## Setup
 
@@ -67,7 +69,14 @@ To use a Jellyfin you already run, set `JELLYFIN_URL` and `JELLYFIN_API_KEY` ins
 
    With no `JELLYFIN_URL`, this is the whole setup: the page asks for the channel and the
    bots, then Jellyfin is installed, the Movies and Shows libraries are created, and the
-   sign-in password is written to `DATA_DIR/jellyfin/credentials.json`.
+   sign-in password is written to `DATA_DIR/jellyfin/credentials.json`. Seerr is started on the
+   same port, at `/seerr/`, and signed in to that Jellyfin, so requests use it by default.
+   Sign in to Seerr with the same user. An existing Jellyfin gets Seerr too, at that same `/seerr/`.
+
+   On this computer open `http://127.0.0.1:8097/panel`. It uses the same port. The page shows the address a phone should use.
+   There you add bots, update the channel link and the language, and follow the steps for
+   opening Jellyfin from another network with Tailscale. Saved bots are connected on the
+   next start.
 
 When you point at your own Jellyfin instead:
 

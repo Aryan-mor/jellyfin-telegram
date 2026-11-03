@@ -53,6 +53,11 @@ type Config struct {
 	JellyfinDataDir string
 	// JellyfinManaged means this program installs and runs Jellyfin itself.
 	JellyfinManaged bool
+	// SeerrManaged means this program runs Seerr against the configured Jellyfin.
+	// It is on unless SEERR_MANAGED=false, including when Jellyfin is one you already run.
+	SeerrManaged bool
+	// FladderManaged means this program runs the Fladder web client, with Seerr filled in.
+	FladderManaged bool
 }
 
 // NeedsSetup reports that no Telegram details were given at all, as on a first run.
@@ -153,6 +158,9 @@ func Load(envPath string) (Config, error) {
 		}
 	}
 	c.JellyfinManaged = c.JellyfinURL == "" && !strings.EqualFold(get("JELLYFIN_MANAGED", "true"), "false")
+	withJellyfin := c.JellyfinManaged || c.JellyfinURL != ""
+	c.SeerrManaged = managedDefault(get("SEERR_MANAGED", ""), withJellyfin)
+	c.FladderManaged = managedDefault(get("FLADDER_MANAGED", ""), withJellyfin)
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
 	}
@@ -255,6 +263,17 @@ func ParseTokens(s string) ([]string, error) {
 		return nil, errors.New("at least one bot token is required")
 	}
 	return out, nil
+}
+
+func managedDefault(raw string, whenJellyfin bool) bool {
+	switch strings.ToLower(raw) {
+	case "false":
+		return false
+	case "":
+		return whenJellyfin
+	default:
+		return true
+	}
 }
 
 func get(key, def string) string {

@@ -15,7 +15,9 @@
 | `internal/subtitles` | Identifies tracks from the file head and finds online subtitles |
 | `internal/lang` | Language codes, names, scripts, encodings and text detection for any language |
 | `internal/managed` | Downloads a pinned Jellyfin build, runs it on loopback, completes its first-run wizard |
-| `internal/front` | One port for streams, the setup page and a reverse proxy to that Jellyfin |
+| `internal/seerr` | Runs a pinned Seerr image and finishes its setup with that Jellyfin as the media server |
+| `internal/fladder` | Runs the Fladder web client with this Jellyfin and Seerr already filled in |
+| `internal/front` | One port for streams, the setup page, Seerr under `/seerr/`, Fladder under `/fladder/`, and a reverse proxy to Jellyfin |
 | `internal/setup` | Browser wizard that writes `.env` after checking the bots against the channel |
 
 ## Reading a video
