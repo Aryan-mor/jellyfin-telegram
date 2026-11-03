@@ -46,14 +46,15 @@ func main() {
 	}
 
 	cfg, err := config.Load(*env)
-	if err != nil {
+	// A first run has no settings at all. The setup page asks for them.
+	if err != nil && !(cmd == "serve" && cfg.NeedsSetup()) {
 		fmt.Fprintf(os.Stderr, "Configuration problems:\n%v\n", err)
 		os.Exit(2)
 	}
 
 	switch cmd {
 	case "serve":
-		err = serve(ctx, cfg, log)
+		err = serve(ctx, cfg, *env, log)
 	case "check":
 		err = check(ctx, cfg, log)
 	case "bench":

@@ -97,7 +97,10 @@ JELLYFIN_API_KEY=KEY-SECRET
 }
 
 func TestParseChannelID(t *testing.T) {
-	for in, want := range map[string]int64{"-1001234": 1234, "1234": 1234, " 55 ": 55} {
+	for in, want := range map[string]int64{
+		"-1001234": 1234, "1234": 1234, " 55 ": 55,
+		"https://t.me/c/4325588340/5": 4325588340, "t.me/c/99/1?single": 99,
+	} {
 		if got, err := ParseChannelID(in); err != nil || got != want {
 			t.Errorf("ParseChannelID(%q) = %d, %v", in, got, err)
 		}

@@ -6,9 +6,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -49,6 +51,23 @@ type Config struct {
 	ExtractBytesPerSecond int64
 	// JellyfinDataDir is Jellyfin's data folder as seen from this service. Empty asks Jellyfin.
 	JellyfinDataDir string
+	// JellyfinManaged means this program installs and runs Jellyfin itself.
+	JellyfinManaged bool
+}
+
+// NeedsSetup reports that no Telegram details were given at all, as on a first run.
+func (c Config) NeedsSetup() bool {
+	return c.GatewayListen != "" && c.APIID == 0 && c.APIHash == "" && c.ChannelID == 0 && len(c.BotTokens) == 0
+}
+
+// LoopbackURL is how this machine reaches the service. Jellyfin reads .strm files through it when
+// it runs here.
+func (c Config) LoopbackURL() string {
+	_, port, err := net.SplitHostPort(c.GatewayListen)
+	if err != nil {
+		port = "8097"
+	}
+	return "http://127.0.0.1:" + port
 }
 
 // JellyfinEnabled reports whether automatic refresh and probing are configured.
@@ -91,7 +110,7 @@ func Load(envPath string) (Config, error) {
 	}
 	c.ChannelID = id
 
-	c.BotTokens, err = parseTokens(get("TELEGRAM_BOT_TOKENS", ""))
+	c.BotTokens, err = ParseTokens(get("TELEGRAM_BOT_TOKENS", ""))
 	if err != nil {
 		fail("TELEGRAM_BOT_TOKENS: %v", err)
 	}
@@ -133,6 +152,7 @@ func Load(envPath string) (Config, error) {
 			fail("SUBTITLE_LANGUAGE must be a language code such as en, de, fa or ja")
 		}
 	}
+	c.JellyfinManaged = c.JellyfinURL == "" && !strings.EqualFold(get("JELLYFIN_MANAGED", "true"), "false")
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
 	}
@@ -141,17 +161,32 @@ func Load(envPath string) (Config, error) {
 
 // ValidateServe adds the checks that only matter when running the gateway.
 func (c Config) ValidateServe() error {
-	if c.GatewayPublicURL == "" {
+	if c.GatewayPublicURL == "" && !c.JellyfinManaged {
 		return errors.New("GATEWAY_PUBLIC_URL is required")
 	}
 	return nil
 }
 
-// ParseChannelID accepts -100xxxxxxxxxx or the bare id and returns the bare id.
+// Reload reads the settings file again after it changed, letting it win over what the first read
+// left in the environment.
+func Reload(envPath string) (Config, error) {
+	if err := godotenv.Overload(envPath); err != nil {
+		return Config{}, fmt.Errorf("read %s: %w", envPath, err)
+	}
+	return Load(envPath)
+}
+
+var reMessageLink = regexp.MustCompile(`t\.me/c/(\d+)`)
+
+// ParseChannelID accepts a message link from the channel, -100xxxxxxxxxx or the bare id, and returns
+// the bare id. A message link is the easiest to get, as any Telegram app can copy one.
 func ParseChannelID(s string) (int64, error) {
 	s = strings.TrimSpace(s)
 	if s == "" {
 		return 0, errors.New("required")
+	}
+	if m := reMessageLink.FindStringSubmatch(s); m != nil {
+		s = m[1]
 	}
 	s = strings.TrimPrefix(s, "-100")
 	id, err := strconv.ParseInt(s, 10, 64)
@@ -198,7 +233,8 @@ func (c Config) EnsureGatewayToken() (string, error) {
 	return token, os.WriteFile(path, []byte(token+"\n"), 0o600)
 }
 
-func parseTokens(s string) ([]string, error) {
+// ParseTokens reads comma-separated bot tokens and drops duplicates.
+func ParseTokens(s string) ([]string, error) {
 	var out []string
 	seen := map[int64]bool{}
 	for i, t := range strings.Split(s, ",") {

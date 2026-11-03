@@ -375,3 +375,18 @@ func TestOldItemWithSameURLGetsNoSubtitle(t *testing.T) {
 		t.Errorf("resolved %d times, uploaded %d times", res.calls.Load(), srv.uploads.Load())
 	}
 }
+
+// Real case: with Persian metadata, Street Fighter is called مبارز خیابانی. Treating that as a
+// Persian film meant it never got a subtitle.
+func TestSubtitleLookupUsesTheChannelNameNotTheTranslatedTitle(t *testing.T) {
+	p := &Prober{}
+	f := media.File{MessageID: 1, FileName: "FilmPokVip.Street.Fighter.1994.720p.BluRay.mp4"}
+	m := p.meta(context.Background(), f, Item{Name: "مبارز خیابانی", Year: 1990, Type: "Movie"}, "u")
+	if m.Title != "FilmPokVip Street Fighter" || m.Year != 1994 {
+		t.Errorf("title %q, year %d", m.Title, m.Year)
+	}
+	m = p.meta(context.Background(), media.File{MessageID: 2}, Item{Name: "Heat", Year: 1995, Type: "Movie"}, "u")
+	if m.Title != "Heat" || m.Year != 1995 {
+		t.Errorf("with no usable name: title %q, year %d", m.Title, m.Year)
+	}
+}

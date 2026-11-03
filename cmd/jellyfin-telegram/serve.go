@@ -5,19 +5,27 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/blockstore"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
@@ -27,9 +35,63 @@ const (
 	reconcileEvery = time.Hour
 	startupTimeout = 2 * time.Minute
 	archiveIdle    = time.Minute
+	// managedPort is where a private Jellyfin listens, on loopback only.
+	managedPort         = 18096
+	managedStartTimeout = 5 * time.Minute
 )
 
-func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
+// serve is the whole program: one port that first shows the setup page if there are no settings,
+// then prepares everything, then serves Jellyfin and the streams.
+func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Logger) error {
+	wizard, err := setup.New(envPath, verifyTelegram(cfg.DataDir, log))
+	if err != nil {
+		return err
+	}
+	var entry front.Switch
+	entry.Set(wizard.Waiting())
+	srv := &http.Server{Addr: cfg.GatewayListen, Handler: &entry, ReadHeaderTimeout: 15 * time.Second}
+	srvErr := make(chan error, 1)
+	go func() { srvErr <- srv.ListenAndServe() }()
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = srv.Shutdown(shutdownCtx)
+	}()
+
+	if cfg.NeedsSetup() {
+		address := fmt.Sprintf("%s/setup?code=%s", cfg.LoopbackURL(), wizard.Code())
+		fmt.Printf("\nOpen this address to set up jellyfin-telegram:\n\n    %s\n\n", address)
+		openBrowser(address)
+		select {
+		case <-wizard.Saved():
+		case err := <-srvErr:
+			return fmt.Errorf("cannot serve on %s: %w", cfg.GatewayListen, err)
+		case <-ctx.Done():
+			return nil
+		}
+		if cfg, err = config.Reload(envPath); err != nil {
+			return err
+		}
+	}
+	err = run(ctx, cfg, wizard, &entry, srvErr, log)
+	if err != nil {
+		wizard.SetStatus(setup.Status{Stage: "Could not start", Error: err.Error()})
+	}
+	return err
+}
+
+func run(ctx context.Context, cfg config.Config, wizard *setup.Wizard, entry *front.Switch, srvErr <-chan error, log *slog.Logger) error {
+	// Cancelled on every return, including a failed start. Otherwise the process exits and the
+	// Jellyfin child keeps the port.
+	ctx, stopChildren := context.WithCancel(ctx)
+	var serverDone chan struct{}
+	defer func() {
+		stopChildren()
+		if serverDone != nil {
+			<-serverDone
+		}
+	}()
+
 	if err := cfg.ValidateServe(); err != nil {
 		return err
 	}
@@ -55,11 +117,16 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return fmt.Errorf("open cache: %w", err)
 	}
 
-	lib := library.New(cfg.LibraryDir, cfg.GatewayPublicURL, token, cfg.ChannelID)
+	streamBase := cfg.GatewayPublicURL
+	if streamBase == "" {
+		streamBase = cfg.LoopbackURL()
+	}
+	lib := library.New(cfg.LibraryDir, streamBase, token, cfg.ChannelID)
 	if err := lib.Prepare(); err != nil {
 		return fmt.Errorf("prepare library: %w", err)
 	}
 
+	wizard.SetStatus(setup.Status{Stage: "Connecting to Telegram", Percent: 2})
 	pool, err := newPool(cfg, cfg.BotTokens, log)
 	if err != nil {
 		return err
@@ -69,21 +136,50 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		return err
 	}
 
-	engine := gateway.NewEngine(store, pool, log)
-	srv := &http.Server{
-		Addr: cfg.GatewayListen,
-		Handler: gateway.Handler(engine, cat, gateway.Options{
-			Token:     token,
-			ChannelID: cfg.ChannelID,
-			Readahead: cfg.ReadaheadBlocks,
-
-			BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
-		}, log),
-		ReadHeaderTimeout: 15 * time.Second,
+	var creds managed.Credentials
+	if cfg.JellyfinManaged {
+		server, c, err := startManaged(ctx, cfg, wizard, log)
+		if err != nil {
+			return err
+		}
+		creds = c
+		cfg.JellyfinURL, cfg.JellyfinAPIKey = server.URL(), c.APIKey
+		cfg.JellyfinDataDir = server.DataDir
+		cfg.FFprobePath = server.Paths.FFprobe
+		server.Prepare()
+		serverDone = make(chan struct{})
+		go func() {
+			defer close(serverDone)
+			server.Run(ctx)
+		}()
+		wizard.SetStatus(setup.Status{Stage: "Starting Jellyfin", Percent: 90})
+		if err := server.WaitReady(ctx, managedStartTimeout); err != nil {
+			return err
+		}
+		if creds, err = finishManaged(ctx, cfg, server); err != nil {
+			return err
+		}
+		cfg.JellyfinAPIKey = creds.APIKey
 	}
-	srvErr := make(chan error, 1)
-	go func() { srvErr <- srv.ListenAndServe() }()
-	log.Info("gateway listening", "addr", cfg.GatewayListen, "public_url", cfg.GatewayPublicURL)
+
+	engine := gateway.NewEngine(store, pool, log)
+	gw := gateway.Handler(engine, cat, gateway.Options{
+		Token:     token,
+		ChannelID: cfg.ChannelID,
+		Readahead: cfg.ReadaheadBlocks,
+
+		BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
+	}, log)
+	options := front.Options{Gateway: gw, Setup: wizard.Handler(), StreamBase: streamBase}
+	if cfg.JellyfinURL != "" {
+		target, err := url.Parse(cfg.JellyfinURL)
+		if err != nil {
+			return fmt.Errorf("JELLYFIN_URL: %w", err)
+		}
+		options.Jellyfin = target
+	}
+	entry.Set(front.Handler(options))
+	log.Info("serving", "addr", cfg.GatewayListen)
 
 	var prober *jellyfin.Prober
 	if cfg.JellyfinEnabled() {
@@ -93,7 +189,17 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 			return err
 		}
 	} else {
-		log.Warn("JELLYFIN_URL is not set, so new files are not probed automatically")
+		log.Warn("no Jellyfin is configured, so new files are not probed automatically")
+	}
+
+	addresses := reachableAddresses(cfg.GatewayListen)
+	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password})
+	fmt.Printf("\nJellyfin is ready at:\n")
+	for _, a := range addresses {
+		fmt.Printf("    %s\n", a)
+	}
+	if creds.Password != "" {
+		fmt.Printf("\nSign in with user %q. The password is in %s\n\n", creds.User, managedCredentialsFile(cfg))
 	}
 
 	idx := indexer.New(pool, cat, lib, store, log)
@@ -110,18 +216,178 @@ func serve(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 		}
 	}()
 
+	var result error
 	select {
 	case err := <-srvErr:
-		return fmt.Errorf("gateway stopped: %w", err)
+		result = fmt.Errorf("cannot serve on %s: %w", cfg.GatewayListen, err)
 	case <-ctx.Done():
 	}
 	log.Info("shutting down")
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	_ = srv.Shutdown(shutdownCtx)
-	<-loopDone
-	<-archiveDone
-	return nil
+	if result == nil {
+		<-loopDone
+		<-archiveDone
+		if serverDone != nil {
+			<-serverDone
+		}
+	}
+	return result
+}
+
+func managedCredentialsFile(cfg config.Config) string {
+	return filepath.Join(cfg.DataDir, "jellyfin", "credentials.json")
+}
+
+// startManaged installs Jellyfin if needed. Its setup runs later, once the server answers.
+func startManaged(ctx context.Context, cfg config.Config, wizard *setup.Wizard, log *slog.Logger) (*managed.Server, managed.Credentials, error) {
+	release, err := managed.ReleaseFor(runtime.GOOS, runtime.GOARCH)
+	if err != nil {
+		return nil, managed.Credentials{}, err
+	}
+	base, err := filepath.Abs(filepath.Join(cfg.DataDir, "jellyfin"))
+	if err != nil {
+		return nil, managed.Credentials{}, err
+	}
+	client := &http.Client{Timeout: 30 * time.Minute}
+	paths, err := managed.Install(ctx, filepath.Join(base, "bin"), release, client, func(name string, done, total int64) {
+		percent := 5
+		if total > 0 {
+			percent = 5 + int(80*done/total)
+		}
+		wizard.SetStatus(setup.Status{Stage: "Downloading " + name, Percent: percent})
+	})
+	if err != nil {
+		return nil, managed.Credentials{}, err
+	}
+	return &managed.Server{Paths: paths, DataDir: filepath.Join(base, "server"), Port: managedPort, Log: log}, managed.Credentials{}, nil
+}
+
+func finishManaged(ctx context.Context, cfg config.Config, server *managed.Server) (managed.Credentials, error) {
+	library, err := filepath.Abs(cfg.LibraryDir)
+	if err != nil {
+		return managed.Credentials{}, err
+	}
+	b := &managed.Bootstrap{
+		URL:       server.URL(),
+		StateFile: managedCredentialsFile(cfg),
+		MoviesDir: filepath.Join(library, "Movies"),
+		ShowsDir:  filepath.Join(library, "Shows"),
+		Language:  cfg.SubtitleLanguage,
+	}
+	return b.Run(ctx)
+}
+
+// verifyTelegram tries the values from the setup page with real connections.
+func verifyTelegram(dataDir string, log *slog.Logger) setup.Verifier {
+	return func(ctx context.Context, apiID int, apiHash string, channel int64, tokens []string) (setup.Report, error) {
+		pool, err := tgpool.New(tgpool.Options{
+			APIID: apiID, APIHash: apiHash, ChannelID: channel, Tokens: tokens, Concurrency: 1,
+			SessionDir: filepath.Join(dataDir, "sessions"), Log: log,
+		})
+		if err != nil {
+			return setup.Report{}, err
+		}
+		cctx, cancel := context.WithTimeout(ctx, startupTimeout)
+		defer cancel()
+		pool.Start(cctx)
+		pool.WaitSettled(cctx)
+
+		var report setup.Report
+		for _, st := range pool.Statuses() {
+			name := "@" + st.Username
+			if st.Username == "" {
+				name = fmt.Sprintf("bot %d", st.ID)
+			}
+			switch {
+			case !st.Ready:
+				report.Bots = append(report.Bots, setup.BotReport{Name: name, Error: "cannot read the channel, make it an admin"})
+			case !st.IsAdmin:
+				report.Bots = append(report.Bots, setup.BotReport{Name: name, Error: "is not an admin of the channel"})
+			default:
+				report.Channel = st.ChannelTitle
+				report.Bots = append(report.Bots, setup.BotReport{Name: name, OK: true})
+			}
+		}
+		if pool.ReadyCount() == 0 {
+			return report, nil
+		}
+		files, _, err := scanChannel(cctx, pool)
+		if err != nil {
+			return report, err
+		}
+		report.Videos = len(files)
+		return report, nil
+	}
+}
+
+// reachableAddresses lists how others on the network can reach this machine.
+func reachableAddresses(listen string) []string {
+	host, port, err := net.SplitHostPort(listen)
+	if err != nil {
+		return nil
+	}
+	if host != "" && host != "0.0.0.0" && host != "::" {
+		return []string{"http://" + net.JoinHostPort(host, port)}
+	}
+	out := []string{"http://localhost:" + port}
+	interfaces, err := net.Interfaces()
+	if err != nil {
+		return out
+	}
+	for _, in := range interfaces {
+		if in.Flags&net.FlagUp == 0 || virtualAdapter(in.Name) {
+			continue
+		}
+		addrs, err := in.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, a := range addrs {
+			if n, ok := a.(*net.IPNet); ok && usableAddress(n.IP) {
+				out = append(out, "http://"+net.JoinHostPort(n.IP.String(), port))
+			}
+		}
+	}
+	return out
+}
+
+// virtualAdapter leaves out networks that exist only inside this machine, such as those of Docker
+// and WSL, because no phone or TV can reach them.
+func virtualAdapter(name string) bool {
+	lower := strings.ToLower(name)
+	for _, prefix := range []string{"vethernet", "docker", "br-", "veth", "virbr", "wsl", "vmware", "virtualbox"} {
+		if strings.HasPrefix(lower, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+// usableAddress accepts home network addresses and the 100.64.0.0/10 range used by mesh VPNs such
+// as Tailscale, which also work away from home.
+func usableAddress(ip net.IP) bool {
+	v4 := ip.To4()
+	if v4 == nil {
+		return false
+	}
+	return v4.IsPrivate() || (v4[0] == 100 && v4[1]&0xC0 == 64)
+}
+
+// openBrowser is a convenience. On a machine with no desktop it fails, and the address printed on the
+// console remains.
+func openBrowser(address string) {
+	if os.Getenv("JFTG_NO_BROWSER") != "" {
+		return
+	}
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("rundll32", "url.dll,FileProtocolHandler", address)
+	case "darwin":
+		cmd = exec.Command("open", address)
+	default:
+		cmd = exec.Command("xdg-open", address)
+	}
+	_ = cmd.Start()
 }
 
 func setupSubtitles(ctx context.Context, cfg config.Config, cat *catalog.Catalog, pool *tgpool.Pool, prober *jellyfin.Prober, log *slog.Logger) error {

@@ -9,6 +9,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 )
 
@@ -200,6 +201,14 @@ func (p *Prober) meta(ctx context.Context, f media.File, it Item, userID string)
 			if series, err := p.client.Item(ctx, it.SeriesID, userID); err == nil {
 				m.IMDb, m.Year = series.IMDb(), series.Year
 			}
+		}
+	}
+	// Jellyfin translates titles into the metadata language, so its title says nothing about the
+	// language of the film and may not match anything online. The name in the channel does both.
+	if parsed := naming.Parse(f.FileName, f.Caption); parsed.Title != "" {
+		m.Title = parsed.Title
+		if parsed.Year > 0 {
+			m.Year = parsed.Year
 		}
 	}
 	return m

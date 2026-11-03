@@ -65,6 +65,8 @@ func check(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 
 	fmt.Println("\nGateway:")
 	switch {
+	case cfg.GatewayPublicURL == "" && cfg.JellyfinManaged:
+		fmt.Printf("  OK    serving from one port, %s\n", cfg.GatewayListen)
 	case cfg.GatewayPublicURL == "":
 		problems++
 		fmt.Println("  FAIL  GATEWAY_PUBLIC_URL is empty")
@@ -77,7 +79,9 @@ func check(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	}
 
 	fmt.Println("\nJellyfin:")
-	if !cfg.JellyfinEnabled() {
+	if cfg.JellyfinManaged {
+		fmt.Println("  OK    a private copy will be set up and run automatically")
+	} else if !cfg.JellyfinEnabled() {
 		fmt.Println("  SKIP  not configured, so new files are not probed automatically")
 	} else {
 		client := jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey)
@@ -94,11 +98,11 @@ func check(ctx context.Context, cfg config.Config, log *slog.Logger) error {
 	switch {
 	case cfg.SubtitleLanguage == "":
 		fmt.Println("  SKIP  SUBTITLE_LANGUAGE is not set")
-	case !cfg.JellyfinEnabled():
+	case !cfg.JellyfinEnabled() && !cfg.JellyfinManaged:
 		fmt.Println("  SKIP  needs the Jellyfin settings")
 	default:
 		fmt.Printf("  OK    language is %s\n", cfg.SubtitleLanguage)
-		if _, err := subtitles.FindTools(cfg.FFprobePath); err != nil {
+		if _, err := subtitles.FindTools(cfg.FFprobePath); err != nil && !cfg.JellyfinManaged {
 			problems++
 			fmt.Printf("  FAIL  %v\n", err)
 		}
