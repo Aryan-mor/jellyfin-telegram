@@ -62,6 +62,7 @@ It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
+- [Thanks](#thanks)
 
 ## What you get
 
@@ -429,6 +430,20 @@ words to skip or require, a daily cap and a pause between groups. A channel whos
 copying is shown as such and left alone. A private channel works only if the signed-in account is
 already a member.
 
+### News channels
+
+Some channels never post the file. The post is a bot link such as `https://t.me/SomeBot?start=…`.
+Add those on the same tab, under **News channels**, and sign fuckjoin in once with the same
+Telegram account (phone and code). That sign-in is a second session, stored under
+`data/fuckjoin`, not inside this source tree.
+
+On each check the account reads new posts, sends each bot link to
+[fuckjoin](https://github.com/AmirHBuilds/fuckjoin), and waits for the video. A file that passes
+the same rules as a direct copy is forwarded into the library channel. The indexer then adds it
+like any other post. **Update fuckjoin** checks out the latest upstream `main` and restarts that
+program. Python 3.10 or newer and git are required for this list. The pinned commit it starts
+from is `1b28f6ee958c8b9b13578ffb224522a510333e6e`.
+
 ### Local media
 
 Set `LOCAL_MEDIA_DIRS` or add folders in the panel. It lists your videos as films and series,
@@ -498,3 +513,10 @@ jellyfin-telegram is free software, licensed under the
 [GNU General Public License v3.0](LICENSE).
 
 This project is not affiliated with Jellyfin or Telegram.
+
+## Thanks
+
+News channels open bot links with [fuckjoin](https://github.com/AmirHBuilds/fuckjoin),
+built by [AmirHosein Najafi](https://github.com/AmirHBuilds) ([amirhosein-najafi.com](https://amirhosein-najafi.com)).
+Thank you for making that tool and publishing it under the MIT license. This project checks out
+his repository and runs it. It does not ship a copy of the source.

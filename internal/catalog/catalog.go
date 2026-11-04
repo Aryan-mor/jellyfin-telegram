@@ -78,6 +78,10 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply source schema: %w", err)
 	}
+	if _, err := db.Exec(newsSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply news schema: %w", err)
+	}
 	return &Catalog{db: db}, nil
 }
 

@@ -393,7 +393,7 @@ func TestChannelsTab(t *testing.T) {
 }
 
 func TestPageHasTheChannelsAndProviderTabs(t *testing.T) {
-	for _, want := range []string{`id="tab-sources"`, `data-tab="sources"`, `id="src-list"`, `id="src-back"`, "@id_bot", "@getidsbot", "/panel/sources/", `id="tab-provider"`, "Coming soon", `id="tab-telegram"`, `id="acct-sessions"`} {
+	for _, want := range []string{`id="tab-sources"`, `data-tab="sources"`, `id="tab-news"`, `data-tab="news"`, `id="src-list"`, `id="news-list"`, `id="news-recent"`, `id="src-back"`, `id="nw-back"`, "@id_bot", "@getidsbot", "/panel/sources/", `id="tab-provider"`, "Coming soon", `id="tab-telegram"`, `id="acct-sessions"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page lacks %s", want)
 		}

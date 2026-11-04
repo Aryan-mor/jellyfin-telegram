@@ -229,7 +229,8 @@ details.grp .cat-body { padding:0 12px 4px; }
       <div class="group">Access</div>
       <button type="button" data-tab="away"><svg class="i"><use href="#i-globe"/></svg>Away from home</button>
       <button type="button" data-tab="downloads"><svg class="i"><use href="#i-down"/></svg>Torrents</button>
-      <button type="button" data-tab="sources" hidden><svg class="i"><use href="#i-chan"/></svg>Channels</button>
+      <button type="button" data-tab="sources" hidden><svg class="i"><use href="#i-chan"/></svg>Direct files</button>
+      <button type="button" data-tab="news" hidden><svg class="i"><use href="#i-chan"/></svg>News channels</button>
       <button type="button" data-tab="provider" hidden><svg class="i"><use href="#i-bot"/></svg>Bot provider</button>
     </nav>
     </div>
@@ -427,7 +428,7 @@ details.grp .cat-body { padding:0 12px 4px; }
 
     <!-- Channels -->
     <section id="tab-sources" hidden>
-      <div class="page-head"><h1>Channels</h1><p>Give the signed-in Telegram account other channels to read. Films and series found there are copied into your library channel by Telegram itself, so nothing is downloaded to this computer and no disk space is used. Jellyfin then picks them up like any other post. It is off until you turn it on.</p></div>
+      <div class="page-head"><h1>Direct file channels</h1><p>Give the signed-in Telegram account other channels that post the film itself. Films and series are copied into your library channel by Telegram, so nothing is downloaded here. Jellyfin indexes them on the next check. This list is off until you turn it on. Channels that only post a download link belong on the News channels tab, which has its own rules.</p></div>
       <div class="card">
         <div class="item" style="padding:0;border:0">
           <div class="main"><div class="title" id="src-switch-label">Off</div><div class="meta" id="src-switch-meta"></div></div>
@@ -484,6 +485,54 @@ details.grp .cat-body { padding:0 12px 4px; }
       <div class="card"><h2>Recent</h2><div id="src-recent" class="list"></div></div>
     </section>
 
+    <!-- News channels -->
+    <section id="tab-news" hidden>
+      <div class="page-head"><h1>News channels</h1><p>These channels post a bot link instead of the film. The account you pick below reads the post, fuckjoin opens the link, and a video that passes the rules on this tab is forwarded into your library channel. Jellyfin indexes it on the next check. The rules here are separate from Direct files.</p></div>
+      <div class="card">
+        <div class="item" style="padding:0;border:0">
+          <div class="main"><div class="title" id="news-switch-label">Off</div><div class="meta" id="news-switch-meta"></div></div>
+          <button id="news-toggle" class="switch" type="button" role="switch" aria-checked="false" aria-label="Open bot links from news channels"></button>
+        </div>
+        <div id="news-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Account</h2>
+        <p>Use an account that is already signed in, or add a different one. Adding one uses the same sign-in as the Telegram account tab.</p>
+        <div id="news-accounts" class="list"></div>
+        <div class="actions" style="margin-top:14px"><button id="news-add-account" class="btn" type="button">Add account</button></div>
+      </div>
+      <div class="card">
+        <h2>Add a channel</h2>
+        <div class="field"><label for="news-input">Channel id or username</label><input id="news-input" type="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="@newschannel or -100…"></div>
+        <div class="actions"><button id="news-add" class="btn" type="button">Add news channel</button></div>
+        <div id="news-list" class="list"></div>
+      </div>
+      <div class="card">
+        <h2>What to open</h2>
+        <div class="cols">
+          <div class="field"><label for="nw-back">Look back</label><span class="hint">How far the first check goes</span><select id="nw-back"></select></div>
+          <div class="field"><label for="nw-every">Check every, minutes</label><span class="hint">At least 5</span><input id="nw-every" inputmode="numeric"></div>
+          <div class="field"><label for="nw-minmin">Shortest video, minutes</label><span class="hint">0 for no limit</span><input id="nw-minmin" inputmode="numeric"></div>
+          <div class="field"><label for="nw-minmb">Smallest file, MB</label><span class="hint">0 for no limit</span><input id="nw-minmb" inputmode="numeric"></div>
+          <div class="field"><label for="nw-maxgb">Largest file, GB</label><span class="hint">0 for no limit</span><input id="nw-maxgb" inputmode="numeric"></div>
+          <div class="field"><label for="nw-day">Most videos per day</label><span class="hint">0 for no limit</span><input id="nw-day" inputmode="numeric"></div>
+          <div class="field"><label for="nw-pause">Seconds between links</label><span class="hint">0 for none</span><input id="nw-pause" inputmode="numeric"></div>
+        </div>
+        <div class="field"><label for="nw-skip">Skip names or captions with these words</label><input id="nw-skip" autocomplete="off" spellcheck="false" placeholder="trailer,teaser,sample"></div>
+        <div class="field"><label for="nw-only">Only keep names or captions with one of these words</label><input id="nw-only" autocomplete="off" spellcheck="false" placeholder="1080p,dubbed"></div>
+        <div class="rule-row">
+          <div><strong>Only files that look like a film or an episode</strong><div class="sum-meta">The name must show a year, or a season and episode number such as S01E02.</div></div>
+          <button id="nw-need" class="switch" type="button" role="switch" aria-checked="false" aria-label="Only films and episodes by name"></button>
+        </div>
+        <div class="actions">
+          <button id="nw-save" class="btn" type="button">Save rules</button>
+          <button id="news-update" class="btn ghost sm" type="button">Update fuckjoin</button>
+        </div>
+        <div id="nw-rules-msg" class="alert"></div>
+      </div>
+      <div class="card"><h2>Recent</h2><div id="news-recent" class="list"></div></div>
+    </section>
+
     <!-- Bot provider -->
     <section id="tab-provider" hidden>
       <div class="page-head"><h1>Bot provider</h1><p>Ready-made reading bots, so you do not have to create them yourself.</p></div>
@@ -530,7 +579,7 @@ details.grp .cat-body { padding:0 12px 4px; }
 const embedded = "__PANEL_CODE__";
 const code = new URLSearchParams(location.search).get('code') || embedded;
 const $ = id => document.getElementById(id);
-const tabs = ['overview', 'accounts', 'telegram', 'local', 'bots', 'api', 'channel', 'away', 'downloads', 'sources', 'provider'];
+const tabs = ['overview', 'accounts', 'telegram', 'local', 'bots', 'api', 'channel', 'away', 'downloads', 'sources', 'news', 'provider'];
 const api = async (path, body) => {
   const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const data = await res.json().catch(() => ({}));
@@ -569,7 +618,7 @@ function show(name) {
   document.title = (label ? label.textContent.trim() + ' · ' : '') + 'jellyfin-telegram';
   window.scrollTo(0, 0);
   if (name === 'local') loadLocal(true);
-  if (name === 'sources') loadSources(true);
+  if (name === 'sources' || name === 'news') loadSources(true);
 }
 
 function drawAccounts(s) {
@@ -666,6 +715,7 @@ function draw(s) {
   document.querySelector('[data-tab="downloads"]').hidden = !s.downloads || !signedIn;
   document.querySelector('[data-tab="local"]').hidden = !s.local;
   document.querySelector('[data-tab="sources"]').hidden = !s.sources || !signedIn;
+  document.querySelector('[data-tab="news"]').hidden = !s.sources || !signedIn;
   $('st-dl-tile').hidden = !s.downloads;
   drawDownloads(s.downloads);
 }
@@ -810,11 +860,16 @@ const loginCopy = {
 };
 let loginStep = 'phone';
 let loginBusy = false;
+let loginTarget = 'account';
+let loginPhone = '';
 function showLoginStep(step) {
   loginStep = step;
   const c = loginCopy[step];
   $('login-title').textContent = c.title;
   $('login-help').textContent = c.help;
+  if (loginTarget === 'fuckjoin' && step === 'phone') {
+    $('login-help').textContent = 'This number is the account already chosen for news channels. Change it to open links with a different account. Telegram sends nothing until you press the button.';
+  }
   $('login-next').textContent = c.button;
   const input = $('login-input');
   input.type = c.type; input.inputMode = c.mode; input.autocomplete = c.auto; input.placeholder = c.hint; input.value = '';
@@ -826,14 +881,23 @@ function showLoginStep(step) {
   input.focus();
 }
 function openLogin() {
+  loginTarget = 'account';
   say('login-msg', '');
   $('login-modal').hidden = false;
   showLoginStep('phone');
 }
+function openNewsLogin(phone) {
+  loginTarget = 'fuckjoin';
+  loginPhone = phone || '';
+  say('login-msg', '');
+  $('login-modal').hidden = false;
+  showLoginStep('phone');
+  if (loginPhone) $('login-input').value = loginPhone;
+}
 async function closeLogin(cancelServer) {
   $('login-modal').hidden = true;
   $('login-input').value = '';
-  if (cancelServer && loginStep !== 'phone') {
+  if (cancelServer && loginStep !== 'phone' && loginTarget === 'account') {
     try { await api('/panel/downloads/login', {cancel:true}); } catch (e) {}
   }
 }
@@ -847,12 +911,20 @@ async function nextLogin() {
   busy($('login-next'), true);
   say('login-msg', loginStep === 'phone' ? 'Asking Telegram to send a code…' : 'Checking with Telegram…');
   const failedAt = loginStep;
+  const path = loginTarget === 'fuckjoin'
+    ? '/panel/sources/news_' + (loginStep === 'phone' ? 'phone' : loginStep === 'code' ? 'code' : 'password')
+    : '/panel/downloads/login';
+  if (loginStep === 'phone') loginPhone = value;
   try {
-    const res = await api('/panel/downloads/login', body);
+    const res = await api(path, body);
     if (res.step === 'done') {
+      const target = loginTarget;
       await closeLogin(false);
-      // The account stays signed in even when it cannot post yet. The list shows why.
-      if (res.warning) say('acct-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
+      if (target === 'fuckjoin') {
+        say('news-msg', 'Signed in for news channels.', 'ok');
+        toast('Signed in');
+        loadSources(true);
+      } else if (res.warning) say('acct-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
       else { say('acct-msg', 'Signed in.', 'ok'); toast('Signed in'); }
       draw(await api('/panel/state'));
     } else {
@@ -1238,6 +1310,7 @@ function drawSources(v, force) {
     recent.append(row);
   }
   if (!(v.recent || []).length) recent.append(el('div', 'empty', 'Nothing copied yet.'));
+  drawNews(v.news || {});
 }
 $('src-toggle').onclick = async () => {
   const on = $('src-toggle').getAttribute('aria-checked') !== 'true';
@@ -1274,7 +1347,160 @@ $('src-save').onclick = async () => {
   } catch (e) { say('src-rules-msg', e.message, 'bad'); }
 };
 $('src-signin').onclick = openLogin;
-setInterval(() => { if (!document.hidden && !$('tab-sources').hidden && $('login-modal').hidden) loadSources(false); }, 5000);
+let nwDirty = false;
+const nwFields = {look_back_days:'nw-back', every_minutes:'nw-every', min_minutes:'nw-minmin', min_mb:'nw-minmb', max_gb:'nw-maxgb', max_per_day:'nw-day', pause_seconds:'nw-pause', skip_words:'nw-skip', only_words:'nw-only'};
+function fillNewsRules(set) {
+  const sel = $('nw-back');
+  sel.replaceChildren();
+  const choices = backChoices.slice();
+  const value = set.look_back_days;
+  if (!choices.some(c => c[0] === value)) choices.push([value, value + ' days']);
+  for (const [v, label] of choices) { const o = el('option', '', label); o.value = String(v); sel.append(o); }
+  sel.value = String(value);
+  for (const [key, id] of Object.entries(nwFields)) if (key !== 'look_back_days') $(id).value = set[key] ?? '';
+  $('nw-need').setAttribute('aria-checked', set.need_title ? 'true' : 'false');
+}
+function readNewsRules() {
+  const out = {};
+  for (const [key, id] of Object.entries(nwFields)) out[key] = (key === 'skip_words' || key === 'only_words') ? $(id).value.trim() : Number($(id).value || 0);
+  out.need_title = $('nw-need').getAttribute('aria-checked') === 'true';
+  return out;
+}
+function accountLabel(a) {
+  if (a.username) return '@' + a.username;
+  if (a.phone) return a.phone;
+  return 'user ' + a.user_id;
+}
+function drawNews(n) {
+  const set = n.settings || {};
+  const fj = n.fuckjoin || {};
+  $('news-switch-label').textContent = set.enabled ? 'Opening bot links is on' : 'Opening bot links is off';
+  $('news-toggle').setAttribute('aria-checked', set.enabled ? 'true' : 'false');
+  const bits = [];
+  if (fj.commit) bits.push('fuckjoin ' + fj.commit);
+  if (set.enabled) bits.push(n.running ? 'checking now' : 'waiting for the next check');
+  $('news-switch-meta').textContent = bits.join(' · ');
+  if (n.note) say('news-msg', n.note, '');
+  else if (fj.note) say('news-msg', fj.note, '');
+  if (!nwDirty && set.look_back_days !== undefined) fillNewsRules(set);
+
+  const accounts = $('news-accounts');
+  accounts.replaceChildren();
+  const sessions = n.sessions || [];
+  const chosen = set.user_id || (sessions.length === 1 ? sessions[0].user_id : 0);
+  for (const a of sessions) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    main.append(el('div', '', accountLabel(a)));
+    const meta = el('div', 'meta');
+    if (a.user_id === chosen && chosen) meta.append(pill('used for news', 'ok'));
+    else meta.append('Signed in');
+    main.append(meta);
+    const use = el('button', 'btn ghost sm', a.user_id === chosen && chosen ? 'In use' : 'Use');
+    use.type = 'button';
+    use.disabled = a.user_id === chosen && chosen;
+    use.onclick = async () => {
+      try {
+        await srcApi('news_account', {user_id: a.user_id});
+        say('news-msg', 'News channels use ' + accountLabel(a) + '.', 'ok');
+        loadSources(true);
+      } catch (e) { say('news-msg', e.message, 'bad'); }
+    };
+    row.append(main, use);
+    accounts.append(row);
+  }
+  if (!sessions.length) accounts.append(el('div', 'empty', 'No account yet.'));
+  if (!fj.ready && sessions.length) {
+    const b = el('button', 'btn sm', 'Sign in');
+    b.type = 'button';
+    b.onclick = () => {
+      const a = sessions.find(s => s.user_id === chosen) || sessions[0] || {};
+      openNewsLogin(a.phone || '');
+    };
+    accounts.append(b);
+  }
+
+  const list = $('news-list');
+  list.replaceChildren();
+  for (const src of n.channels || []) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const t = el('div'); t.append(el('div', '', src.title || ('Channel ' + src.channel_id)));
+    const meta = el('div', 'meta');
+    meta.append(src.username ? '@' + src.username : '-100' + src.channel_id);
+    if (src.error) meta.append(pill('problem', 'bad'));
+    else if (!src.enabled) meta.append(pill('paused', 'warn'));
+    else if (src.in_progress) meta.append(pill('going through history', 'accent'));
+    else if (src.last_scan) meta.append(pill('up to date', 'ok'));
+    else meta.append(pill('waiting for the first check', 'accent'));
+    meta.append(src.copied + ' forwarded');
+    t.append(meta);
+    if (src.error) t.append(el('div', 'meta', src.error));
+    main.append(t);
+    const acts = el('div', 'actions'); acts.style.marginTop = '0';
+    const pause = el('button', 'btn ghost sm', src.enabled ? 'Pause' : 'Resume'); pause.type = 'button';
+    pause.onclick = async () => { try { await srcApi('news_pause', {id:src.id, enabled:!src.enabled}); loadSources(true); } catch (e) { say('news-msg', e.message, 'bad'); } };
+    const del = el('button', 'btn danger sm', 'Remove'); del.type = 'button';
+    del.onclick = async () => { try { await srcApi('news_remove', {id:src.id}); loadSources(true); } catch (e) { say('news-msg', e.message, 'bad'); } };
+    acts.append(pause, del);
+    row.append(main, acts);
+    list.append(row);
+  }
+  if (!(n.channels || []).length) list.append(el('div', 'empty', 'No news channel yet.'));
+
+  const names = {};
+  for (const src of n.channels || []) names[src.id] = src.title || src.username || String(src.channel_id);
+  const recent = $('news-recent');
+  recent.replaceChildren();
+  const newsState = {done: ['forwarded', 'ok'], skipped: ['skipped', 'warn'], gave_up: ['gave up', 'bad'], fetched: ['forwarding', 'accent'], pending: ['opening', 'accent']};
+  for (const r of n.recent || []) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    main.append(el('div', 'title', r.url));
+    main.append(el('div', 'meta', [names[r.source_id], ago(r.updated), r.detail].filter(Boolean).join(' · ')));
+    const st = newsState[r.state] || [r.state || 'waiting', 'accent'];
+    row.append(main, pill(st[0], st[1]));
+    recent.append(row);
+  }
+  if (!(n.recent || []).length) recent.append(el('div', 'empty', 'Nothing opened yet.'));
+}
+$('news-toggle').onclick = async () => {
+  const on = $('news-toggle').getAttribute('aria-checked') !== 'true';
+  try {
+    await srcApi('news', {enabled:on});
+    say('news-msg', on ? 'On. Bot links are opened on the next check.' : 'Off. Files already forwarded stay.', 'ok');
+    loadSources(true);
+  } catch (e) { say('news-msg', e.message, 'bad'); }
+};
+$('news-add-account').onclick = () => openLogin();
+$('news-add').onclick = async () => {
+  const value = $('news-input').value.trim();
+  if (!value) { say('news-msg', 'Enter a channel id or username.', 'bad'); return; }
+  try {
+    await srcApi('news_add', {channel:value});
+    $('news-input').value = '';
+    say('news-msg', 'Added.', 'ok');
+    loadSources(true);
+  } catch (e) { say('news-msg', e.message, 'bad'); }
+};
+$('nw-need').onclick = () => { $('nw-need').setAttribute('aria-checked', $('nw-need').getAttribute('aria-checked') === 'true' ? 'false' : 'true'); nwDirty = true; };
+document.querySelectorAll('#tab-news .cols input, #tab-news .cols select, #nw-skip, #nw-only').forEach(n => { n.addEventListener('input', () => { nwDirty = true; }); });
+$('nw-save').onclick = async () => {
+  try {
+    await srcApi('news_settings', readNewsRules());
+    nwDirty = false;
+    say('nw-rules-msg', 'Saved.', 'ok'); toast('News rules saved');
+    loadSources(true);
+  } catch (e) { say('nw-rules-msg', e.message, 'bad'); }
+};
+$('news-update').onclick = async () => {
+  busy($('news-update'), true);
+  say('news-msg', 'Fetching the latest fuckjoin…');
+  try { const res = await srcApi('news_update'); say('news-msg', 'Updated to ' + (res.commit || 'the latest commit') + '.', 'ok'); loadSources(true); }
+  catch (e) { say('news-msg', e.message, 'bad'); }
+  busy($('news-update'), false);
+};
+setInterval(() => { if (!document.hidden && (!$('tab-sources').hidden || !$('tab-news').hidden) && $('login-modal').hidden) loadSources(false); }, 5000);
 
 show(location.hash.slice(1) || 'overview');
 api('/panel/state').then(draw).catch(e => { toast(e.message, true); say('bot-msg', e.message, 'bad'); });
