@@ -169,12 +169,13 @@ playback alone.
    ./jellyfin-telegram          # Windows: .\jellyfin-telegram.exe
    ```
 
-2. Open the address it prints, normally `http://127.0.0.1:8097`.
+2. Open the address it prints. It looks like `http://127.0.0.1:8097/setup?code=...`, where the code
+   is one-time and different on every start. A browser tab usually opens by itself.
 3. Enter `api_id`, `api_hash`, the channel link and your bot tokens. The page checks every bot
    against the channel and writes `.env` for you.
 4. Wait while it downloads Jellyfin 12.4, starts it, creates the libraries and signs in. The
    Jellyfin password is saved in `DATA_DIR/jellyfin/credentials.json`.
-5. Open `http://127.0.0.1:8097` for Jellyfin and `http://127.0.0.1:8097/panel` for the panel.
+5. After setup, `http://127.0.0.1:8097` is Jellyfin and `http://127.0.0.1:8097/panel` is the panel.
 
 Upload a video to the channel and within about a minute it is in your library.
 
