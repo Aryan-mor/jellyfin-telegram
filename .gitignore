@@ -1,11 +1,21 @@
 # Secrets and sessions
 .env
-data/
+/data/
 
 # Generated library
-library/
+/library/
 
 # Build output
 /jellyfin-telegram
 /jellyfin-telegram.exe
 /bin/
+
+# Local tool settings
+.claude/
+
+# OS and editor files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.log

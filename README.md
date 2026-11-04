@@ -1,3 +1,14 @@
+<p align="center">
+  <img src="docs/images/banner.svg" alt="jellyfin-telegram" width="100%">
+</p>
+
+<p align="center">
+  <a href="go.mod"><img alt="Go version" src="https://img.shields.io/github/go-mod/go-version/Aryan-mor/jellyfin-telegram?logo=go"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/license-GPL--3.0-blue.svg"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux-lightgrey">
+  <a href="CONTRIBUTING.md"><img alt="PRs welcome" src="https://img.shields.io/badge/PRs-welcome-brightgreen.svg"></a>
+</p>
+
 # jellyfin-telegram
 
 Use a private Telegram channel as the storage for your Jellyfin library, with **stock Jellyfin**:
@@ -7,16 +18,24 @@ Jellyfin sees a normal library of `.strm` files. Each file points at one message
 When you press play, this service reads the video from Telegram through a pool of bots and hands
 it to Jellyfin as an ordinary HTTP stream, with seeking.
 
-```text
-Telegram channel  <--MTProto, bot pool-->  jellyfin-telegram  <--HTTP ranges-->  Jellyfin and clients
-                                                   |
-                                                   +--> library/Movies, library/Shows (.strm files)
-```
+<p align="center">
+  <img src="docs/images/architecture.svg" alt="How jellyfin-telegram connects Telegram and Jellyfin" width="90%">
+</p>
 
 It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database server.
 
+## Features
+
+- Stock Jellyfin: any official client works, nothing to patch
+- Parallel bot pool for fast reads, with HTTP range support and seeking
+- Zero-config setup page that downloads and configures a private Jellyfin for you
+- Everything on one port (8097): Jellyfin, streams, setup page and web panel
+- Automatic Movies/Shows naming with TMDB matching
+- Subtitle detection, online fetching and one-time extraction of embedded tracks
+- Optional Seerr, Fladder, torrent download chain, channel forwarding and local media upload
 ## Contents
 
+- [Features](#features)
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
 - [Install](#install) ([Windows](#windows), [Linux](#linux), [Docker for the extras](#docker-for-the-extras))
@@ -31,6 +50,9 @@ It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database
 - [Commands](#commands)
 - [Limits](#limits)
 - [Development](#development)
+- [Contributing](#contributing)
+- [Security](#security)
+- [License](#license)
 
 ## What you get
 
@@ -428,3 +450,20 @@ with only Telegram replaced by a fake that counts reads.
 
 See [docs/architecture.md](docs/architecture.md) for the design and the measured Jellyfin
 behaviour.
+
+## Contributing
+
+Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the
+[Code of Conduct](CODE_OF_CONDUCT.md). Bug reports and feature requests go in
+[GitHub Issues](https://github.com/Aryan-mor/jellyfin-telegram/issues).
+
+## Security
+
+Please do not report vulnerabilities in public issues. See [SECURITY.md](SECURITY.md).
+
+## License
+
+jellyfin-telegram is free software, licensed under the
+[GNU General Public License v3.0](LICENSE).
+
+This project is not affiliated with Jellyfin or Telegram.
