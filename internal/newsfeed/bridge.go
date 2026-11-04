@@ -76,6 +76,9 @@ func (b *Bridge) Open(ctx context.Context, rawURL string) ([]tguser.Post, error)
 		if time.Now().After(deadline) {
 			return nil, errors.New("fuckjoin did not finish in time")
 		}
+		if b.FJ != nil && !b.FJ.View().Running {
+			return nil, errors.New("fuckjoin stopped before it finished the link")
+		}
 		if err := b.step(ctx); err != nil {
 			return nil, err
 		}

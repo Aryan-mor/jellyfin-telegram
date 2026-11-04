@@ -487,7 +487,10 @@ func (r *Runtime) start() error {
 const driveScript = `"""Run fuckjoin and post queued links from this same session."""
 import asyncio
 import os
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
 from telethon import TelegramClient
 import runpy

@@ -1642,6 +1642,7 @@ function drawNews(n) {
     if (src.error) meta.append(pill('problem', 'bad'));
     else if (!src.enabled) meta.append(pill('paused', 'warn'));
     else if (src.in_progress) meta.append(pill('going through history', 'accent'));
+    else if (n.running && !src.last_scan) meta.append(pill('checking now', 'accent'));
     else if (src.last_scan) meta.append(pill('up to date', 'ok'));
     else meta.append(pill('waiting for the first check', 'accent'));
     meta.append(src.copied + ' forwarded');
