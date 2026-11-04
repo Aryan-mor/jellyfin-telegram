@@ -14,6 +14,6 @@
   <path d="M410 90 L470 205 L350 205 Z" fill="url(#jf)"/>
   <path d="M410 135 L440 190 L380 190 Z" fill="#101827"/>
   <text x="530" y="140" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="60" font-weight="700" fill="#f8fafc">jellyfin-telegram</text>
-  <text x="532" y="192" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="26" fill="#cbd5e1">Stream your Jellyfin library from a private Telegram channel</text>
+  <text x="532" y="192" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="26" fill="#cbd5e1">Stream your Jellyfin library from Telegram</text>
   <text x="532" y="232" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#94a3b8">Stock Jellyfin &#183; bot pool &#183; seeking &#183; subtitles &#183; one Go binary</text>
 </svg>
