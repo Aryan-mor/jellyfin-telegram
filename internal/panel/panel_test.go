@@ -239,3 +239,38 @@ func TestATunnelOnThisMachineIsNotTrusted(t *testing.T) {
 		}
 	}
 }
+
+func TestPageHasTheThreeStepSignInModal(t *testing.T) {
+	for _, want := range []string{`id="login-modal"`, `data-step="phone"`, `data-step="code"`, `data-step="password"`, `id="dl-add"`} {
+		if !strings.Contains(page, want) {
+			t.Errorf("the page lacks %s", want)
+		}
+	}
+	if strings.Contains(page, `id="dl-code"`) || strings.Contains(page, `id="dl-password"`) {
+		t.Error("the old single form is still there")
+	}
+}
+
+func TestStateListsHowToSignInToEachApp(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{Code: "secret", EnvPath: path, Accounts: func() []Account {
+		return []Account{{App: "Jellyfin", Path: "/", User: "admin", Password: "pw"}, {App: "Fladder", Path: "/fladder/"}}
+	}})
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panel/state?code=secret", nil))
+	var got struct {
+		Accounts []Account `json:"accounts"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Accounts) != 2 || got.Accounts[0].User != "admin" || got.Accounts[0].Password != "pw" || got.Accounts[1].User != "" {
+		t.Fatalf("accounts %+v", got.Accounts)
+	}
+	if !strings.Contains(page, `data-tab="accounts"`) || !strings.Contains(page, `id="accounts"`) {
+		t.Error("the page has no Sign in tab")
+	}
+}

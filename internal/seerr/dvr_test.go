@@ -36,6 +36,16 @@ func TestApplyDVROnce(t *testing.T) {
 			if !strings.HasSuffix(r.URL.Path, "/0") {
 				t.Fatal(r.URL.Path)
 			}
+			// The real server refuses an id in the body as read-only, so this one does too.
+			var got map[string]any
+			_ = json.Unmarshal(body, &got)
+			if _, has := got["id"]; has {
+				w.WriteHeader(http.StatusBadRequest)
+				_, _ = w.Write([]byte(`{"message":"request/body/id is read-only"}`))
+				return
+			}
+			got["id"] = 0
+			radarr[0] = got
 			w.WriteHeader(http.StatusOK)
 		case http.MethodDelete:
 			radarr = nil
@@ -54,6 +64,15 @@ func TestApplyDVROnce(t *testing.T) {
 	}
 	if len(radarr) != 1 {
 		t.Fatalf("rows %d", len(radarr))
+	}
+	// Moving Radarr to another address must change the saved server, not add a second one.
+	one[0].Hostname = "jellyfin-telegram-radarr"
+	one[0].Port = 7878
+	if err := ApplyDVR(context.Background(), srv.URL, "key", one); err != nil {
+		t.Fatal(err)
+	}
+	if len(radarr) != 1 || radarr[0]["hostname"] != "jellyfin-telegram-radarr" || radarr[0]["port"] != float64(7878) {
+		t.Fatalf("the server was not moved: %v", radarr)
 	}
 	if err := RemoveDVR(context.Background(), srv.URL, "key"); err != nil {
 		t.Fatal(err)

@@ -102,7 +102,12 @@ func (m *Manager) Connect(ctx context.Context) error {
 	}
 	for _, e := range entries {
 		name := e.Name()
-		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, "pending-") || strings.HasSuffix(name, ".tmp") {
+		// A sign-in cannot continue after a restart. What it left may hold a login key, so it goes.
+		if !e.IsDir() && strings.HasPrefix(name, "pending-") {
+			_ = os.Remove(filepath.Join(m.dir, name))
+			continue
+		}
+		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasSuffix(name, ".tmp") {
 			continue
 		}
 		id, err := strconv.ParseInt(strings.TrimSuffix(name, ".json"), 10, 64)
@@ -137,28 +142,52 @@ func (m *Manager) start(parent context.Context, store *fileStore, meta Meta) {
 	go m.serve(ctx, lv)
 }
 
-// errNotAdmin ends a session for good. Retrying cannot give the account the right back.
+// errNotAdmin means the account cannot post in the channel right now. The session is kept and
+// checked again, because the account can be made an admin at any time.
 var errNotAdmin = errors.New("this account is not a channel admin with permission to post")
 
-// serve keeps one account connected. A dropped connection is tried again with a growing delay.
-// A revoked session or a lost admin right is not, because waiting does not fix either.
+const (
+	reconnectStart = 5 * time.Second
+	reconnectMax   = 5 * time.Minute
+	// notAdminEvery is how often an account without access is checked again.
+	notAdminEvery = 2 * time.Minute
+)
+
+// reconnectWait says how long to wait before the next try, what the delay becomes, and whether to
+// give up. Only a revoked session is final. A dropped connection is retried with a growing delay,
+// and a missing admin right is checked again at a steady pace until someone grants it.
+func reconnectWait(err error, delay time.Duration) (sleep, next time.Duration, stop bool) {
+	switch {
+	case fatalAuth(err):
+		return 0, delay, true
+	case errors.Is(err, errNotAdmin):
+		return notAdminEvery, delay, false
+	}
+	return delay, min(delay*2, reconnectMax), false
+}
+
+// serve keeps one account connected. The session stays on the panel with its error while it waits.
 func (m *Manager) serve(ctx context.Context, lv *live) {
-	delay := 5 * time.Second
+	delay := reconnectStart
 	for ctx.Err() == nil {
 		began := time.Now()
 		err := m.serveOnce(ctx, lv)
-		if ctx.Err() != nil || fatalAuth(err) || errors.Is(err, errNotAdmin) {
+		if ctx.Err() != nil {
 			return
 		}
 		if time.Since(began) > time.Minute {
-			delay = 5 * time.Second
+			delay = reconnectStart
 		}
+		sleep, next, stop := reconnectWait(err, delay)
+		if stop {
+			return
+		}
+		delay = next
 		select {
 		case <-ctx.Done():
 			return
-		case <-time.After(delay):
+		case <-time.After(sleep):
 		}
-		delay = min(delay*2, 5*time.Minute)
 	}
 }
 

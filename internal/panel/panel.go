@@ -54,6 +54,8 @@ type Options struct {
 	// Seerr and Fladder are true when those apps are served on this gateway.
 	Seerr   bool
 	Fladder bool
+	// Accounts lists how to sign in to each app that runs here. It may be nil.
+	Accounts func() []Account
 	// Downloads reports the automatic download stack. Nil hides that tab's actions.
 	Downloads func(context.Context) (any, error)
 	// DownloadDo runs one panel action: login, logout, enable or pace.
@@ -114,6 +116,15 @@ type address struct {
 	Away bool   `json:"away"`
 }
 
+// Account is how to sign in to one app. An empty User means the app uses an account the person already has.
+type Account struct {
+	App      string `json:"app"`
+	Path     string `json:"path"`
+	User     string `json:"user,omitempty"`
+	Password string `json:"password,omitempty"`
+	Note     string `json:"note,omitempty"`
+}
+
 type botView struct {
 	ID        int64  `json:"id"`
 	Name      string `json:"name"`
@@ -133,6 +144,7 @@ type state struct {
 	Seerr     bool      `json:"seerr"`
 	Fladder   bool      `json:"fladder"`
 	Downloads any       `json:"downloads,omitempty"`
+	Accounts  []Account `json:"accounts"`
 }
 
 func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
@@ -448,7 +460,10 @@ func (p *panel) snapshot() (state, error) {
 			live[b.ID] = b
 		}
 	}
-	s := state{APIID: cur.apiID, ChannelID: cur.channel, Language: cur.language, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder}
+	s := state{APIID: cur.apiID, ChannelID: cur.channel, Language: cur.language, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}}
+	if p.o.Accounts != nil {
+		s.Accounts = p.o.Accounts()
+	}
 	for _, token := range cur.tokens {
 		id, _ := config.BotID(token)
 		view := botView{ID: id, Name: "bot " + strconv.FormatInt(id, 10), Hint: hint(token)}

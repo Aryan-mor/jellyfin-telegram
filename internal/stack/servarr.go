@@ -103,21 +103,28 @@ func (a App) profiles(ctx context.Context) (Profile, error) {
 	if err := a.call(ctx, http.MethodGet, "/api/v3/qualityprofile", nil, &list); err != nil {
 		return Profile{}, err
 	}
+	// Only the profile Seerr will use is changed. The default "Ultra-HD" profile allows nothing but
+	// 2160p, so switching 2160p off would leave it empty, which the apps refuse.
 	var picked Profile
+	var chosen map[string]any
 	for _, profile := range list {
-		profile["upgradeAllowed"] = false
-		disallowHeavy(profile["items"])
-		id := int(number(profile["id"]))
-		if err := a.call(ctx, http.MethodPut, fmt.Sprintf("/api/v3/qualityprofile/%d", id), profile, nil); err != nil {
-			return Profile{}, err
-		}
 		name, _ := profile["name"].(string)
+		id := int(number(profile["id"]))
 		if picked.ID == 0 || preferProfile(name, picked.Name) {
-			picked = Profile{ID: id, Name: name}
+			picked, chosen = Profile{ID: id, Name: name}, profile
 		}
 	}
-	if picked.ID == 0 {
+	if chosen == nil {
 		return Profile{}, fmt.Errorf("%s has no quality profile", a.Kind)
+	}
+	chosen["upgradeAllowed"] = false
+	disallowHeavy(chosen["items"])
+	if !anyAllowed(chosen["items"]) {
+		return Profile{}, fmt.Errorf("the %s profile %q allows nothing but 2160p or Remux, so it cannot be used", a.Kind, picked.Name)
+	}
+	fixCutoff(chosen)
+	if err := a.call(ctx, http.MethodPut, fmt.Sprintf("/api/v3/qualityprofile/%d", picked.ID), chosen, nil); err != nil {
+		return Profile{}, err
 	}
 	return picked, nil
 }
@@ -152,8 +159,9 @@ func (a App) sizes(ctx context.Context, capMB, runtimeMin float64) error {
 	limit := capMB / runtimeMin
 	for _, item := range items {
 		item["maxSize"] = limit
-		if preferred := number(item["preferredSize"]); preferred > limit {
-			item["preferredSize"] = limit
+		// The preferred size has to stay below the maximum, or the update is ignored.
+		if preferred := number(item["preferredSize"]); preferred > limit*0.9 {
+			item["preferredSize"] = limit * 0.9
 		}
 		if number(item["minSize"]) > limit {
 			item["minSize"] = 0
@@ -214,7 +222,7 @@ func (a App) indexer(ctx context.Context, rawURL string) error {
 	for _, item := range list {
 		if item["name"] == "Bitmagnet" {
 			id = int(number(item["id"]))
-			enabled, _ = item["enable"].(bool)
+			enabled, _ = item["enableAutomaticSearch"].(bool)
 		}
 	}
 	if id == 0 {
@@ -252,7 +260,10 @@ func indexerBody(kind, rawURL string, enable bool) map[string]any {
 		categories = []int{5000, 5010, 5020, 5030, 5040, 5045, 5050, 5060}
 	}
 	return map[string]any{
-		"enable": enable, "protocol": "torrent", "priority": 25, "name": "Bitmagnet",
+		// Radarr and Sonarr no longer have one "enable" switch. Without these three keys the indexer
+		// is saved but never used for RSS, automatic search or interactive search.
+		"enableRss": enable, "enableAutomaticSearch": enable, "enableInteractiveSearch": enable,
+		"protocol": "torrent", "priority": 25, "name": "Bitmagnet",
 		"implementation": "Torznab", "implementationName": "Torznab", "configContract": "TorznabSettings",
 		"fields": []map[string]any{
 			{"name": "baseUrl", "value": rawURL},
@@ -281,6 +292,41 @@ func disallowHeavy(v any) {
 			disallowHeavy(child)
 		}
 	}
+}
+
+// fixCutoff moves the cutoff to the best quality still allowed. Radarr and Sonarr refuse a profile
+// whose cutoff was just switched off, and the default profiles cut off at 2160p or a Remux.
+func fixCutoff(profile map[string]any) {
+	items, _ := profile["items"].([]any)
+	cutoff := number(profile["cutoff"])
+	best := -1.0
+	for _, raw := range items {
+		item, _ := raw.(map[string]any)
+		if item == nil || item["allowed"] != true {
+			continue
+		}
+		id := number(item["id"])
+		if q, ok := item["quality"].(map[string]any); ok {
+			id = number(q["id"])
+		}
+		if id == cutoff {
+			return
+		}
+		best = id
+	}
+	if best >= 0 {
+		profile["cutoff"] = best
+	}
+}
+
+func anyAllowed(items any) bool {
+	list, _ := items.([]any)
+	for _, raw := range list {
+		if item, _ := raw.(map[string]any); item != nil && item["allowed"] == true {
+			return true
+		}
+	}
+	return false
 }
 
 func heavy(name string) bool {

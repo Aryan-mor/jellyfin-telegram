@@ -88,8 +88,8 @@ func applyOne(ctx context.Context, c *client, s DVR) error {
 		if item["name"] != s.Name {
 			continue
 		}
+		// The id is part of the address and Seerr refuses it in the body as read-only.
 		id := int(num(item["id"]))
-		body["id"] = id
 		return c.callOK(ctx, http.MethodPut, "/api/v1/settings/"+s.Kind+"/"+strconv.Itoa(id), body, nil)
 	}
 	return c.callOK(ctx, http.MethodPost, "/api/v1/settings/"+s.Kind, body, nil)

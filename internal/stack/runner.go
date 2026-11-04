@@ -19,14 +19,13 @@ import (
 
 // Runner starts the containers and applies their settings.
 type Runner struct {
-	Downloads    string
-	ConfigDir    string
-	SeerrURL     string
-	SeerrKey     string
-	PublicBase   string
-	JellyfinHost string
-	MaxDBGB      int
-	Log          *slog.Logger
+	Downloads  string
+	ConfigDir  string
+	SeerrURL   string
+	SeerrKey   string
+	PublicBase string
+	MaxDBGB    int
+	Log        *slog.Logger
 
 	mu     sync.Mutex
 	status Status
@@ -122,6 +121,8 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 		r.fail(err)
 		return err
 	}
+	// Seerr loses the network whenever its container is made again, so this runs on every pass.
+	linkErr := r.linkSeerr(ctx)
 	r.mu.Lock()
 	skip := r.configured && r.configuredCap == r.capMB
 	capNow := r.capMB
@@ -132,7 +133,8 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 			return err
 		}
 		r.mu.Lock()
-		r.configured, r.configuredCap = true, capNow
+		// A failed Seerr update left a warning, so the next pass has to try again.
+		r.configured, r.configuredCap = r.status.Warning == "", capNow
 		r.mu.Unlock()
 		// configure saved the API keys it read from the containers.
 		if saved, err := r.loadSecrets(); err == nil {
@@ -142,6 +144,9 @@ func (r *Runner) Reconcile(ctx context.Context) error {
 	containers := r.containers(ctx)
 	r.mu.Lock()
 	r.status.Error = ""
+	if linkErr != nil {
+		r.status.Warning = "Seerr cannot reach Radarr and Sonarr: " + linkErr.Error()
+	}
 	r.status.Ready = true
 	r.status.RadarrUser = "admin"
 	r.status.RadarrPassword = sec.RadarrPassword
@@ -192,10 +197,10 @@ func (r *Runner) startAll(ctx context.Context, sec secrets) error {
 	if err := ensureContainer(ctx, QbitName, qbitArgs(r.Downloads, filepath.Join(r.ConfigDir, "qbittorrent"))); err != nil {
 		return err
 	}
-	if err := ensureContainer(ctx, RadarrName, servarrArgs("radarr", RadarrPort, 7878, "/radarr", VolumeRadarr, r.Downloads, sec)); err != nil {
+	if err := ensureContainer(ctx, RadarrName, servarrArgs("radarr", RadarrPort, RadarrInnerPort, "/radarr", VolumeRadarr, r.Downloads, sec)); err != nil {
 		return err
 	}
-	return ensureContainer(ctx, SonarrName, servarrArgs("sonarr", SonarrPort, 8989, "/sonarr", VolumeSonarr, r.Downloads, sec))
+	return ensureContainer(ctx, SonarrName, servarrArgs("sonarr", SonarrPort, SonarrInnerPort, "/sonarr", VolumeSonarr, r.Downloads, sec))
 }
 
 func (r *Runner) configure(ctx context.Context, sec secrets) error {

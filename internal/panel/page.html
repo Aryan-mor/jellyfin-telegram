@@ -35,6 +35,14 @@ button:disabled { opacity:.55; cursor:default; }
 code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; word-break:break-all; }
 .ok { color:var(--ok); } .bad { color:var(--bad); }
 .note { margin-top:12px; }
+.modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
+.modal-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; width:100%; max-width:420px; }
+.steps { display:flex; gap:8px; list-style:none; padding:0; margin:0 0 16px; }
+.steps li { flex:1; text-align:center; padding:6px 4px; border-radius:8px; border:1px solid var(--line); color:var(--muted); font-size:13px; margin:0; }
+.steps li.now { background:var(--accent); color:#fff; border-color:transparent; font-weight:600; }
+.steps li.past { color:var(--ok); border-color:var(--ok); }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
+button.ghost { background:transparent; color:inherit; border:1px solid var(--line); }
 [hidden] { display:none !important; }
 </style>
 </head>
@@ -49,14 +57,21 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     <a id="link-fladder-releases" class="quiet" href="https://github.com/DonutWare/Fladder/releases" target="_blank" rel="noreferrer" hidden>Download other Fladder versions</a>
   </div>
   <nav>
-    <button type="button" data-tab="bots" aria-selected="true">Bots</button>
+    <button type="button" data-tab="accounts" aria-selected="true">Sign in</button>
+    <button type="button" data-tab="bots">Bots</button>
     <button type="button" data-tab="api">Telegram API</button>
     <button type="button" data-tab="channel">Channel</button>
     <button type="button" data-tab="away">Away from home</button>
     <button type="button" data-tab="downloads">Downloads</button>
   </nav>
 
-  <section id="tab-bots">
+  <section id="tab-accounts">
+    <h2>Sign in</h2>
+    <p>The account to use in each app. Share the address of this computer with the people who should watch, and send them to Jellyfin first.</p>
+    <div id="accounts"></div>
+  </section>
+
+  <section id="tab-bots" hidden>
     <h2>Bots</h2>
     <p>A bot is an account that reads the videos. The token is its password. This program never shows the full token again.</p>
     <ol>
@@ -133,13 +148,7 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     <div id="dl-msg" class="note"></div>
     <h2>Accounts</h2>
     <div id="dl-sessions"></div>
-    <label for="dl-phone">Phone number</label>
-    <input id="dl-phone" autocomplete="off" placeholder="+15551212">
-    <label for="dl-code">Code from Telegram</label>
-    <input id="dl-code" autocomplete="one-time-code">
-    <label for="dl-password">Two-step password, if Telegram asks</label>
-    <input id="dl-password" type="password" autocomplete="off">
-    <button id="dl-login" type="button">Continue</button>
+    <button id="dl-add" type="button">Add account</button>
     <h2>Pace</h2>
     <p>These limits apply to every account that does not set its own. They are cautious guesses. Telegram has not published a limit. A flood wait doubles that account's rest until the end of the day.</p>
     <label for="dl-mb">Megabytes per second (0 means no cap)</label>
@@ -161,11 +170,29 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     <div id="dl-queue"></div>
   </section>
 </main>
+
+<div id="login-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="login-title">
+  <div class="modal-card">
+    <ol class="steps" id="login-steps">
+      <li data-step="phone">1 Phone</li>
+      <li data-step="code">2 Code</li>
+      <li data-step="password">3 Password</li>
+    </ol>
+    <h2 id="login-title"></h2>
+    <p id="login-help"></p>
+    <input id="login-input" autocomplete="off" spellcheck="false">
+    <div id="login-msg" class="note"></div>
+    <div class="modal-actions">
+      <button id="login-cancel" class="ghost" type="button">Cancel</button>
+      <button id="login-next" type="button"></button>
+    </div>
+  </div>
+</div>
 <script>
 const embedded = "__PANEL_CODE__";
 const code = new URLSearchParams(location.search).get('code') || embedded;
 const $ = id => document.getElementById(id);
-const tabs = ['bots', 'api', 'channel', 'away', 'downloads'];
+const tabs = ['accounts', 'bots', 'api', 'channel', 'away', 'downloads'];
 const api = async (path, body) => {
   const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const data = await res.json().catch(() => ({}));
@@ -175,7 +202,7 @@ const api = async (path, body) => {
 const say = (id, text, cls) => { const n = $(id); n.textContent = text; n.className = 'note ' + (cls || ''); };
 
 function show(name) {
-  if (!tabs.includes(name)) name = 'bots';
+  if (!tabs.includes(name)) name = 'accounts';
   for (const tab of tabs) {
     $('tab-' + tab).hidden = tab !== name;
     document.querySelector('[data-tab="' + tab + '"]').setAttribute('aria-selected', tab === name ? 'true' : 'false');
@@ -183,7 +210,38 @@ function show(name) {
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
 }
 
+function drawAccounts(s) {
+  const list = (s.accounts || []).slice();
+  // Radarr and Sonarr belong to the downloads feature, so their accounts come from its status.
+  const d = s.downloads;
+  if (d && d.radarr_user) list.push({app:'Radarr', path:'/radarr/', user:d.radarr_user, password:d.radarr_password, note:'Looks for films. Only needed to check on a download.'});
+  if (d && d.sonarr_user) list.push({app:'Sonarr', path:'/sonarr/', user:d.sonarr_user, password:d.sonarr_password, note:'Looks for series. Only needed to check on a download.'});
+  const box = $('accounts');
+  box.replaceChildren();
+  for (const a of list) {
+    const row = document.createElement('div');
+    row.className = 'row';
+    const left = document.createElement('div');
+    const name = document.createElement('a');
+    name.href = a.path; name.textContent = a.app; name.style.fontWeight = '600';
+    const note = document.createElement('small');
+    note.textContent = a.note || '';
+    left.append(name, note);
+    const right = document.createElement('div');
+    if (a.user) {
+      const u = document.createElement('div'); u.append('user '); const uc = document.createElement('code'); uc.textContent = a.user; u.append(uc);
+      const p = document.createElement('div'); p.append('password '); const pc = document.createElement('code'); pc.textContent = a.password; p.append(pc);
+      right.append(u, p);
+    } else {
+      const own = document.createElement('small'); own.textContent = 'your own account'; right.append(own);
+    }
+    row.append(left, right);
+    box.append(row);
+  }
+}
+
 function draw(s) {
+  drawAccounts(s);
   $('api_id').value = s.api_id || '';
   $('language').value = s.language || '';
   if (!$('channel').value) $('channel').placeholder = 'Current channel id ' + s.channel_id;
@@ -311,6 +369,8 @@ function drawDownloads(d) {
   stack.replaceChildren();
   const lines = [];
   if (d.error) lines.push(d.error);
+  if (d.warning) lines.push(d.warning);
+  if (d.search_every_minutes) lines.push(d.last_search > 0 ? 'Looked again for missing titles at ' + new Date(d.last_search * 1000).toLocaleTimeString() + ', then every ' + d.search_every_minutes + ' minutes.' : 'Will look again for missing titles every ' + d.search_every_minutes + ' minutes.');
   if (d.radarr_user) lines.push('Radarr at /radarr/  user '+d.radarr_user+'  password '+d.radarr_password);
   if (d.sonarr_user) lines.push('Sonarr at /sonarr/  user '+d.sonarr_user+'  password '+d.sonarr_password);
   if (d.enabled || (d.containers || []).length) lines.push(d.crawler ? 'Bitmagnet is crawling the DHT.' : 'Bitmagnet search is on. The DHT crawler is paused because the database reached its cap.');
@@ -336,24 +396,82 @@ $('dl-toggle').onclick = async () => {
   try { await api('/panel/automation', {enabled:on}); say('dl-msg', on ? 'Starting. Playback is not interrupted.' : 'Stopped. Files already in the channel still play.', 'ok'); draw(await api('/panel/state')); }
   catch (e) { say('dl-msg', e.message, 'bad'); }
 };
-$('dl-login').onclick = async () => {
-  const body = {};
-  if ($('dl-password').value) body.password = $('dl-password').value;
-  else if ($('dl-code').value) body.code = $('dl-code').value.trim();
-  else body.phone = $('dl-phone').value.trim();
+// Signing in takes up to three steps. Telegram is asked for a code only after the phone number is
+// sent, and for the two-step password only if the account has one.
+const loginCopy = {
+  phone: {title:'Your Telegram phone number', help:'Use the account that is an admin of the channel, with the country code. Telegram sends nothing until you press the button.', button:'Send code', type:'tel', mode:'tel', auto:'tel', hint:'+15551212'},
+  code: {title:'Enter the code', help:'Telegram sent a code to the Telegram app on that account, or by text message. It stays valid for a few minutes.', button:'Confirm code', type:'text', mode:'numeric', auto:'one-time-code', hint:'12345'},
+  password: {title:'Two-step verification', help:'This account has a password. It goes to Telegram only and is not saved here.', button:'Sign in', type:'password', mode:'text', auto:'off', hint:''},
+};
+let loginStep = 'phone';
+let loginBusy = false;
+function showLoginStep(step) {
+  loginStep = step;
+  const c = loginCopy[step];
+  $('login-title').textContent = c.title;
+  $('login-help').textContent = c.help;
+  $('login-next').textContent = c.button;
+  const input = $('login-input');
+  input.type = c.type; input.inputMode = c.mode; input.autocomplete = c.auto; input.placeholder = c.hint; input.value = '';
+  const order = ['phone', 'code', 'password'];
+  document.querySelectorAll('#login-steps li').forEach(li => {
+    const i = order.indexOf(li.dataset.step);
+    li.className = i < order.indexOf(step) ? 'past' : i === order.indexOf(step) ? 'now' : '';
+  });
+  input.focus();
+}
+function openLogin() {
+  say('login-msg', '');
+  $('login-modal').hidden = false;
+  showLoginStep('phone');
+}
+async function closeLogin(cancelServer) {
+  $('login-modal').hidden = true;
+  $('login-input').value = '';
+  if (cancelServer && loginStep !== 'phone') {
+    try { await api('/panel/downloads/login', {cancel:true}); } catch (e) {}
+  }
+}
+async function nextLogin() {
+  if (loginBusy) return;
+  const input = $('login-input');
+  const value = loginStep === 'password' ? input.value : input.value.trim();
+  if (!value) { say('login-msg', 'This field is empty.', 'bad'); return; }
+  const body = loginStep === 'phone' ? {phone:value} : loginStep === 'code' ? {code:value} : {password:value};
+  loginBusy = true;
+  $('login-next').disabled = true;
+  say('login-msg', loginStep === 'phone' ? 'Asking Telegram to send a code…' : 'Checking with Telegram…');
+  const failedAt = loginStep;
   try {
     const res = await api('/panel/downloads/login', body);
-    if (res.step === 'code') say('dl-msg', 'Enter the code Telegram sent.', 'ok');
-    else if (res.step === 'password') say('dl-msg', 'Enter the two-step password.', 'ok');
-    else { say('dl-msg', 'Signed in.', 'ok'); $('dl-code').value = ''; $('dl-password').value = ''; }
-    draw(await api('/panel/state'));
-  } catch (e) { say('dl-msg', e.message, 'bad'); }
-};
+    if (res.step === 'done') {
+      await closeLogin(false);
+      // The account stays signed in even when it cannot post yet. The list shows why.
+      if (res.warning) say('dl-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
+      else say('dl-msg', 'Signed in.', 'ok');
+      draw(await api('/panel/state'));
+    } else {
+      showLoginStep(res.step);
+      say('login-msg', res.step === 'code' ? 'The code was sent. Check Telegram.' : '', 'ok');
+    }
+  } catch (e) {
+    // Telegram ends the sign-in after a wrong code or password, so the next try starts over.
+    if (failedAt !== 'phone') showLoginStep('phone');
+    say('login-msg', e.message + (failedAt !== 'phone' ? ' Start again with the phone number.' : ''), 'bad');
+  }
+  loginBusy = false;
+  $('login-next').disabled = false;
+}
+$('dl-add').onclick = openLogin;
+$('login-next').onclick = nextLogin;
+$('login-cancel').onclick = () => closeLogin(true);
+$('login-input').addEventListener('keydown', e => { if (e.key === 'Enter') nextLogin(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('login-modal').hidden) closeLogin(true); });
 $('dl-save-pace').onclick = async () => {
   try { await api('/panel/downloads/pace', paceBody()); say('dl-msg', 'Pace saved.', 'ok'); }
   catch (e) { say('dl-msg', e.message, 'bad'); }
 };
-show(location.hash.slice(1) || 'bots');
+show(location.hash.slice(1) || 'accounts');
 api('/panel/state').then(draw).catch(e => say('bot-msg', e.message, 'bad'));
 </script>
 </body>

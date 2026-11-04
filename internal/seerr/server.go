@@ -142,6 +142,10 @@ func dockerArgs(goos, configDir, apiKey string) []string {
 		"run", "--rm", "--name", ContainerName, "--init", "--pull", "never",
 		"-e", "API_KEY=" + apiKey,
 		"-e", "LOG_LEVEL=info",
+		// Node gives each connection attempt 250 ms. Reaching this machine through Docker Desktop is
+		// sometimes slower, and Seerr then failed at random with an empty error, even towards Jellyfin.
+		// Turning the attempt race off made all of 6 test runs connect, against 5 of 6 before.
+		"-e", "NODE_OPTIONS=--no-network-family-autoselection",
 		"-v", bindMount(configDir),
 	}
 	if goos == "linux" {

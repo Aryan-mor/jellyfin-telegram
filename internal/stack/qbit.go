@@ -64,10 +64,35 @@ func (q *Qbit) ApplyLimits(ctx context.Context) error {
 func (q *Qbit) EnsureCategory(ctx context.Context, name, savePath string) error {
 	form := url.Values{"category": {name}, "savePath": {savePath}}
 	err := q.form(ctx, "/api/v2/torrents/createCategory", form)
-	if err != nil && strings.Contains(strings.ToLower(err.Error()), "conflict") {
-		return nil
+	if err != nil && strings.Contains(err.Error(), "status 409") {
+		// 409 also means "exists already", which is what a second start finds. Editing an unchanged
+		// category answers 409 too, so what counts is whether the category is there with this path.
+		_ = q.form(ctx, "/api/v2/torrents/editCategory", form)
+		if q.hasCategory(ctx, name, savePath) {
+			return nil
+		}
 	}
 	return err
+}
+
+func (q *Qbit) hasCategory(ctx context.Context, name, savePath string) bool {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, q.Base+"/api/v2/torrents/categories", nil)
+	if err != nil {
+		return false
+	}
+	res, err := q.HTTP.Do(req)
+	if err != nil {
+		return false
+	}
+	defer res.Body.Close()
+	var all map[string]struct {
+		SavePath string `json:"savePath"`
+	}
+	if json.NewDecoder(io.LimitReader(res.Body, 1<<20)).Decode(&all) != nil {
+		return false
+	}
+	got, ok := all[name]
+	return ok && got.SavePath == savePath
 }
 
 // PauseAll stops every torrent. qBittorrent 5 renamed pause to stop.

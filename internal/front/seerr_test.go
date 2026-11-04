@@ -67,3 +67,42 @@ func TestSeerrStaysUnderItsPath(t *testing.T) {
 		t.Errorf("redirect %d %q", res.StatusCode, res.Header.Get("Location"))
 	}
 }
+
+func TestFladderSeerrAPILandsOnSeerr(t *testing.T) {
+	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/auth/me" {
+			t.Errorf("upstream path %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":1}`))
+	}))
+	defer upstream.Close()
+	target, err := url.Parse(upstream.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	jellyfin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("jellyfin saw %s", r.URL.Path)
+	}))
+	defer jellyfin.Close()
+	jellyfinURL, err := url.Parse(jellyfin.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+	srv := httptest.NewServer(Handler(Options{Gateway: gateway, Jellyfin: jellyfinURL, Seerr: target}))
+	defer srv.Close()
+
+	res, err := http.Get(srv.URL + "/api/v1/auth/me")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	body, err := io.ReadAll(res.Body)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.StatusCode != http.StatusOK || string(body) != `{"id":1}` {
+		t.Errorf("status %d body %s", res.StatusCode, body)
+	}
+}

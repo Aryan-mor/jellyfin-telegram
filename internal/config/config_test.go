@@ -188,3 +188,16 @@ func TestSubtitleLanguage(t *testing.T) {
 		t.Errorf("bad code gave %v", err)
 	}
 }
+
+func TestSearchIntervalDefaultAndLimit(t *testing.T) {
+	t.Setenv("DOWNLOADS_SEARCH_EVERY_MINUTES", "")
+	cfg, err := Load(filepath.Join(t.TempDir(), "none.env"))
+	_ = err
+	if cfg.DownloadsSearchEveryMinutes != 60 {
+		t.Errorf("default %d, want 60", cfg.DownloadsSearchEveryMinutes)
+	}
+	t.Setenv("DOWNLOADS_SEARCH_EVERY_MINUTES", "-5")
+	if _, err := Load(filepath.Join(t.TempDir(), "none.env")); err == nil || !strings.Contains(err.Error(), "DOWNLOADS_SEARCH_EVERY_MINUTES") {
+		t.Errorf("a negative interval was accepted: %v", err)
+	}
+}

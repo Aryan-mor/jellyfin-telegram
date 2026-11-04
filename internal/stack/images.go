@@ -22,6 +22,10 @@ const (
 	DHTPort       = 3334
 	PeerPort      = 6881
 
+	// The ports Radarr and Sonarr listen on inside their containers.
+	RadarrInnerPort = 7878
+	SonarrInnerPort = 8989
+
 	// Version tags, not floating latest. Digests are filled in when a pull is pinned.
 	ImageQbit      = "lscr.io/linuxserver/qbittorrent:5.1.2"
 	ImageRadarr    = "lscr.io/linuxserver/radarr:6.4.4"

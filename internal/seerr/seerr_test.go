@@ -176,3 +176,12 @@ func containsSeq(args []string, a, b string) bool {
 	}
 	return false
 }
+
+func TestSeerrDoesNotRaceItsConnectionAttempts(t *testing.T) {
+	for _, goos := range []string{"linux", "windows", "darwin"} {
+		args := dockerArgs(goos, filepath.Join(t.TempDir(), "config"), "k")
+		if !containsSeq(args, "-e", "NODE_OPTIONS=--no-network-family-autoselection") {
+			t.Errorf("%s: Seerr can still fail at random with a connection timeout: %v", goos, args)
+		}
+	}
+}
