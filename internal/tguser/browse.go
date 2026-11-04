@@ -32,6 +32,13 @@ type Channel struct {
 	NoForwards bool
 }
 
+// StartHit is one bot deep link in a channel post. One post can carry several.
+type StartHit struct {
+	ID   int
+	Date time.Time
+	URL  string
+}
+
 // Post is one document in a source channel.
 type Post struct {
 	ID        int
@@ -84,6 +91,35 @@ func ParseChannelRef(input string) (id int64, username string, err error) {
 		return 0, name, nil
 	}
 	return 0, "", errors.New("that is not a channel username, link or id")
+}
+
+type userKey struct{}
+
+// WithUser asks later reads and forwards on this context to use one signed-in account.
+// Zero keeps the usual choice, any free admin.
+func WithUser(ctx context.Context, id int64) context.Context {
+	if id == 0 {
+		return ctx
+	}
+	return context.WithValue(ctx, userKey{}, id)
+}
+
+func (m *Manager) pick(ctx context.Context) (*live, error) {
+	id, _ := ctx.Value(userKey{}).(int64)
+	if id == 0 {
+		return m.idle()
+	}
+	lv, _, err := m.get(id)
+	if err != nil {
+		return nil, errors.New("that account is not signed in")
+	}
+	if !lv.connected.Load() {
+		return nil, errors.New("that account is not connected")
+	}
+	if lv.busy.Load() {
+		return nil, ErrNoFreeSession
+	}
+	return lv, nil
 }
 
 // idle picks a healthy session that is not uploading.
@@ -152,7 +188,7 @@ func (m *Manager) Lookup(ctx context.Context, input string) (Channel, error) {
 	if err != nil {
 		return Channel{}, err
 	}
-	lv, err := m.idle()
+	lv, err := m.pick(ctx)
 	if err != nil {
 		return Channel{}, err
 	}
@@ -178,6 +214,8 @@ func (m *Manager) Lookup(ctx context.Context, input string) (Channel, error) {
 type Page struct {
 	// Posts holds the documents on the page, newest first. Messages without a document are left out.
 	Posts []Post
+	// Links are bot start URLs found in the same page. The post itself is not a video.
+	Links []StartHit
 	// Highest and Lowest are the newest and oldest message ids on the page, documents or not.
 	Highest, Lowest int
 	// Oldest is the date of the oldest message on the page.
@@ -188,7 +226,7 @@ type Page struct {
 
 // History returns up to limit messages older than offsetID, newest first. Zero starts at the newest.
 func (m *Manager) History(ctx context.Context, ref SourceRef, offsetID, limit int) (Page, error) {
-	lv, err := m.idle()
+	lv, err := m.pick(ctx)
 	if err != nil {
 		return Page{}, err
 	}
@@ -221,6 +259,11 @@ func (m *Manager) History(ctx context.Context, ref SourceRef, offsetID, limit in
 				see(msg.ID, msg.Date)
 				if p, ok := postFrom(msg); ok {
 					out.Posts = append(out.Posts, p)
+				}
+				for _, url := range StartURLs(msg.Message, append(textURL(msg), buttonURLs(msg)...)) {
+					out.Links = append(out.Links, StartHit{
+						ID: msg.ID, Date: time.Unix(int64(msg.Date), 0).UTC(), URL: url,
+					})
 				}
 			case *tg.MessageService:
 				see(msg.ID, msg.Date)
@@ -286,7 +329,7 @@ func (m *Manager) Copy(ctx context.Context, ref SourceRef, ids []int) error {
 	if len(ids) == 0 {
 		return nil
 	}
-	lv, err := m.idle()
+	lv, err := m.pick(ctx)
 	if err != nil {
 		return err
 	}

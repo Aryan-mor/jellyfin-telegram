@@ -149,7 +149,15 @@ func (s *Service) Run(ctx context.Context) {
 	for {
 		set, err := s.Settings(ctx)
 		if err == nil && set.Enabled {
-			s.Pass(ctx)
+			if s.Pass(ctx) {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(20 * time.Second):
+				case <-s.wake:
+				}
+				continue
+			}
 		}
 		wait := time.Duration(max(set.EveryMinutes, 5)) * time.Minute
 		select {
@@ -161,9 +169,9 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-// Pass walks every enabled channel once. It stops early when the daily cap is reached, when no
-// account is free, or when the switch is turned off.
-func (s *Service) Pass(parent context.Context) {
+// Pass walks every enabled channel once. It returns true when no account was free, so the caller
+// tries again shortly instead of waiting for the normal interval.
+func (s *Service) Pass(parent context.Context) bool {
 	s.run.Lock()
 	defer s.run.Unlock()
 	ctx, cancel := context.WithCancel(parent)
@@ -180,13 +188,13 @@ func (s *Service) Pass(parent context.Context) {
 
 	set, err := s.Settings(ctx)
 	if err != nil || !set.Enabled {
-		return
+		return false
 	}
 	s.setNote("")
 	sources, err := s.Cat.Sources(ctx)
 	if err != nil {
 		s.setNote(err.Error())
-		return
+		return false
 	}
 	for _, src := range sources {
 		if ctx.Err() != nil || !src.Enabled {
@@ -197,10 +205,11 @@ func (s *Service) Pass(parent context.Context) {
 		}
 		if err := s.walk(ctx, src, set); err != nil {
 			if stop := s.record(ctx, src, err); stop {
-				return
+				return errors.Is(err, tguser.ErrNoFreeSession)
 			}
 		}
 	}
+	return false
 }
 
 func (s *Service) setNote(text string) {
@@ -216,7 +225,7 @@ func (s *Service) record(ctx context.Context, src catalog.Source, err error) (st
 	}
 	switch {
 	case errors.Is(err, tguser.ErrNoFreeSession):
-		s.setNote("Waiting for a signed-in account that is free. An upload is using it.")
+		s.setNote("Waiting for a signed-in account that is free.")
 		return true
 	case errors.Is(err, errDailyCap):
 		s.setNote("The daily limit is reached. Copying continues tomorrow.")

@@ -24,6 +24,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/downloads"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fladder"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/fuckjoin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
@@ -32,6 +33,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/localmedia"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
@@ -222,12 +224,13 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	dl := startDownloads(cfg, envPath, cat, pool, users, seerrTarget, log)
 	local := startLocal(cfg, envPath, cat, pool, users, log)
 	sources := startSources(cfg, cat, users)
+	news, fj := startNews(cfg, cat, users, sources, log)
 	radarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.RadarrPort))
 	sonarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.SonarrPort))
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, sources,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, sources, news, fj,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -249,6 +252,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	go local.Run(ctx)
 	if sources != nil {
 		go sources.Run(ctx)
+	}
+	if news != nil {
+		go news.Run(ctx)
 	}
 	log.Info("serving", "addr", cfg.GatewayListen)
 
@@ -407,7 +413,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, sources *tgsource.Service, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -426,8 +432,8 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		},
 		LocalDo:  localActions(local),
 		Sessions: sessionsView(users),
-		Sources:  sourcesView(sources, users),
-		SourceDo: sourcesDo(sources),
+		Sources:  sourcesView(sources, news, fj, users),
+		SourceDo: sourcesDo(sources, news, fj),
 		Verify:   verifyTelegram(dataDir, log),
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
