@@ -82,6 +82,10 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply news schema: %w", err)
 	}
+	if _, err := db.Exec(mirrorSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply mirror schema: %w", err)
+	}
 	return &Catalog{db: db}, nil
 }
 
@@ -141,19 +145,19 @@ func (c *Catalog) All(ctx context.Context) ([]media.File, error) {
 
 // Unprobed returns files Jellyfin has not probed yet.
 func (c *Catalog) Unprobed(ctx context.Context) ([]media.File, error) {
-	return c.query(ctx, `SELECT `+columns+` FROM files WHERE probed_at=0 ORDER BY message_id`)
+	return c.query(ctx, `SELECT `+columns+` FROM files WHERE probed_at=0 AND rel_path NOT LIKE 'Music/%' ORDER BY message_id`)
 }
 
 // Pending returns files that still need a probe or a subtitle check.
 func (c *Catalog) Pending(ctx context.Context) ([]media.File, error) {
-	return c.query(ctx, `SELECT `+columns+` FROM files WHERE probed_at=0 OR subtitle_outcome='' ORDER BY message_id`)
+	return c.query(ctx, `SELECT `+columns+` FROM files WHERE (probed_at=0 OR subtitle_outcome='') AND rel_path NOT LIKE 'Music/%' ORDER BY message_id`)
 }
 
 // ExtractPending returns probed files whose embedded subtitles still need handling, leaving out
 // files that failed too many times.
 func (c *Catalog) ExtractPending(ctx context.Context, maxTries int) ([]media.File, error) {
 	return c.query(ctx, `SELECT `+columns+` FROM files
-		WHERE probed_at>0 AND extract_state='' AND extract_tries<? ORDER BY message_id`, maxTries)
+		WHERE probed_at>0 AND extract_state='' AND extract_tries<? AND rel_path NOT LIKE 'Music/%' ORDER BY message_id`, maxTries)
 }
 
 // ExtractDone returns files whose subtitles are kept in the channel.

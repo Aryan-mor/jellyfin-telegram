@@ -33,6 +33,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/localmedia"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/mirror"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
@@ -230,7 +231,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, sources, news, fj,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, sources, news, fj,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -256,6 +257,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	if news != nil {
 		go news.Run(ctx)
 	}
+	go (&mirror.Service{Cat: cat, Copy: pool.CopyMessage, Log: log}).Run(ctx)
 	log.Info("serving", "addr", cfg.GatewayListen)
 
 	var prober *jellyfin.Prober
@@ -413,7 +415,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -434,6 +436,8 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		Sessions: sessionsView(users),
 		Sources:  sourcesView(sources, news, fj, users),
 		SourceDo: sourcesDo(sources, news, fj),
+		Mirrors:  mirrorsView(cat),
+		MirrorDo: mirrorsDo(cat, pool, channel),
 		Verify:   verifyTelegram(dataDir, log),
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
@@ -453,6 +457,113 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			return checkChannelUnchanged(context.Background(), cat, id)
 		},
 	})
+}
+
+func mirrorsView(cat *catalog.Catalog) func(context.Context) (any, error) {
+	return func(ctx context.Context) (any, error) {
+		list, err := cat.Mirrors(ctx)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]map[string]any, 0, len(list))
+		for _, m := range list {
+			n, err := cat.MirrorSent(ctx, m.ID)
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, map[string]any{
+				"id": m.ID, "channel_id": m.ChannelID, "title": m.Title,
+				"bot_id": m.BotID, "kinds": m.Kinds, "error": m.Error, "sent": n,
+			})
+		}
+		return out, nil
+	}
+}
+
+func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, main int64) func(*http.Request, string, map[string]any) (any, error) {
+	return func(r *http.Request, action string, body map[string]any) (any, error) {
+		switch action {
+		case "remove":
+			id := int64(number(body["id"]))
+			if id <= 0 {
+				return nil, errors.New("that mirror is not listed")
+			}
+			if err := cat.DeleteMirror(r.Context(), id); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		case "add", "save":
+			botID := int64(number(body["bot_id"]))
+			if botID <= 0 {
+				return nil, errors.New("choose the bot that posts in this channel")
+			}
+			kinds, err := kindList(body["kinds"])
+			if err != nil {
+				return nil, err
+			}
+			if action == "add" {
+				channelID, username, err := mirror.ParseTarget(fmt.Sprint(body["channel"]))
+				if err != nil {
+					return nil, err
+				}
+				if channelID != 0 && channelID == main {
+					return nil, errors.New("that is the main channel")
+				}
+				id, title, err := pool.AcceptMirror(r.Context(), botID, channelID, username)
+				if err != nil {
+					return nil, err
+				}
+				if _, err := cat.AddMirror(r.Context(), id, botID, title, kinds); err != nil {
+					return nil, err
+				}
+				return map[string]any{"ok": true}, nil
+			}
+			id := int64(number(body["id"]))
+			if id <= 0 {
+				return nil, errors.New("that mirror is not listed")
+			}
+			list, err := cat.Mirrors(r.Context())
+			if err != nil {
+				return nil, err
+			}
+			var current catalog.Mirror
+			found := false
+			for _, m := range list {
+				if m.ID == id {
+					current = m
+					found = true
+				}
+			}
+			if !found {
+				return nil, errors.New("that mirror is not listed")
+			}
+			got, title, err := pool.AcceptMirror(r.Context(), botID, current.ChannelID, "")
+			if err != nil {
+				return nil, err
+			}
+			if got != current.ChannelID {
+				return nil, errors.New("that bot cannot see this mirror")
+			}
+			if _, err := cat.UpdateMirror(r.Context(), id, botID, title, kinds); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		default:
+			return nil, errors.New("unknown action")
+		}
+	}
+}
+
+func kindList(v any) ([]string, error) {
+	raw, _ := v.([]any)
+	in := make([]string, 0, len(raw))
+	for _, item := range raw {
+		s, _ := item.(string)
+		if s != "" {
+			in = append(in, s)
+		}
+	}
+	return catalog.NormalizeKinds(in)
 }
 
 func downloadActions(dl *downloads.Service, users *tguser.Manager) func(*http.Request, string, map[string]any) (any, error) {

@@ -39,6 +39,11 @@ var videoExtensions = map[string]bool{
 	".ts": true, ".m2ts": true, ".wmv": true, ".flv": true, ".mpg": true, ".mpeg": true,
 }
 
+var audioExtensions = map[string]bool{
+	".mp3": true, ".flac": true, ".m4a": true, ".aac": true,
+	".ogg": true, ".opus": true, ".wav": true, ".wma": true,
+}
+
 // Options configures a Telegram-backed pool.
 type Options struct {
 	APIID       int
@@ -212,6 +217,86 @@ func resolveChannel(ctx context.Context, api *tg.Client, id int64) (*tg.Channel,
 		}
 	}
 	return nil, fmt.Errorf("channel %d is not visible to this bot", id)
+}
+
+// openChannel finds a channel this bot may post in. The bot must also be an admin of the main
+// channel. username is used when the id is not known yet.
+func (b *bot) openChannel(ctx context.Context, id int64, username string) (*tg.Channel, error) {
+	api, _, err := b.conn()
+	if err != nil {
+		return nil, errors.New("that bot is not connected")
+	}
+	st := b.status()
+	if !st.IsAdmin {
+		return nil, errors.New("that bot is not an admin of the main channel")
+	}
+	var ch *tg.Channel
+	if username != "" {
+		res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+		if err != nil {
+			return nil, fmt.Errorf("cannot see @%s: %w", username, err)
+		}
+		for _, raw := range res.Chats {
+			if found, ok := raw.(*tg.Channel); ok {
+				ch = found
+				break
+			}
+		}
+		if ch == nil {
+			return nil, fmt.Errorf("@%s is not a channel", username)
+		}
+	} else {
+		ch, err = resolveChannel(ctx, api, id)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if ch.ID == b.channelID {
+		return nil, errors.New("that is the main channel")
+	}
+	if !canPost(ch) {
+		name := ch.Title
+		if name == "" {
+			name = fmt.Sprintf("%d", ch.ID)
+		}
+		who := st.Username
+		if who == "" {
+			who = fmt.Sprintf("%d", b.id)
+		}
+		return nil, fmt.Errorf("@%s must be an admin of %s, with permission to post, and an admin of the main channel", strings.TrimPrefix(who, "@"), name)
+	}
+	return ch, nil
+}
+
+func canPost(ch *tg.Channel) bool {
+	if ch.Creator {
+		return true
+	}
+	rights, ok := ch.GetAdminRights()
+	return ok && rights.PostMessages
+}
+
+// forwardTo copies one main-channel message into dest without the author line.
+func (b *bot) forwardTo(ctx context.Context, messageID int, dest *tg.Channel) (int, error) {
+	api, channel, err := b.conn()
+	if err != nil {
+		return 0, err
+	}
+	var raw [8]byte
+	if _, err := rand.Read(raw[:]); err != nil {
+		return 0, err
+	}
+	res, err := api.MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
+		FromPeer:   &tg.InputPeerChannel{ChannelID: channel.ChannelID, AccessHash: channel.AccessHash},
+		ToPeer:     &tg.InputPeerChannel{ChannelID: dest.ID, AccessHash: dest.AccessHash},
+		ID:         []int{messageID},
+		RandomID:   []int64{int64(binary.LittleEndian.Uint64(raw[:]))},
+		DropAuthor: true,
+	})
+	if err != nil {
+		return 0, err
+	}
+	return sentMessageID(res), nil
 }
 
 func (b *bot) conn() (*tg.Client, *tg.InputChannel, error) {
@@ -441,17 +526,29 @@ func fileFromMessage(m *tg.Message, channelID int64) *media.File {
 	}
 	name := ""
 	isVideoAttr := false
+	isAudio := false
+	voice := false
 	for _, a := range doc.Attributes {
 		switch v := a.(type) {
 		case *tg.DocumentAttributeFilename:
 			name = v.FileName
 		case *tg.DocumentAttributeVideo:
 			isVideoAttr = !v.RoundMessage
+		case *tg.DocumentAttributeAudio:
+			if v.Voice {
+				voice = true
+			} else {
+				isAudio = true
+			}
 		}
 	}
-	isVideo := isVideoAttr || strings.HasPrefix(doc.MimeType, "video/") ||
-		videoExtensions[strings.ToLower(path.Ext(name))]
-	if !isVideo {
+	ext := strings.ToLower(path.Ext(name))
+	isVideo := isVideoAttr || strings.HasPrefix(doc.MimeType, "video/") || videoExtensions[ext]
+	if !isAudio && !voice && (strings.HasPrefix(doc.MimeType, "audio/") || audioExtensions[ext]) {
+		isAudio = true
+	}
+	// A voice note is not music. A music video stays a video.
+	if !isVideo && (!isAudio || voice) {
 		return nil
 	}
 	return &media.File{
