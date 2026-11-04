@@ -88,6 +88,18 @@ To use a Jellyfin you already run, set `JELLYFIN_URL` and `JELLYFIN_API_KEY` ins
    feature off removes the containers and leaves playback alone. Your home IP is visible to peers
    and to the DHT. There is no VPN in this setup.
 
+   The Torrents tab is that whole chain behind one switch, off by default. The Channels tab is a
+   second, separate way to fill the library: give the signed-in account other Telegram channels
+   (a public `@name`, or a numeric id such as `-1001234567890`; forward any message from the channel
+   to @id_bot or @getidsbot to learn the id). The account reads each channel and asks Telegram to
+   forward the films and series into your library channel without the author line. Telegram copies
+   the file on its own servers, so nothing is downloaded here and no disk is used. The first check
+   reaches back as far as you choose (a day up to all history), and later checks only look at new
+   posts. You can set how often to check, the shortest video, the smallest and largest file, words
+   to skip or require, a daily cap and a pause between groups. A channel whose owner forbids
+   copying is shown as such and left alone. A private channel works only if the signed-in account
+   is already a member. It is off until you turn it on. The Bot provider tab is a placeholder.
+
 When you point at your own Jellyfin instead:
 
 1. Add `LIBRARY_DIR/Movies` as another folder of the existing Movies library, and

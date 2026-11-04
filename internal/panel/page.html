@@ -3,177 +3,491 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
 <title>jellyfin-telegram</title>
 <style>
-:root { color-scheme: light dark; --bg:#f6f6f8; --card:#fff; --text:#1c1c22; --muted:#62626e; --line:#d8d8e0; --accent:#6a4fd6; --ok:#17803d; --bad:#c0262d; }
-@media (prefers-color-scheme: dark) { :root { --bg:#111116; --card:#1b1b22; --text:#ededf2; --muted:#a0a0ad; --line:#33333e; --accent:#a48cff; --ok:#4ac377; --bad:#ff7b80; } }
-* { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:32px 16px; }
-main { max-width:680px; margin:0 auto; }
-h1 { font-size:22px; margin:0 0 12px; }
-h2 { font-size:18px; margin:0 0 8px; }
-p { margin:0 0 12px; color:var(--muted); }
-ol { margin:0 0 16px; padding-left:1.2em; color:var(--text); }
-li { margin:0 0 8px; }
-li span { color:var(--muted); }
-.apps { display:flex; flex-wrap:wrap; gap:8px; margin:0 0 16px; }
-.apps a { display:inline-block; margin:0; padding:8px 14px; border-radius:8px; background:var(--accent); color:#fff; font-weight:600; text-decoration:none; }
-.apps a.quiet { background:transparent; color:inherit; border:1px solid var(--line); }
-nav { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px; }
-nav button { margin:0; background:transparent; color:inherit; border:1px solid var(--line); }
-nav button[aria-selected="true"] { background:var(--accent); color:#fff; border-color:transparent; }
-section { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; }
-small { display:block; color:var(--muted); font-weight:400; margin-bottom:6px; }
-label { display:block; font-weight:600; margin:16px 0 4px; }
-input { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
+:root {
+  --bg:#f5f5f9; --surface:#fff; --surface-2:#f0f0f6; --text:#18181f; --muted:#5f5f70; --line:#e2e2ea;
+  --accent:#6a4fd6; --accent-2:#5a3fc4; --accent-soft:#ece8fb; --on-accent:#fff;
+  --ok:#14803c; --ok-soft:#dff4e6; --bad:#c0262d; --bad-soft:#fbe4e5; --warn:#935f00; --warn-soft:#fdf0d2;
+  --shadow:0 1px 2px rgba(20,20,40,.06),0 4px 16px rgba(20,20,40,.05); --radius:14px;
+}
+:root[data-theme="dark"] {
+  --bg:#0f0f14; --surface:#18181f; --surface-2:#20202a; --text:#ececf3; --muted:#9d9db0; --line:#2b2b38;
+  --accent:#a48cff; --accent-2:#b8a5ff; --accent-soft:#2a2347; --on-accent:#14101f;
+  --ok:#4ac377; --ok-soft:#14301f; --bad:#ff7b80; --bad-soft:#3a1a1c; --warn:#f0b84a; --warn-soft:#352a10;
+  --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.25);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg:#0f0f14; --surface:#18181f; --surface-2:#20202a; --text:#ececf3; --muted:#9d9db0; --line:#2b2b38;
+    --accent:#a48cff; --accent-2:#b8a5ff; --accent-soft:#2a2347; --on-accent:#14101f;
+    --ok:#4ac377; --ok-soft:#14301f; --bad:#ff7b80; --bad-soft:#3a1a1c; --warn:#f0b84a; --warn-soft:#352a10;
+    --shadow:0 1px 2px rgba(0,0,0,.4),0 6px 20px rgba(0,0,0,.25);
+  }
+}
+* { box-sizing:border-box; }
+html { -webkit-text-size-adjust:100%; }
+body { margin:0; background:var(--bg); color:var(--text); font:15px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; }
 a { color:var(--accent); }
-button { margin-top:8px; padding:8px 14px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
-button.quiet { background:transparent; color:var(--bad); border:1px solid var(--line); }
-button:disabled { opacity:.55; cursor:default; }
-.row { display:flex; justify-content:space-between; gap:12px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line); }
-.row:last-child { border-bottom:0; }
-code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; word-break:break-all; }
-.ok { color:var(--ok); } .bad { color:var(--bad); }
-.note { margin-top:12px; }
-.modal { position:fixed; inset:0; background:rgba(0,0,0,.55); display:flex; align-items:center; justify-content:center; padding:16px; z-index:10; }
-.modal-card { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:24px; width:100%; max-width:420px; }
-.steps { display:flex; gap:8px; list-style:none; padding:0; margin:0 0 16px; }
-.steps li { flex:1; text-align:center; padding:6px 4px; border-radius:8px; border:1px solid var(--line); color:var(--muted); font-size:13px; margin:0; }
-.steps li.now { background:var(--accent); color:#fff; border-color:transparent; font-weight:600; }
-.steps li.past { color:var(--ok); border-color:var(--ok); }
-.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:12px; }
-button.ghost { background:transparent; color:inherit; border:1px solid var(--line); }
 [hidden] { display:none !important; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:6px; }
+svg.i { width:18px; height:18px; flex:none; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+/* layout */
+.shell { display:grid; grid-template-columns:248px 1fr; min-height:100vh; }
+aside { position:sticky; top:0; height:100vh; padding:20px 14px; background:var(--surface); border-right:1px solid var(--line); display:flex; flex-direction:column; gap:4px; overflow-y:auto; }
+.brand { display:flex; align-items:center; gap:10px; padding:4px 10px 16px; font-weight:700; font-size:16px; letter-spacing:-.01em; }
+.logo { width:32px; height:32px; border-radius:9px; background:linear-gradient(135deg,var(--accent),#2fa8e8); display:grid; place-items:center; color:#fff; }
+.logo svg { width:18px; height:18px; stroke:#fff; }
+.group { margin:14px 10px 4px; font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--muted); }
+nav button { all:unset; box-sizing:border-box; width:100%; display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:10px; color:var(--muted); font-weight:550; cursor:pointer; }
+nav button:hover { background:var(--surface-2); color:var(--text); }
+nav button[aria-selected="true"] { background:var(--accent-soft); color:var(--accent); }
+nav button:focus-visible { outline:2px solid var(--accent); }
+nav .dot { margin-left:auto; width:8px; height:8px; border-radius:50%; background:var(--bad); }
+.side-foot { margin-top:auto; padding:12px 10px 0; display:flex; align-items:center; justify-content:space-between; color:var(--muted); font-size:13px; }
+main { padding:32px clamp(16px,4vw,48px) 64px; max-width:980px; width:100%; }
+.page-head { margin-bottom:24px; }
+.page-head h1 { margin:0 0 4px; font-size:26px; letter-spacing:-.02em; }
+.page-head p { margin:0; color:var(--muted); max-width:62ch; }
+
+/* components */
+.card { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:22px; box-shadow:var(--shadow); margin-bottom:18px; }
+.card h2 { margin:0 0 4px; font-size:17px; letter-spacing:-.01em; }
+.card > p, .lead { margin:0 0 14px; color:var(--muted); }
+.grid { display:grid; gap:16px; grid-template-columns:repeat(auto-fit,minmax(220px,1fr)); margin-bottom:18px; }
+.tile { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); display:flex; flex-direction:column; gap:6px; text-decoration:none; color:inherit; }
+a.tile:hover { border-color:var(--accent); transform:translateY(-1px); transition:.15s; }
+.tile .label { color:var(--muted); font-size:13px; font-weight:600; display:flex; align-items:center; gap:8px; }
+.tile .value { font-size:22px; font-weight:700; letter-spacing:-.02em; }
+.tile .sub { color:var(--muted); font-size:13px; }
+.app-tile { flex-direction:row; align-items:center; gap:14px; }
+.app-ico { width:42px; height:42px; border-radius:11px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); }
+.app-ico svg { width:22px; height:22px; }
+.app-tile strong { display:block; }
+.app-tile span { color:var(--muted); font-size:13px; }
+.pill { display:inline-flex; align-items:center; gap:6px; padding:2px 10px; border-radius:99px; font-size:12px; font-weight:650; background:var(--surface-2); color:var(--muted); white-space:nowrap; }
+.pill::before { content:""; width:6px; height:6px; border-radius:50%; background:currentColor; }
+.pill.ok { background:var(--ok-soft); color:var(--ok); } .pill.bad { background:var(--bad-soft); color:var(--bad); }
+.pill.warn { background:var(--warn-soft); color:var(--warn); } .pill.accent { background:var(--accent-soft); color:var(--accent); }
+.list { display:flex; flex-direction:column; }
+.item { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:14px 0; border-bottom:1px solid var(--line); flex-wrap:wrap; }
+.item:last-child { border-bottom:0; padding-bottom:0; } .item:first-child { padding-top:0; }
+.item .main { min-width:0; flex:1 1 220px; }
+.item .title { font-weight:600; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.item .meta { color:var(--muted); font-size:13px; margin-top:2px; display:flex; gap:6px 10px; flex-wrap:wrap; align-items:center; }
+.avatar { width:38px; height:38px; border-radius:50%; background:var(--accent-soft); color:var(--accent); display:grid; place-items:center; flex:none; font-weight:700; }
+.row { display:flex; align-items:center; gap:12px; }
+.creds { display:grid; gap:6px; }
+.cred { display:flex; align-items:center; gap:8px; font-size:13px; color:var(--muted); }
+.cred b { width:64px; font-weight:600; }
+code, .mono { font-family:ui-monospace,"Cascadia Code",Consolas,monospace; font-size:13px; }
+code { background:var(--surface-2); padding:2px 7px; border-radius:6px; word-break:break-all; color:var(--text); }
+
+/* forms */
+.field { margin:0 0 16px; }
+.field label { display:block; font-weight:600; margin-bottom:5px; }
+.field .hint { display:block; color:var(--muted); font-size:13px; margin:-2px 0 6px; }
+.cols { display:grid; gap:0 16px; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); }
+input { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:inherit; font:inherit; transition:border-color .15s,box-shadow .15s; }
+input:hover { border-color:var(--muted); }
+input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.input-wrap { position:relative; } .input-wrap input { padding-right:44px; }
+.input-wrap button { position:absolute; right:4px; top:4px; }
+.btn { all:unset; box-sizing:border-box; display:inline-flex; align-items:center; justify-content:center; gap:8px; padding:9px 16px; border-radius:10px; background:var(--accent); color:var(--on-accent); font-weight:650; cursor:pointer; transition:background .15s,transform .05s; }
+.btn:hover { background:var(--accent-2); } .btn:active { transform:translateY(1px); }
+.btn:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.btn.ghost { background:transparent; color:var(--text); border:1px solid var(--line); } .btn.ghost:hover { background:var(--surface-2); }
+.btn.danger { background:transparent; color:var(--bad); border:1px solid var(--line); } .btn.danger:hover { background:var(--bad-soft); }
+.btn.sm { padding:5px 10px; font-size:13px; border-radius:8px; }
+.btn.icon { padding:6px; border-radius:8px; background:transparent; color:var(--muted); } .btn.icon:hover { background:var(--surface-2); color:var(--text); }
+.btn[disabled] { opacity:.5; cursor:default; pointer-events:none; }
+.btn.busy::after { content:""; width:14px; height:14px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.actions { display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:4px; }
+.switch { all:unset; box-sizing:border-box; width:46px; height:26px; border-radius:99px; background:var(--line); position:relative; cursor:pointer; transition:background .2s; flex:none; }
+.switch::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:transform .2s; }
+.switch[aria-checked="true"] { background:var(--ok); } .switch[aria-checked="true"]::after { transform:translateX(20px); }
+.switch:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+.alert { margin-top:14px; padding:10px 14px; border-radius:10px; font-size:14px; background:var(--surface-2); color:var(--muted); }
+.alert:empty { display:none; }
+.alert.ok { background:var(--ok-soft); color:var(--ok); } .alert.bad { background:var(--bad-soft); color:var(--bad); }
+.bar { height:6px; border-radius:99px; background:var(--surface-2); overflow:hidden; width:160px; }
+.bar > i { display:block; height:100%; background:var(--accent); border-radius:99px; }
+
+select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:inherit; font:inherit; }
+select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+.rule-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 0; flex-wrap:wrap; }
+.soon { display:flex; flex-direction:column; align-items:flex-start; gap:10px; }
+
+/* guide steps */
+details.guide { margin:0 0 16px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); }
+details.guide summary { cursor:pointer; padding:11px 16px; font-weight:600; list-style:none; display:flex; align-items:center; gap:8px; }
+details.guide summary::-webkit-details-marker { display:none; }
+details.guide summary::after { content:""; margin-left:auto; width:8px; height:8px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(45deg); transition:transform .2s; }
+details.guide[open] summary::after { transform:rotate(-135deg); }
+ol.steps { list-style:none; counter-reset:s; margin:0; padding:2px 16px 14px; }
+ol.steps li { counter-increment:s; position:relative; padding:6px 0 6px 36px; }
+ol.steps li::before { content:counter(s); position:absolute; left:0; top:6px; width:24px; height:24px; border-radius:50%; background:var(--accent-soft); color:var(--accent); font-size:12px; font-weight:700; display:grid; place-items:center; }
+.empty { text-align:center; color:var(--muted); padding:22px 8px; }
+.skeleton { height:64px; border-radius:12px; background:linear-gradient(90deg,var(--surface-2),var(--line),var(--surface-2)); background-size:200% 100%; animation:sh 1.2s infinite; margin-bottom:14px; }
+@keyframes sh { to { background-position:-200% 0; } }
+
+/* modal and toast */
+.modal { position:fixed; inset:0; background:rgba(8,8,16,.6); backdrop-filter:blur(3px); display:flex; align-items:center; justify-content:center; padding:16px; z-index:30; }
+.modal-card { background:var(--surface); border:1px solid var(--line); border-radius:18px; padding:26px; width:100%; max-width:420px; box-shadow:0 20px 60px rgba(0,0,0,.4); }
+.modal-card h2 { margin:0 0 6px; } .modal-card p { margin:0 0 14px; color:var(--muted); }
+.stepper { display:flex; gap:8px; list-style:none; padding:0; margin:0 0 20px; }
+.stepper li { flex:1; text-align:center; padding:6px 4px; border-radius:99px; background:var(--surface-2); color:var(--muted); font-size:12px; font-weight:600; }
+.stepper li.now { background:var(--accent); color:var(--on-accent); } .stepper li.past { background:var(--ok-soft); color:var(--ok); }
+.modal-actions { display:flex; justify-content:flex-end; gap:8px; margin-top:16px; }
+#toasts { position:fixed; right:16px; bottom:16px; display:flex; flex-direction:column; gap:8px; z-index:40; max-width:min(380px,calc(100vw - 32px)); }
+.toast { padding:11px 16px; border-radius:12px; background:var(--text); color:var(--bg); font-weight:550; box-shadow:0 8px 28px rgba(0,0,0,.3); animation:in .2s ease-out; }
+.toast.bad { background:var(--bad); color:#fff; }
+@keyframes in { from { opacity:0; transform:translateY(8px); } }
+
+/* local files */
+.filters { display:flex; gap:6px; flex-wrap:wrap; margin:0 0 14px; }
+.chip { all:unset; box-sizing:border-box; padding:5px 12px; border-radius:99px; border:1px solid var(--line); color:var(--muted); font-weight:600; font-size:13px; cursor:pointer; }
+.chip:hover { background:var(--surface-2); color:var(--text); }
+.chip[aria-pressed="true"] { background:var(--accent-soft); color:var(--accent); border-color:transparent; }
+.chip:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
+details.cat, details.grp { border:1px solid var(--line); border-radius:12px; background:var(--surface); margin:0 0 12px; }
+details.grp { background:var(--surface-2); border-radius:10px; margin:6px 0; }
+details.cat > summary, details.grp > summary { cursor:pointer; padding:11px 14px; list-style:none; display:flex; align-items:center; gap:10px; flex-wrap:wrap; }
+details.cat > summary::-webkit-details-marker, details.grp > summary::-webkit-details-marker { display:none; }
+details.cat > summary::before, details.grp > summary::before { content:""; width:7px; height:7px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(-45deg); transition:transform .15s; flex:none; }
+details.cat[open] > summary::before, details.grp[open] > summary::before { transform:rotate(45deg); }
+.sum-title { font-weight:650; flex:1 1 200px; min-width:0; overflow-wrap:anywhere; }
+.sum-meta { color:var(--muted); font-size:13px; }
+.cat-body { padding:0 14px 8px; }
+details.grp .cat-body { padding:0 12px 4px; }
+.frow { display:flex; align-items:center; gap:10px 14px; padding:10px 0; border-top:1px solid var(--line); flex-wrap:wrap; }
+.frow:first-child { border-top:0; }
+.frow .main { flex:1 1 240px; min-width:0; }
+.frow .name { font-weight:600; overflow-wrap:anywhere; }
+.frow .sub { color:var(--muted); font-size:12.5px; overflow-wrap:anywhere; }
+.frow .sub.bad { color:var(--bad); }
+.frow .side { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.bar.wide { width:100%; max-width:320px; margin-top:6px; }
+.notice { display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:space-between; }
+@media (max-width:820px) {
+  .shell { grid-template-columns:1fr; }
+  aside { position:sticky; z-index:20; height:auto; flex-direction:column; padding:10px 12px 0; border-right:0; border-bottom:1px solid var(--line); gap:0; overflow:visible; }
+  .brand { padding:2px 4px 8px; } .group, .side-foot { display:none; }
+  .navs { display:flex; gap:4px; overflow-x:auto; padding-bottom:8px; scrollbar-width:none; }
+  .navs::-webkit-scrollbar { display:none; }
+  nav button { width:auto; white-space:nowrap; padding:8px 12px; }
+  main { padding-top:22px; }
+  .page-head h1 { font-size:22px; }
+  .card { padding:18px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
-<main>
-  <h1>jellyfin-telegram</h1>
-  <p>On this computer, open <code>/panel</code>. From a phone on the same Wi-Fi, open <code id="share-url"></code>.</p>
-  <div class="apps">
-    <a href="/">Jellyfin</a>
-    <a id="link-seerr" href="/seerr/" hidden>Seerr</a>
-    <a id="link-fladder" href="/fladder/" hidden>Fladder</a>
-    <a id="link-fladder-releases" class="quiet" href="https://github.com/DonutWare/Fladder/releases" target="_blank" rel="noreferrer" hidden>Download other Fladder versions</a>
-  </div>
-  <nav>
-    <button type="button" data-tab="accounts" aria-selected="true">Sign in</button>
-    <button type="button" data-tab="bots">Bots</button>
-    <button type="button" data-tab="api">Telegram API</button>
-    <button type="button" data-tab="channel">Channel</button>
-    <button type="button" data-tab="away">Away from home</button>
-    <button type="button" data-tab="downloads">Downloads</button>
-  </nav>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></symbol>
+    <symbol id="i-key" viewBox="0 0 24 24"><circle cx="8" cy="15" r="4"/><path d="M11 12l9-9M16 7l3 3"/></symbol>
+    <symbol id="i-bot" viewBox="0 0 24 24"><rect x="4" y="8" width="16" height="12" rx="3"/><path d="M12 8V4M9 14h.01M15 14h.01"/></symbol>
+    <symbol id="i-code" viewBox="0 0 24 24"><path d="M8 7l-5 5 5 5M16 7l5 5-5 5M14 4l-4 16"/></symbol>
+    <symbol id="i-chan" viewBox="0 0 24 24"><path d="M4 4h16v12H9l-5 4z"/></symbol>
+    <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 010 18M12 3a14 14 0 000 18"/></symbol>
+    <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3v13M6 11l6 6 6-6M4 21h16"/></symbol>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9l5 3-5 3z"/></symbol>
+    <symbol id="i-req" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/><circle cx="12" cy="12" r="9"/></symbol>
+    <symbol id="i-phone" viewBox="0 0 24 24"><rect x="7" y="2" width="10" height="20" rx="2"/><path d="M11 18h2"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V6a2 2 0 012-2h9"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M5 19l1.5-1.5M17.5 6.5L19 5"/></symbol>
+    <symbol id="i-disk" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M3 14h18M7 17h.01"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></symbol>
+  </defs>
+</svg>
 
-  <section id="tab-accounts">
-    <h2>Sign in</h2>
-    <p>The account to use in each app. Share the address of this computer with the people who should watch, and send them to Jellyfin first.</p>
-    <div id="accounts"></div>
-  </section>
+<div class="shell">
+  <aside>
+    <div class="brand"><span class="logo"><svg class="i"><use href="#i-play"/></svg></span>jellyfin-telegram</div>
+    <div class="navs">
+    <nav>
+      <button type="button" data-tab="overview" aria-selected="true"><svg class="i"><use href="#i-home"/></svg>Overview</button>
+      <button type="button" data-tab="accounts"><svg class="i"><use href="#i-key"/></svg>Sign in</button>
+      <button type="button" data-tab="local" hidden><svg class="i"><use href="#i-disk"/></svg>Local files</button>
+      <div class="group">Telegram</div>
+      <button type="button" data-tab="bots"><svg class="i"><use href="#i-bot"/></svg>Bots<span class="dot" id="dot-bots" hidden></span></button>
+      <button type="button" data-tab="api"><svg class="i"><use href="#i-code"/></svg>Telegram API</button>
+      <button type="button" data-tab="channel"><svg class="i"><use href="#i-chan"/></svg>Channel</button>
+      <div class="group">Access</div>
+      <button type="button" data-tab="away"><svg class="i"><use href="#i-globe"/></svg>Away from home</button>
+      <button type="button" data-tab="downloads"><svg class="i"><use href="#i-down"/></svg>Torrents</button>
+      <button type="button" data-tab="sources" hidden><svg class="i"><use href="#i-chan"/></svg>Channels</button>
+      <button type="button" data-tab="provider"><svg class="i"><use href="#i-bot"/></svg>Bot provider</button>
+    </nav>
+    </div>
+    <div class="side-foot"><span>Panel</span><button class="btn icon" id="theme" type="button" aria-label="Switch light or dark theme"><svg class="i"><use href="#i-sun"/></svg></button></div>
+  </aside>
 
-  <section id="tab-bots" hidden>
-    <h2>Bots</h2>
-    <p>A bot is an account that reads the videos. The token is its password. This program never shows the full token again.</p>
-    <ol>
-      <li>Open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> in Telegram.</li>
-      <li>Send <code>/newbot</code>.</li>
-      <li>Choose a display name, then a username that ends in <code>bot</code>.</li>
-      <li>BotFather replies with a token. Paste that token below. Do not post it in the channel.</li>
-      <li>Open the private channel, tap its name, then Administrators, then Add Administrator, and choose the bot.</li>
-      <li>Leave “Post messages” on. The program uses that permission to store extracted subtitles back in the channel. A bot that is not an admin cannot read the videos.</li>
-      <li>Repeat for each extra bot. The bots download at the same time, so more bots make playback faster.</li>
-    </ol>
-    <p>A saved bot connects the next time the program starts.</p>
-    <div id="bots"></div>
-    <label for="add">Add a bot</label>
-    <input id="add" autocomplete="off" spellcheck="false" placeholder="123456789:AAE...">
-    <button id="add-btn" type="button">Add bot</button>
-    <div id="bot-msg" class="note"></div>
-  </section>
+  <main>
+    <!-- Overview -->
+    <section id="tab-overview">
+      <div class="page-head"><h1>Overview</h1><p>Everything this server runs, and where to open it.</p></div>
+      <div class="grid" id="apps">
+        <a class="tile app-tile" href="/"><span class="app-ico"><svg class="i"><use href="#i-play"/></svg></span><div><strong>Jellyfin</strong><span>Watch your library</span></div></a>
+        <a class="tile app-tile" id="link-seerr" href="/seerr/" hidden><span class="app-ico"><svg class="i"><use href="#i-req"/></svg></span><div><strong>Seerr</strong><span>Request films and series</span></div></a>
+        <a class="tile app-tile" id="link-fladder" href="/fladder/" hidden><span class="app-ico"><svg class="i"><use href="#i-phone"/></svg></span><div><strong>Fladder</strong><span>A nicer web client</span></div></a>
+      </div>
+      <div class="grid" id="stats">
+        <div class="tile"><div class="label"><svg class="i"><use href="#i-bot"/></svg>Bots</div><div class="value" id="st-bots">–</div><div class="sub" id="st-bots-sub">&nbsp;</div></div>
+        <div class="tile"><div class="label"><svg class="i"><use href="#i-chan"/></svg>Channel</div><div class="value mono" id="st-channel" style="font-size:18px">–</div><div class="sub" id="st-lang">&nbsp;</div></div>
+        <div class="tile" id="st-dl-tile" hidden><div class="label"><svg class="i"><use href="#i-down"/></svg>Downloads</div><div class="value" id="st-dl">–</div><div class="sub" id="st-dl-sub">&nbsp;</div></div>
+      </div>
+      <div class="card">
+        <h2>Open from another device</h2>
+        <p>On this computer, open <code>/panel</code>. From a phone on the same Wi-Fi, open this link. The part after <code>code=</code> is the secret that keeps the panel private.</p>
+        <div class="row" style="flex-wrap:wrap"><code id="share-url" style="flex:1 1 280px"></code><button class="btn ghost sm" type="button" id="copy-share"><svg class="i"><use href="#i-copy"/></svg>Copy</button></div>
+        <div class="actions" style="margin-top:14px"><a id="link-fladder-releases" class="btn ghost sm" href="https://github.com/DonutWare/Fladder/releases" target="_blank" rel="noreferrer" hidden><svg class="i"><use href="#i-ext"/></svg>Download other Fladder versions</a></div>
+      </div>
+    </section>
 
-  <section id="tab-api" hidden>
-    <h2>Telegram API</h2>
-    <p>The API ID and API hash are required. They are not the bot token. Telegram does not offer a public ID you can download or copy from someone else. Each person creates a pair, free, with their own phone number. This program speaks Telegram’s own protocol, and that protocol refuses a connection without this pair.</p>
-    <ol>
-      <li>Open <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a> and sign in with the phone number of your Telegram account.</li>
-      <li>Open API development tools.</li>
-      <li>Create an application if you do not have one. The name can be <code>jellyfin-telegram</code>. The platform can be Desktop. The description can be short.</li>
-      <li>Copy the numeric <code>App api_id</code> and the <code>App api_hash</code> into the fields below.</li>
-      <li>The hash is a secret, like a password. Later, leave the hash field empty to keep the one already saved.</li>
-    </ol>
-    <label for="api_id">API ID</label>
-    <input id="api_id" inputmode="numeric" autocomplete="off">
-    <label for="api_hash">API hash</label>
-    <small>Leave this empty to keep the saved hash.</small>
-    <input id="api_hash" type="password" autocomplete="off" placeholder="Unchanged if empty">
-    <button id="save-api" type="button">Save API</button>
-    <div id="api-msg" class="note"></div>
-  </section>
+    <!-- Sign in -->
+    <section id="tab-accounts" hidden>
+      <div class="page-head"><h1>Sign in</h1><p>The account to use in each app. Share this computer's address with the people who should watch, and send them to Jellyfin first.</p></div>
+      <div class="card"><div id="accounts" class="list"><div class="skeleton"></div></div></div>
+    </section>
 
-  <section id="tab-channel" hidden>
-    <h2>Channel and language</h2>
-    <ol>
-      <li>In Telegram, create a private channel. A public channel is not used.</li>
-      <li>Post the videos there. A useful file name looks like <code>Title.Year.mkv</code>. Or put <code>Title (Year)</code> on the first line of the caption, so Jellyfin does not guess the wrong film.</li>
-      <li>Open any message in that channel, choose Copy Link, and paste it below. It looks like <code>https://t.me/c/1234567890/5</code>.</li>
-      <li>The library belongs to one channel. A different channel is refused, because the stream files already point at messages in the first one.</li>
-      <li>The language is the subtitle language: a short code such as <code>en</code>, <code>de</code>, <code>fr</code>, <code>fa</code> or <code>ja</code>. Leave it empty to skip subtitles.</li>
-    </ol>
-    <label for="channel">Channel link</label>
-    <input id="channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5">
-    <label for="language">Language</label>
-    <input id="language" maxlength="12" autocomplete="off">
-    <button id="save-channel" type="button">Save channel</button>
-    <div id="channel-msg" class="note"></div>
-  </section>
+    <!-- Bots -->
+    <section id="tab-bots" hidden>
+      <div class="page-head"><h1>Bots</h1><p>A bot is an account that reads the videos. The token is its password. This program never shows the full token again.</p></div>
+      <div class="card">
+        <h2>Connected bots</h2>
+        <p>The bots download at the same time, so more bots make playback faster. A saved bot connects the next time the program starts.</p>
+        <div id="bots" class="list"><div class="skeleton"></div></div>
+      </div>
+      <div class="card">
+        <h2>Add a bot</h2>
+        <details class="guide"><summary>How to create a bot</summary>
+          <ol class="steps">
+            <li>Open <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> in Telegram.</li>
+            <li>Send <code>/newbot</code>.</li>
+            <li>Choose a display name, then a username that ends in <code>bot</code>.</li>
+            <li>BotFather replies with a token. Paste that token below. Do not post it in the channel.</li>
+            <li>Open the private channel, tap its name, then Administrators, then Add Administrator, and choose the bot.</li>
+            <li>Leave “Post messages” on. The program uses that permission to store extracted subtitles back in the channel. A bot that is not an admin cannot read the videos.</li>
+            <li>Repeat for each extra bot.</li>
+          </ol>
+        </details>
+        <div class="field"><label for="add">Bot token</label><input id="add" autocomplete="off" spellcheck="false" placeholder="123456789:AAE..."></div>
+        <div class="actions"><button id="add-btn" class="btn" type="button">Add bot</button></div>
+        <div id="bot-msg" class="alert"></div>
+      </div>
+    </section>
 
-  <section id="tab-away" hidden>
-    <h2>Away from home</h2>
-    <p>At home, open an address tagged “At home”. Away from home, use Tailscale. It is a private network between your own devices. Nothing is published on the public internet.</p>
-    <ol>
-      <li>Install <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">Tailscale</a> on this computer.</li>
-      <li>Install it on the phone or the TV.</li>
-      <li>Sign both devices in to the same Tailscale account.</li>
-      <li>Open the address tagged “Away from home” below.</li>
-      <li>Do not turn on Tailscale Funnel. Funnel would publish Jellyfin to the whole internet, and it is a poor fit for video. No router port has to be opened.</li>
-    </ol>
-    <div id="urls"></div>
-  </section>
+    <!-- API -->
+    <section id="tab-api" hidden>
+      <div class="page-head"><h1>Telegram API</h1><p>The API ID and API hash are required. They are not the bot token.</p></div>
+      <div class="card">
+        <details class="guide"><summary>Where do I get these?</summary>
+          <p style="margin:0;padding:0 16px 8px;color:var(--muted)">Telegram does not offer a public ID you can download or copy from someone else. Each person creates a pair, free, with their own phone number. This program speaks Telegram’s own protocol, and that protocol refuses a connection without this pair.</p>
+          <ol class="steps">
+            <li>Open <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a> and sign in with the phone number of your Telegram account.</li>
+            <li>Open API development tools.</li>
+            <li>Create an application if you do not have one. The name can be <code>jellyfin-telegram</code>. The platform can be Desktop. The description can be short.</li>
+            <li>Copy the numeric <code>App api_id</code> and the <code>App api_hash</code> into the fields below.</li>
+            <li>The hash is a secret, like a password. Later, leave the hash field empty to keep the one already saved.</li>
+          </ol>
+        </details>
+        <div class="cols">
+          <div class="field"><label for="api_id">API ID</label><input id="api_id" inputmode="numeric" autocomplete="off"></div>
+          <div class="field"><label for="api_hash">API hash</label><div class="input-wrap"><input id="api_hash" type="password" autocomplete="off" placeholder="Unchanged if empty"><button class="btn icon" type="button" data-reveal="api_hash" aria-label="Show or hide the hash"><svg class="i"><use href="#i-eye"/></svg></button></div></div>
+        </div>
+        <div class="actions"><button id="save-api" class="btn" type="button">Save API</button></div>
+        <div id="api-msg" class="alert"></div>
+      </div>
+    </section>
 
-  <section id="tab-downloads" hidden>
-    <h2>Downloads</h2>
-    <p>Seerr can ask Radarr and Sonarr to download a film or an episode. qBittorrent fetches it, a Telegram account you sign in here posts it to the channel, and the file on disk is deleted after Jellyfin has probed it. A file larger than the account can send is refused, not split. The account session is stored in <code>data/users</code> and is not encrypted, so keep that folder like a password.</p>
-    <p>Sign-in works from this computer or over Tailscale only. More accounts move the queue faster. One file still uploads through one account.</p>
-    <div class="row"><div><strong id="dl-switch-label">Off</strong><small id="dl-dir"></small></div><button id="dl-toggle" type="button">Turn on</button></div>
-    <div id="dl-msg" class="note"></div>
-    <h2>Accounts</h2>
-    <div id="dl-sessions"></div>
-    <button id="dl-add" type="button">Add account</button>
-    <h2>Pace</h2>
-    <p>These limits apply to every account that does not set its own. They are cautious guesses. Telegram has not published a limit. A flood wait doubles that account's rest until the end of the day.</p>
-    <label for="dl-mb">Megabytes per second (0 means no cap)</label>
-    <input id="dl-mb" inputmode="numeric" value="8">
-    <label for="dl-rest">Minutes between files</label>
-    <input id="dl-rest" inputmode="numeric" value="5">
-    <label for="dl-every">Long rest after this many GB</label>
-    <input id="dl-every" inputmode="numeric" value="20">
-    <label for="dl-long">Long rest, minutes</label>
-    <input id="dl-long" inputmode="numeric" value="60">
-    <label for="dl-daily">Daily GB per account</label>
-    <input id="dl-daily" inputmode="numeric" value="50">
-    <label for="dl-hours">Hours, such as 01-08. Empty means all day.</label>
-    <input id="dl-hours" autocomplete="off" placeholder="01-08">
-    <button id="dl-save-pace" type="button">Save pace</button>
-    <h2>Stack</h2>
-    <div id="dl-stack"></div>
-    <h2>Queue</h2>
-    <div id="dl-queue"></div>
-  </section>
-</main>
+    <!-- Channel -->
+    <section id="tab-channel" hidden>
+      <div class="page-head"><h1>Channel and language</h1><p>The private Telegram channel that holds your videos.</p></div>
+      <div class="card">
+        <details class="guide"><summary>How to set up the channel</summary>
+          <ol class="steps">
+            <li>In Telegram, create a private channel. A public channel is not used.</li>
+            <li>Post the videos there. A useful file name looks like <code>Title.Year.mkv</code>. Or put <code>Title (Year)</code> on the first line of the caption, so Jellyfin does not guess the wrong film.</li>
+            <li>Open any message in that channel, choose Copy Link, and paste it below. It looks like <code>https://t.me/c/1234567890/5</code>.</li>
+            <li>Or give the channel id. Forward any message from the channel to <a href="https://t.me/id_bot" target="_blank" rel="noreferrer">@id_bot</a> or <a href="https://t.me/getidsbot" target="_blank" rel="noreferrer">@getidsbot</a>. It replies with the id, a number that starts with <code>-100</code>. Paste that number below.</li>
+            <li>The library belongs to one channel. A different channel is refused, because the stream files already point at messages in the first one.</li>
+            <li>The language is the subtitle language: a short code such as <code>en</code>, <code>de</code>, <code>fr</code>, <code>fa</code> or <code>ja</code>. Leave it empty to skip subtitles.</li>
+          </ol>
+        </details>
+        <div class="field"><label for="channel">Channel link or id</label><input id="channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5"></div>
+        <div class="field" style="max-width:240px"><label for="language">Subtitle language</label><input id="language" maxlength="12" autocomplete="off" placeholder="en"></div>
+        <div class="actions"><button id="save-channel" class="btn" type="button">Save channel</button></div>
+        <div id="channel-msg" class="alert"></div>
+      </div>
+    </section>
+
+    <!-- Away -->
+    <section id="tab-away" hidden>
+      <div class="page-head"><h1>Away from home</h1><p>At home, open an address tagged “At home”. Away from home, use Tailscale. It is a private network between your own devices. Nothing is published on the public internet.</p></div>
+      <div class="card">
+        <h2>Setup</h2>
+        <ol class="steps" style="padding:8px 0 0">
+          <li>Install <a href="https://tailscale.com/download" target="_blank" rel="noreferrer">Tailscale</a> on this computer.</li>
+          <li>Install it on the phone or the TV.</li>
+          <li>Sign both devices in to the same Tailscale account.</li>
+          <li>Open the address tagged “Away from home” below.</li>
+          <li>Do not turn on Tailscale Funnel. Funnel would publish Jellyfin to the whole internet, and it is a poor fit for video. No router port has to be opened.</li>
+        </ol>
+      </div>
+      <div class="card"><h2>Addresses</h2><p>Tap copy and paste it on the other device.</p><div id="urls" class="list"></div></div>
+    </section>
+
+    <!-- Local files -->
+    <section id="tab-local" hidden>
+      <div class="page-head"><h1>Local files</h1><p>Videos already on this computer, sorted into films and series. Upload the ones you choose to the channel. Once Jellyfin has read a file from Telegram, its local copy can be deleted to get the space back. Nothing is uploaded or deleted until you press a button.</p></div>
+      <div class="grid" id="local-stats">
+        <div class="tile"><div class="label"><svg class="i"><use href="#i-disk"/></svg>Only on this computer</div><div class="value" id="lc-local">–</div><div class="sub" id="lc-local-sub">&nbsp;</div></div>
+        <div class="tile"><div class="label"><svg class="i"><use href="#i-down"/></svg>On the way</div><div class="value" id="lc-busy">–</div><div class="sub" id="lc-busy-sub">&nbsp;</div></div>
+        <div class="tile"><div class="label"><svg class="i"><use href="#i-chan"/></svg>In Telegram</div><div class="value" id="lc-synced">–</div><div class="sub" id="lc-synced-sub">&nbsp;</div></div>
+        <div class="tile" id="lc-problem-tile" hidden><div class="label"><svg class="i"><use href="#i-bot"/></svg>Needs a look</div><div class="value" id="lc-problem">–</div><div class="sub" id="lc-problem-sub">&nbsp;</div></div>
+      </div>
+      <div class="card" id="local-account" hidden>
+        <div class="notice"><span id="local-account-text"></span><button class="btn sm" id="local-signin" type="button">Add account</button></div>
+      </div>
+      <div class="card">
+        <h2>Folders</h2>
+        <p>Folders that hold your videos. The Telegram library and the downloads folder are never listed. Choosing folders works from this computer or over Tailscale.</p>
+        <div id="local-folders" class="list"></div>
+        <div class="field" style="margin-top:14px"><label for="local-add">Add a folder</label><input id="local-add" autocomplete="off" spellcheck="false" placeholder="D:\Library\Movie"></div>
+        <div class="actions">
+          <button id="local-add-btn" class="btn" type="button">Add folder</button>
+          <button id="local-scan" class="btn ghost" type="button">Scan now</button>
+          <span class="sum-meta" id="local-scanned"></span>
+        </div>
+        <div id="local-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Files</h2>
+        <p>Uploads follow the same pace as downloads and go through the signed-in accounts, one file per account. A file larger than every account can send is refused, not split.</p>
+        <div class="actions" style="margin:0 0 14px">
+          <button id="local-upload-all" class="btn" type="button" disabled>Upload everything that is only here</button>
+          <button id="local-delete-synced" class="btn danger" type="button" disabled>Delete every local copy that is in Telegram</button>
+        </div>
+        <div class="filters" id="local-filters" role="group" aria-label="Show"></div>
+        <div id="local-files"><div class="skeleton"></div></div>
+      </div>
+    </section>
+
+    <!-- Downloads -->
+    <section id="tab-downloads" hidden>
+      <div class="page-head"><h1>Torrents</h1><p>One switch for the whole chain: Seerr asks Radarr and Sonarr for a film or an episode, qBittorrent fetches it, a Telegram account you sign in here posts it to the channel, and the file on disk is deleted after Jellyfin has probed it. It is off until you turn it on. To fill the library from other Telegram channels instead, use the Channels tab.</p></div>
+      <div class="card">
+        <div class="item" style="padding:0;border:0">
+          <div class="main"><div class="title" id="dl-switch-label">Off</div><div class="meta" id="dl-dir"></div></div>
+          <button id="dl-toggle" class="switch" type="button" role="switch" aria-checked="false" aria-label="Torrent downloads"></button>
+        </div>
+        <div id="dl-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Telegram accounts</h2>
+        <p>These accounts are shared by torrents, local files and channels. A file larger than the account can send is refused, not split. Sign-in works from this computer or over Tailscale only. More accounts move the queue faster, but one file still uploads through one account. The session is stored in <code>data/users</code> and is not encrypted, so keep that folder like a password.</p>
+        <div id="dl-sessions" class="list"></div>
+        <div class="actions" style="margin-top:14px"><button id="dl-add" class="btn" type="button">Add account</button></div>
+      </div>
+      <div class="card">
+        <h2>Pace</h2>
+        <p>These limits apply to every account that does not set its own. They are cautious guesses. Telegram has not published a limit. A flood wait doubles that account's rest until the end of the day.</p>
+        <div class="cols">
+          <div class="field"><label for="dl-mb">Megabytes per second</label><span class="hint">0 means no cap</span><input id="dl-mb" inputmode="numeric" value="8"></div>
+          <div class="field"><label for="dl-rest">Minutes between files</label><span class="hint">&nbsp;</span><input id="dl-rest" inputmode="numeric" value="5"></div>
+          <div class="field"><label for="dl-every">Long rest after this many GB</label><span class="hint">&nbsp;</span><input id="dl-every" inputmode="numeric" value="20"></div>
+          <div class="field"><label for="dl-long">Long rest, minutes</label><span class="hint">&nbsp;</span><input id="dl-long" inputmode="numeric" value="60"></div>
+          <div class="field"><label for="dl-daily">Daily GB per account</label><span class="hint">&nbsp;</span><input id="dl-daily" inputmode="numeric" value="50"></div>
+          <div class="field"><label for="dl-hours">Hours</label><span class="hint">Such as 01-08. Empty means all day.</span><input id="dl-hours" autocomplete="off" placeholder="01-08"></div>
+        </div>
+        <div class="actions"><button id="dl-save-pace" class="btn" type="button">Save pace</button></div>
+      </div>
+      <div class="card"><h2>Stack</h2><div id="dl-stack" class="list"></div></div>
+      <div class="card"><h2>Queue</h2><div id="dl-queue" class="list"></div></div>
+    </section>
+
+    <!-- Channels -->
+    <section id="tab-sources" hidden>
+      <div class="page-head"><h1>Channels</h1><p>Give the signed-in Telegram account other channels to read. Films and series found there are copied into your library channel by Telegram itself, so nothing is downloaded to this computer and no disk space is used. Jellyfin then picks them up like any other post. It is off until you turn it on.</p></div>
+      <div class="card">
+        <div class="item" style="padding:0;border:0">
+          <div class="main"><div class="title" id="src-switch-label">Off</div><div class="meta" id="src-switch-meta"></div></div>
+          <button id="src-toggle" class="switch" type="button" role="switch" aria-checked="false" aria-label="Copy from channels"></button>
+        </div>
+        <div id="src-account" class="notice" style="margin-top:14px" hidden><span>No Telegram account is signed in. It must be an admin of the library channel.</span><button class="btn sm" id="src-signin" type="button">Add account</button></div>
+        <div id="src-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Add a channel</h2>
+        <details class="guide"><summary>How do I get a channel id?</summary>
+          <ol class="steps">
+            <li>A public channel has a username. Give it as <code>@name</code> or <code>https://t.me/name</code>, and skip the rest.</li>
+            <li>For a private channel, join it first with the account you signed in with. Telegram only lets an account read a private channel it is a member of.</li>
+            <li>In Telegram, forward any message from that channel to <a href="https://t.me/id_bot" target="_blank" rel="noreferrer">@id_bot</a> or <a href="https://t.me/getidsbot" target="_blank" rel="noreferrer">@getidsbot</a>.</li>
+            <li>The bot replies with the channel id, a number that starts with <code>-100</code>. Copy it and paste it below.</li>
+            <li>A link to a message also works, such as <code>https://t.me/c/1234567890/5</code>. An invite link (<code>t.me/+…</code>) does not.</li>
+          </ol>
+        </details>
+        <div class="field"><label for="src-input">Channel id or username</label><input id="src-input" autocomplete="off" spellcheck="false" placeholder="-1001234567890 or @channelname"></div>
+        <div class="actions"><button id="src-add" class="btn" type="button">Add channel</button></div>
+        <div id="src-add-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Your channels</h2>
+        <div id="src-list" class="list"><div class="skeleton"></div></div>
+        <div class="actions" style="margin-top:14px">
+          <button id="src-check" class="btn ghost sm" type="button">Check now</button>
+          <button id="src-rescan" class="btn ghost sm" type="button">Look at all channels again</button>
+          <span class="sum-meta" id="src-last"></span>
+        </div>
+      </div>
+      <div class="card">
+        <h2>What to copy</h2>
+        <p>The first check reaches back as far as you choose. After that only new posts are looked at. A video that is already in the library is never copied twice.</p>
+        <div class="cols">
+          <div class="field"><label for="src-back">Look back</label><span class="hint">How far the first check goes</span><select id="src-back"></select></div>
+          <div class="field"><label for="src-every">Check every, minutes</label><span class="hint">At least 5</span><input id="src-every" inputmode="numeric"></div>
+          <div class="field"><label for="src-minmin">Shortest video, minutes</label><span class="hint">Leaves out trailers and clips. 0 for no limit</span><input id="src-minmin" inputmode="numeric"></div>
+          <div class="field"><label for="src-minmb">Smallest file, MB</label><span class="hint">0 for no limit</span><input id="src-minmb" inputmode="numeric"></div>
+          <div class="field"><label for="src-maxgb">Largest file, GB</label><span class="hint">0 for no limit</span><input id="src-maxgb" inputmode="numeric"></div>
+          <div class="field"><label for="src-day">Most videos per day</label><span class="hint">All channels together. 0 for no limit</span><input id="src-day" inputmode="numeric"></div>
+          <div class="field"><label for="src-pause">Seconds between groups of ten</label><span class="hint">Keeps Telegram calm. 0 for none</span><input id="src-pause" inputmode="numeric"></div>
+        </div>
+        <div class="field"><label for="src-skip">Skip names or captions with these words</label><span class="hint">Separate with commas, any letter case</span><input id="src-skip" autocomplete="off" spellcheck="false" placeholder="trailer,teaser,sample"></div>
+        <div class="field"><label for="src-only">Only copy names or captions with one of these words</label><span class="hint">Empty means any. Separate with commas</span><input id="src-only" autocomplete="off" spellcheck="false" placeholder="1080p,dubbed"></div>
+        <div class="rule-row">
+          <div><strong>Only files that look like a film or an episode</strong><div class="sum-meta">The name must show a year, or a season and episode number such as S01E02.</div></div>
+          <button id="src-need" class="switch" type="button" role="switch" aria-checked="false" aria-label="Only films and episodes by name"></button>
+        </div>
+        <div class="actions"><button id="src-save" class="btn" type="button">Save rules</button></div>
+        <div id="src-rules-msg" class="alert"></div>
+      </div>
+      <div class="card"><h2>Recent</h2><div id="src-recent" class="list"></div></div>
+    </section>
+
+    <!-- Bot provider -->
+    <section id="tab-provider" hidden>
+      <div class="page-head"><h1>Bot provider</h1><p>Ready-made reading bots, so you do not have to create them yourself.</p></div>
+      <div class="card soon">
+        <span class="pill accent">Coming soon</span>
+        <p style="margin:0">Today you make each bot with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> and add it to the channel as an admin. A bot provider will hand you bots that are ready to use. It is not available yet. Your own bots keep working as they do now.</p>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div id="toasts" aria-live="polite"></div>
 
 <div id="login-modal" class="modal" hidden role="dialog" aria-modal="true" aria-labelledby="login-title">
   <div class="modal-card">
-    <ol class="steps" id="login-steps">
+    <ol class="stepper" id="login-steps">
       <li data-step="phone">1 Phone</li>
       <li data-step="code">2 Code</li>
       <li data-step="password">3 Password</li>
@@ -181,33 +495,67 @@ button.ghost { background:transparent; color:inherit; border:1px solid var(--lin
     <h2 id="login-title"></h2>
     <p id="login-help"></p>
     <input id="login-input" autocomplete="off" spellcheck="false">
-    <div id="login-msg" class="note"></div>
+    <div id="login-msg" class="alert"></div>
     <div class="modal-actions">
-      <button id="login-cancel" class="ghost" type="button">Cancel</button>
-      <button id="login-next" type="button"></button>
+      <button id="login-cancel" class="btn ghost" type="button">Cancel</button>
+      <button id="login-next" class="btn" type="button"></button>
     </div>
   </div>
 </div>
+
+<div id="confirm-modal" class="modal" hidden role="alertdialog" aria-modal="true" aria-labelledby="confirm-title" aria-describedby="confirm-text">
+  <div class="modal-card">
+    <h2 id="confirm-title"></h2>
+    <p id="confirm-text"></p>
+    <div class="modal-actions">
+      <button id="confirm-cancel" class="btn ghost" type="button">Cancel</button>
+      <button id="confirm-ok" class="btn" type="button"></button>
+    </div>
+  </div>
+</div>
+
 <script>
 const embedded = "__PANEL_CODE__";
 const code = new URLSearchParams(location.search).get('code') || embedded;
 const $ = id => document.getElementById(id);
-const tabs = ['accounts', 'bots', 'api', 'channel', 'away', 'downloads'];
+const tabs = ['overview', 'accounts', 'local', 'bots', 'api', 'channel', 'away', 'downloads', 'sources', 'provider'];
 const api = async (path, body) => {
   const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Something went wrong');
   return data;
 };
-const say = (id, text, cls) => { const n = $(id); n.textContent = text; n.className = 'note ' + (cls || ''); };
+const say = (id, text, cls) => { const n = $(id); n.textContent = text; n.className = 'alert ' + (cls || ''); };
+const el = (tag, cls, text) => { const n = document.createElement(tag); if (cls) n.className = cls; if (text !== undefined) n.textContent = text; return n; };
+const pill = (text, cls) => el('span', 'pill ' + (cls || ''), text);
+const icon = name => { const s = document.createElementNS('http://www.w3.org/2000/svg', 'svg'); s.setAttribute('class', 'i'); const u = document.createElementNS('http://www.w3.org/2000/svg', 'use'); u.setAttribute('href', '#i-' + name); s.append(u); return s; };
+function toast(text, bad) {
+  const t = el('div', 'toast' + (bad ? ' bad' : ''), text);
+  $('toasts').append(t);
+  setTimeout(() => t.remove(), 3800);
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); }
+  catch (e) { const t = el('textarea'); t.value = text; document.body.append(t); t.select(); try { document.execCommand('copy'); } catch (e2) {} t.remove(); }
+  toast('Copied');
+}
+function copyBtn(text, label) {
+  const b = el('button', 'btn icon'); b.type = 'button'; b.setAttribute('aria-label', label || 'Copy'); b.append(icon('copy'));
+  b.onclick = () => copy(text);
+  return b;
+}
+function busy(btn, on) { btn.classList.toggle('busy', on); btn.disabled = on; }
 
 function show(name) {
-  if (!tabs.includes(name)) name = 'accounts';
+  if (!tabs.includes(name)) name = 'overview';
   for (const tab of tabs) {
     $('tab-' + tab).hidden = tab !== name;
     document.querySelector('[data-tab="' + tab + '"]').setAttribute('aria-selected', tab === name ? 'true' : 'false');
   }
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  window.scrollTo(0, 0);
+  if (name === 'local') loadLocal(true);
+  if (name === 'sources') loadSources(true);
 }
 
 function drawAccounts(s) {
@@ -219,25 +567,30 @@ function drawAccounts(s) {
   const box = $('accounts');
   box.replaceChildren();
   for (const a of list) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const left = document.createElement('div');
-    const name = document.createElement('a');
-    name.href = a.path; name.textContent = a.app; name.style.fontWeight = '600';
-    const note = document.createElement('small');
-    note.textContent = a.note || '';
-    left.append(name, note);
-    const right = document.createElement('div');
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const title = el('div', 'title');
+    title.append(el('span', 'avatar', a.app.slice(0, 1).toUpperCase()));
+    const text = el('div');
+    const link = el('a', '', a.app); link.href = a.path; link.style.fontWeight = '650';
+    text.append(link, el('div', 'meta', a.note || ''));
+    title.append(text);
+    main.append(title);
+    row.append(main);
     if (a.user) {
-      const u = document.createElement('div'); u.append('user '); const uc = document.createElement('code'); uc.textContent = a.user; u.append(uc);
-      const p = document.createElement('div'); p.append('password '); const pc = document.createElement('code'); pc.textContent = a.password; p.append(pc);
-      right.append(u, p);
+      const creds = el('div', 'creds');
+      for (const [k, v] of [['User', a.user], ['Password', a.password]]) {
+        const line = el('div', 'cred'); line.append(el('b', '', k));
+        const c = el('code', '', v); line.append(c, copyBtn(v, 'Copy ' + k.toLowerCase()));
+        creds.append(line);
+      }
+      row.append(creds);
     } else {
-      const own = document.createElement('small'); own.textContent = 'your own account'; right.append(own);
+      row.append(pill('your own account'));
     }
-    row.append(left, right);
     box.append(row);
   }
+  if (!list.length) box.append(el('div', 'empty', 'No accounts to show yet.'));
 }
 
 function draw(s) {
@@ -245,101 +598,121 @@ function draw(s) {
   $('api_id').value = s.api_id || '';
   $('language').value = s.language || '';
   if (!$('channel').value) $('channel').placeholder = 'Current channel id ' + s.channel_id;
+
   const bots = $('bots');
   bots.replaceChildren();
+  let healthy = 0, waiting = 0;
   for (const b of s.bots || []) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const left = document.createElement('div');
-    const name = document.createElement('div');
-    name.textContent = b.name;
-    const meta = document.createElement('small');
-    let detail = 'token ending ' + b.hint;
-    if (!b.connected) detail += ' · connects after a restart';
-    else if (b.ok) detail += ' · admin';
-    else detail += b.error ? ' · ' + b.error : ' · not an admin';
-    meta.textContent = detail;
-    left.append(name, meta);
-    const btn = document.createElement('button');
-    btn.className = 'quiet';
-    btn.type = 'button';
-    btn.textContent = 'Remove';
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const title = el('div', 'title');
+    title.append(el('span', 'avatar', (b.name.replace('@', '')[0] || 'B').toUpperCase()));
+    const t = el('div'); t.append(el('div', '', b.name));
+    const meta = el('div', 'meta');
+    meta.append('token ending ' + b.hint);
+    if (!b.connected) { meta.append(pill('connects after restart', 'warn')); waiting++; }
+    else if (b.ok) { meta.append(pill('admin', 'ok')); healthy++; }
+    else meta.append(pill(b.error || 'not an admin', 'bad'));
+    t.append(meta); title.append(t); main.append(title);
+    const btn = el('button', 'btn danger sm', 'Remove'); btn.type = 'button';
     btn.onclick = () => changeBots({remove: b.id}, btn);
-    row.append(left, btn);
+    row.append(main, btn);
     bots.append(row);
   }
+  if (!(s.bots || []).length) bots.append(el('div', 'empty', 'No bots yet. Add one below.'));
+  const total = (s.bots || []).length;
+  $('st-bots').textContent = healthy + ' / ' + total;
+  $('st-bots-sub').textContent = healthy === total && total ? 'All bots can read the channel' : waiting ? waiting + ' connect after a restart' : 'Check the Bots tab';
+  $('dot-bots').hidden = !total || (healthy + waiting === total);
+  $('st-channel').textContent = s.channel_id;
+  $('st-lang').textContent = s.language ? 'Subtitles: ' + s.language : 'Subtitles off';
+
   const urls = $('urls');
   urls.replaceChildren();
   for (const a of s.addresses || []) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const c = document.createElement('code');
-    c.textContent = a.url;
-    const tag = document.createElement('small');
-    tag.textContent = a.away ? 'Away from home' : 'At home';
-    row.append(c, tag);
+    const row = el('div', 'item');
+    const main = el('div', 'main'); main.append(el('code', '', a.url));
+    const right = el('div', 'row'); right.append(pill(a.away ? 'Away from home' : 'At home', a.away ? 'accent' : 'ok'), copyBtn(a.url, 'Copy address'));
+    row.append(main, right);
     urls.append(row);
   }
+  if (!(s.addresses || []).length) urls.append(el('div', 'empty', 'No address yet. The list appears when the program has finished starting.'));
   const phone = (s.addresses || []).find(a => !a.away && !/localhost|127\.0\.0\.1/.test(a.url));
-  $('share-url').textContent = phone ? phone.url.replace(/\/$/, '') + '/panel?code=' + code : '';
+  shareUrl = phone ? phone.url.replace(/\/$/, '') + '/panel?code=' + code : '';
+  $('share-url').textContent = shareUrl || 'No network address yet';
+  $('copy-share').hidden = !shareUrl;
   $('link-seerr').hidden = !s.seerr;
   $('link-fladder').hidden = !s.fladder;
   $('link-fladder-releases').hidden = !s.fladder;
   document.querySelector('[data-tab="downloads"]').hidden = !s.downloads;
+  document.querySelector('[data-tab="local"]').hidden = !s.local;
+  document.querySelector('[data-tab="sources"]').hidden = !s.sources;
+  $('st-dl-tile').hidden = !s.downloads;
   drawDownloads(s.downloads);
-  if (!(s.addresses || []).length) {
-    const p = document.createElement('p');
-    p.textContent = 'No address yet. The list appears when the program has finished starting.';
-    urls.append(p);
-  }
 }
+let shareUrl = '';
 
 async function changeBots(body, btn) {
-  if (btn) btn.disabled = true;
+  busy(btn || $('add-btn'), true);
   say('bot-msg', 'Checking with Telegram…');
   try {
     await api('/panel/bots', body);
     say('bot-msg', 'Saved. Restart jellyfin-telegram to connect the new list.', 'ok');
+    toast('Bots saved');
     $('add').value = '';
     draw(await api('/panel/state'));
   } catch (e) {
     say('bot-msg', e.message, 'bad');
-    if (btn) btn.disabled = false;
   }
+  busy(btn || $('add-btn'), false);
 }
 
 async function save(body, btn, msg) {
-  btn.disabled = true;
+  busy(btn, true);
   say(msg, 'Checking with Telegram…');
   try {
     await api('/panel/settings', body);
     say(msg, 'Saved. Restart jellyfin-telegram to use it.', 'ok');
+    toast('Saved');
     $('api_hash').value = '';
     $('channel').value = '';
     draw(await api('/panel/state'));
   } catch (e) {
     say(msg, e.message, 'bad');
   }
-  btn.disabled = false;
+  busy(btn, false);
 }
 
-document.querySelectorAll('nav button').forEach(btn => {
-  btn.onclick = () => show(btn.dataset.tab);
-});
+document.querySelectorAll('nav button').forEach(btn => { btn.onclick = () => show(btn.dataset.tab); });
+document.querySelectorAll('[data-reveal]').forEach(b => { b.onclick = () => { const i = $(b.dataset.reveal); i.type = i.type === 'password' ? 'text' : 'password'; }; });
 window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 $('add-btn').onclick = () => changeBots({add: $('add').value.trim()});
+$('add').addEventListener('keydown', e => { if (e.key === 'Enter') $('add-btn').click(); });
 $('save-api').onclick = () => save({api_id:$('api_id').value, api_hash:$('api_hash').value}, $('save-api'), 'api-msg');
 $('save-channel').onclick = () => save({channel:$('channel').value, language:$('language').value}, $('save-channel'), 'channel-msg');
+$('copy-share').onclick = () => copy(shareUrl);
+
+// Theme: follows the system until the person picks one.
+const root = document.documentElement;
+try { const t = localStorage.getItem('panel-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+$('theme').onclick = () => {
+  const dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+  root.dataset.theme = dark ? 'light' : 'dark';
+  try { localStorage.setItem('panel-theme', root.dataset.theme); } catch (e) {}
+};
 
 function paceBody() {
   return {mb_per_sec:Number($('dl-mb').value||0), rest_minutes:Number($('dl-rest').value||0), long_every_gb:Number($('dl-every').value||0), long_rest_minutes:Number($('dl-long').value||0), daily_gb:Number($('dl-daily').value||0), hours:$('dl-hours').value.trim()};
 }
+const fmtBytes = n => n >= 1e9 ? (n/1e9).toFixed(1) + ' GB' : (n/1e6).toFixed(0) + ' MB';
 function drawDownloads(d) {
   if (!d) return;
-  $('dl-switch-label').textContent = d.enabled ? 'On' : 'Off';
-  $('dl-toggle').textContent = d.enabled ? 'Turn off' : 'Turn on';
+  $('dl-switch-label').textContent = d.enabled ? 'Torrent downloads are on' : 'Torrent downloads are off';
+  $('dl-toggle').setAttribute('aria-checked', d.enabled ? 'true' : 'false');
   const free = d.free_bytes ? (d.free_bytes/1024/1024/1024).toFixed(1) + ' GiB free' : '';
   $('dl-dir').textContent = [d.dir, free].filter(Boolean).join(' · ');
+  $('st-dl').textContent = d.enabled ? 'On' : 'Off';
+  $('st-dl-sub').textContent = d.enabled ? ((d.queue || []).length + ' in the queue') : 'Files in the channel still play';
   if (d.pace && document.activeElement && !document.activeElement.id.startsWith('dl-')) {
     $('dl-mb').value = d.pace.MBPerSec ?? d.pace.mb_per_sec ?? '';
     $('dl-rest').value = d.pace.RestMinutes ?? d.pace.rest_minutes ?? '';
@@ -351,52 +724,62 @@ function drawDownloads(d) {
   const sessions = $('dl-sessions');
   sessions.replaceChildren();
   for (const ses of d.sessions || []) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const left = document.createElement('div');
-    const name = document.createElement('div');
-    name.textContent = ses.username ? '@'+ses.username : (ses.phone || ('user '+ses.user_id));
-    const meta = document.createElement('small');
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const title = el('div', 'title');
+    const nm = ses.username ? '@' + ses.username : (ses.phone || ('user ' + ses.user_id));
+    title.append(el('span', 'avatar', nm.replace('@', '').replace('+', '')[0] || 'U'));
+    const t = el('div'); t.append(el('div', '', nm));
+    const meta = el('div', 'meta');
     const cap = Math.round((ses.max_bytes||0)/1000/1000);
-    meta.textContent = [ses.premium ? 'Premium' : 'Standard', ses.admin ? 'admin' : 'not an admin', cap ? cap+' MB' : '', ses.connected ? 'connected' : 'not connected', ses.error || ''].filter(Boolean).join(' · ');
-    left.append(name, meta);
-    const btn = document.createElement('button');
-    btn.className = 'quiet'; btn.type = 'button'; btn.textContent = 'Sign out';
-    btn.onclick = async () => { try { await api('/panel/downloads/logout', {user_id:ses.user_id}); draw(await api('/panel/state')); } catch (e) { say('dl-msg', e.message, 'bad'); } };
-    row.append(left, btn);
+    meta.append(pill(ses.connected ? 'connected' : 'not connected', ses.connected ? 'ok' : 'warn'), pill(ses.admin ? 'admin' : 'not an admin', ses.admin ? 'ok' : 'bad'), pill(ses.premium ? 'Premium' : 'Standard'));
+    if (cap) meta.append(cap + ' MB limit');
+    if (ses.error) meta.append(pill(ses.error, 'bad'));
+    t.append(meta);
+    if (ses.busy && ses.total) {
+      const bar = el('div', 'bar'); bar.style.marginTop = '8px';
+      const fill = el('i'); fill.style.width = Math.min(100, Math.round(ses.progress / ses.total * 100)) + '%'; bar.append(fill);
+      t.append(bar, el('div', 'meta', 'Uploading ' + fmtBytes(ses.progress) + ' of ' + fmtBytes(ses.total)));
+    }
+    title.append(t); main.append(title);
+    const btn = el('button', 'btn danger sm', 'Sign out'); btn.type = 'button';
+    btn.onclick = async () => { try { await api('/panel/downloads/logout', {user_id:ses.user_id}); toast('Signed out'); draw(await api('/panel/state')); } catch (e) { say('dl-msg', e.message, 'bad'); } };
+    row.append(main, btn);
     sessions.append(row);
   }
+  if (!(d.sessions || []).length) sessions.append(el('div', 'empty', 'No Telegram account is signed in.'));
+
   const stack = $('dl-stack');
   stack.replaceChildren();
-  const lines = [];
-  if (d.error) lines.push(d.error);
-  if (d.warning) lines.push(d.warning);
-  if (d.search_every_minutes) lines.push(d.last_search > 0 ? 'Looked again for missing titles at ' + new Date(d.last_search * 1000).toLocaleTimeString() + ', then every ' + d.search_every_minutes + ' minutes.' : 'Will look again for missing titles every ' + d.search_every_minutes + ' minutes.');
-  if (d.radarr_user) lines.push('Radarr at /radarr/  user '+d.radarr_user+'  password '+d.radarr_password);
-  if (d.sonarr_user) lines.push('Sonarr at /sonarr/  user '+d.sonarr_user+'  password '+d.sonarr_password);
-  if (d.enabled || (d.containers || []).length) lines.push(d.crawler ? 'Bitmagnet is crawling the DHT.' : 'Bitmagnet search is on. The DHT crawler is paused because the database reached its cap.');
-  for (const c of d.containers || []) lines.push(c.name+' '+(c.running ? 'running' : 'stopped'));
-  for (const line of lines) { const p = document.createElement('p'); p.textContent = line; stack.append(p); }
+  const line = (text, cls) => { const r = el('div', 'item'); r.append(el('div', 'main', text)); if (cls) r.append(pill(cls[0], cls[1])); stack.append(r); };
+  if (d.error) line(d.error, ['error', 'bad']);
+  if (d.warning) line(d.warning, ['warning', 'warn']);
+  if (d.search_every_minutes) line(d.last_search > 0 ? 'Looked again for missing titles at ' + new Date(d.last_search * 1000).toLocaleTimeString() + ', then every ' + d.search_every_minutes + ' minutes.' : 'Will look again for missing titles every ' + d.search_every_minutes + ' minutes.');
+  if (d.enabled || (d.containers || []).length) line(d.crawler ? 'Bitmagnet is crawling the DHT.' : 'Bitmagnet search is on. The DHT crawler is paused because the database reached its cap.', d.crawler ? ['crawling', 'ok'] : ['paused', 'warn']);
+  for (const c of d.containers || []) line(c.name, [c.running ? 'running' : 'stopped', c.running ? 'ok' : 'bad']);
+  if (!stack.children.length) stack.append(el('div', 'empty', 'Nothing is running yet.'));
+
   const queue = $('dl-queue');
   queue.replaceChildren();
   for (const item of d.queue || []) {
-    const row = document.createElement('div');
-    row.className = 'row';
-    const left = document.createElement('div');
-    left.textContent = item.name || '';
-    const meta = document.createElement('small');
-    meta.textContent = [item.state, item.error].filter(Boolean).join(' · ');
-    left.append(meta);
-    row.append(left);
+    const row = el('div', 'item');
+    const main = el('div', 'main'); main.append(el('div', 'title', item.name || ''));
+    if (item.error) main.append(el('div', 'meta', item.error));
+    const st = String(item.state || '');
+    row.append(main, pill(st || 'queued', /err|fail|stall/i.test(st) || item.error ? 'bad' : /done|complete|upload|seed/i.test(st) ? 'ok' : 'accent'));
     queue.append(row);
   }
-  if (!(d.queue || []).length) { const p = document.createElement('p'); p.textContent = 'Nothing queued.'; queue.append(p); }
+  if (!(d.queue || []).length) queue.append(el('div', 'empty', 'Nothing queued.'));
 }
 $('dl-toggle').onclick = async () => {
-  const on = $('dl-toggle').textContent === 'Turn on';
-  try { await api('/panel/automation', {enabled:on}); say('dl-msg', on ? 'Starting. Playback is not interrupted.' : 'Stopped. Files already in the channel still play.', 'ok'); draw(await api('/panel/state')); }
-  catch (e) { say('dl-msg', e.message, 'bad'); }
+  const on = $('dl-toggle').getAttribute('aria-checked') !== 'true';
+  try {
+    await api('/panel/automation', {enabled:on});
+    say('dl-msg', on ? 'Starting. Playback is not interrupted.' : 'Stopped. Files already in the channel still play.', 'ok');
+    draw(await api('/panel/state'));
+  } catch (e) { say('dl-msg', e.message, 'bad'); }
 };
+
 // Signing in takes up to three steps. Telegram is asked for a code only after the phone number is
 // sent, and for the two-step password only if the account has one.
 const loginCopy = {
@@ -440,7 +823,7 @@ async function nextLogin() {
   if (!value) { say('login-msg', 'This field is empty.', 'bad'); return; }
   const body = loginStep === 'phone' ? {phone:value} : loginStep === 'code' ? {code:value} : {password:value};
   loginBusy = true;
-  $('login-next').disabled = true;
+  busy($('login-next'), true);
   say('login-msg', loginStep === 'phone' ? 'Asking Telegram to send a code…' : 'Checking with Telegram…');
   const failedAt = loginStep;
   try {
@@ -449,7 +832,7 @@ async function nextLogin() {
       await closeLogin(false);
       // The account stays signed in even when it cannot post yet. The list shows why.
       if (res.warning) say('dl-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
-      else say('dl-msg', 'Signed in.', 'ok');
+      else { say('dl-msg', 'Signed in.', 'ok'); toast('Signed in'); }
       draw(await api('/panel/state'));
     } else {
       showLoginStep(res.step);
@@ -461,7 +844,7 @@ async function nextLogin() {
     say('login-msg', e.message + (failedAt !== 'phone' ? ' Start again with the phone number.' : ''), 'bad');
   }
   loginBusy = false;
-  $('login-next').disabled = false;
+  busy($('login-next'), false);
 }
 $('dl-add').onclick = openLogin;
 $('login-next').onclick = nextLogin;
@@ -469,11 +852,413 @@ $('login-cancel').onclick = () => closeLogin(true);
 $('login-input').addEventListener('keydown', e => { if (e.key === 'Enter') nextLogin(); });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('login-modal').hidden) closeLogin(true); });
 $('dl-save-pace').onclick = async () => {
-  try { await api('/panel/downloads/pace', paceBody()); say('dl-msg', 'Pace saved.', 'ok'); }
-  catch (e) { say('dl-msg', e.message, 'bad'); }
+  try { await api('/panel/downloads/pace', paceBody()); say('dl-msg', 'Pace saved.', 'ok'); toast('Pace saved'); }
+  catch (e) { say('dl-msg', e.message, 'bad'); toast(e.message, true); }
 };
-show(location.hash.slice(1) || 'accounts');
-api('/panel/state').then(draw).catch(e => say('bot-msg', e.message, 'bad'));
+// ---- Local files ----
+// The server lists the videos and says where each one stands. Every upload and every delete here
+// starts from a button, and a delete asks first.
+const localChips = [['all', 'All'], ['local', 'Only here'], ['busy', 'On the way'], ['synced', 'In Telegram'], ['problem', 'Needs a look']];
+let localFilter = 'all', localSeen = '', localData = null, localBusy = false;
+const openState = new Map();
+const isOpen = (key, dflt) => openState.has(key) ? openState.get(key) : dflt;
+const bucket = st => (st === 'waiting' || st === 'uploading' || st === 'checking') ? 'busy' : st;
+const sizeText = n => n >= 1e12 ? (n / 1e12).toFixed(2) + ' TB' : n >= 1e9 ? (n / 1e9).toFixed(1) + ' GB' : n >= 1e6 ? (n / 1e6).toFixed(0) + ' MB' : Math.max(1, Math.round(n / 1e3)) + ' KB';
+const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
+const localApi = (action, body) => api('/panel/local/' + action, body || {});
+
+let confirmClose = null;
+function confirmBox(title, text, button) {
+  return new Promise(resolve => {
+    $('confirm-title').textContent = title;
+    $('confirm-text').textContent = text;
+    $('confirm-ok').textContent = button;
+    const done = v => { $('confirm-modal').hidden = true; confirmClose = null; resolve(v); };
+    $('confirm-ok').onclick = () => done(true);
+    $('confirm-cancel').onclick = () => done(false);
+    confirmClose = () => done(false);
+    $('confirm-modal').hidden = false;
+    $('confirm-cancel').focus();
+  });
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && confirmClose) confirmClose(); });
+
+async function loadLocal(force) {
+  if (localBusy && !force) return;
+  try {
+    const v = await api('/panel/local');
+    const text = JSON.stringify(v);
+    if (force || text !== localSeen) { localSeen = text; drawLocal(v); }
+  } catch (e) {
+    if (force) say('local-msg', e.message, 'bad');
+  }
+}
+
+function allLocalFiles(v) {
+  const out = [];
+  for (const c of v.categories || []) for (const g of c.groups || []) for (const f of g.files || []) out.push(f);
+  return out;
+}
+
+function drawLocal(v) {
+  localData = v;
+  const files = allLocalFiles(v);
+  const t = v.totals || {};
+  const tile = (id, total, subText) => { $(id).textContent = total ? total.count : 0; $(id + '-sub').textContent = subText; };
+  tile('lc-local', t.local, t.local && t.local.count ? sizeText(t.local.bytes) + ' to free once uploaded' : 'Nothing is waiting');
+  tile('lc-busy', t.busy, t.busy && t.busy.count ? sizeText(t.busy.bytes) : 'Nothing is being sent');
+  tile('lc-synced', t.synced, t.synced && t.synced.count ? sizeText(t.synced.bytes) + ' can be deleted from here' : 'Nothing yet');
+  $('lc-problem-tile').hidden = !(t.problem && t.problem.count);
+  if (t.problem && t.problem.count) tile('lc-problem', t.problem, 'Open the list to see why');
+
+  $('local-account').hidden = !v.problem;
+  $('local-account-text').textContent = v.problem || '';
+
+  const folders = $('local-folders');
+  folders.replaceChildren();
+  for (const f of v.folders || []) {
+    const row = el('div', 'item');
+    const main = el('div', 'main'); main.append(el('code', '', f.path));
+    const meta = el('div', 'meta');
+    if (f.error) meta.append(pill(f.error, 'bad'));
+    else meta.append(plural(f.files, 'video') + ' · ' + sizeText(f.bytes));
+    main.append(meta);
+    const btn = el('button', 'btn danger sm', 'Remove'); btn.type = 'button';
+    btn.onclick = () => runLocal('folder', {remove: f.path}, btn, 'Folder removed. Its files were not touched.');
+    row.append(main, btn);
+    folders.append(row);
+  }
+  if (!(v.folders || []).length) folders.append(el('div', 'empty', 'No folder yet. Add the folder that holds your films or series.'));
+  $('local-scanned').textContent = v.scanning ? 'Scanning…' : v.scanned ? 'Scanned at ' + new Date(v.scanned * 1000).toLocaleTimeString() : '';
+
+  const only = files.filter(f => f.status === 'local'), synced = files.filter(f => f.status === 'synced');
+  const up = $('local-upload-all'), del = $('local-delete-synced');
+  up.disabled = !only.length || !!v.problem;
+  up.textContent = only.length ? 'Upload everything that is only here (' + only.length + ', ' + sizeText(only.reduce((n, f) => n + f.size, 0)) + ')' : 'Upload everything that is only here';
+  del.disabled = !synced.length;
+  del.textContent = synced.length ? 'Delete every local copy that is in Telegram (' + synced.length + ', ' + sizeText(synced.reduce((n, f) => n + f.size, 0)) + ')' : 'Delete every local copy that is in Telegram';
+
+  const chips = $('local-filters');
+  chips.replaceChildren();
+  for (const [key, label] of localChips) {
+    const n = key === 'all' ? files.length : files.filter(f => bucket(f.status) === key).length;
+    if (key === 'problem' && !n && localFilter !== 'problem') continue;
+    const c = el('button', 'chip', label + ' ' + n); c.type = 'button';
+    c.setAttribute('aria-pressed', localFilter === key ? 'true' : 'false');
+    c.onclick = () => { localFilter = key; drawLocal(localData); };
+    chips.append(c);
+  }
+  drawLocalFiles(v);
+}
+
+function drawLocalFiles(v) {
+  const box = $('local-files');
+  box.replaceChildren();
+  const keep = f => localFilter === 'all' || bucket(f.status) === localFilter;
+  for (const cat of v.categories || []) {
+    const groups = (cat.groups || []).map(g => Object.assign({}, g, {files: g.files.filter(keep)})).filter(g => g.files.length);
+    if (!groups.length) continue;
+    const count = groups.reduce((n, g) => n + g.files.length, 0);
+    const bytes = groups.reduce((n, g) => n + g.files.reduce((m, f) => m + f.size, 0), 0);
+    const d = el('details', 'cat');
+    const sum = el('summary');
+    sum.append(el('span', 'sum-title', cat.label), el('span', 'sum-meta', plural(count, 'file') + ' · ' + sizeText(bytes)));
+    d.append(sum);
+    const body = el('div', 'cat-body');
+    d.append(body);
+    lazyBody(d, 'cat:' + cat.id, true, body, () => {
+      for (const g of groups) {
+        if (g.files.length === 1 && cat.id !== 'shows') body.append(fileRow(g.files[0], g));
+        else body.append(groupBlock(cat, g));
+      }
+    });
+    box.append(d);
+  }
+  if (!box.children.length) box.append(el('div', 'empty', (v.folders || []).length ? (localFilter === 'all' ? 'No videos found in these folders yet.' : 'Nothing here.') : 'Add a folder above to see its videos.'));
+}
+
+// The body of a section is built when it opens, so a library of thousands of episodes stays quick.
+function lazyBody(d, key, dflt, body, fill) {
+  let filled = false;
+  const run = () => { if (!filled) { filled = true; fill(); } };
+  d.open = isOpen(key, dflt);
+  if (d.open) run();
+  d.addEventListener('toggle', () => { openState.set(key, d.open); if (d.open) run(); });
+}
+
+function groupBlock(cat, g) {
+  const d = el('details', 'grp');
+  const sum = el('summary');
+  const name = g.title + (g.year ? ' (' + g.year + ')' : '');
+  const only = g.files.filter(f => f.status === 'local'), synced = g.files.filter(f => f.status === 'synced');
+  sum.append(el('span', 'sum-title', name), el('span', 'sum-meta', plural(g.files.length, cat.id === 'shows' ? 'episode' : 'file') + ' · ' + sizeText(g.bytes) + (synced.length ? ' · ' + synced.length + ' in Telegram' : '')));
+  if (only.length) sum.append(summaryButton('Upload ' + only.length, '', b => uploadIds(only.map(f => f.id), b)));
+  if (synced.length) sum.append(summaryButton('Delete ' + synced.length + ' local', 'danger', b => deleteFiles(synced, b, name)));
+  d.append(sum);
+  const body = el('div', 'cat-body');
+  d.append(body);
+  lazyBody(d, 'grp:' + cat.id + ':' + name, false, body, () => { for (const f of g.files) body.append(fileRow(f, g)); });
+  return d;
+}
+
+function summaryButton(text, cls, fn) {
+  const b = el('button', 'btn sm ' + cls, text); b.type = 'button';
+  // A button inside a summary would otherwise also open or close the section.
+  b.onclick = e => { e.preventDefault(); e.stopPropagation(); fn(b); };
+  return b;
+}
+
+function fileRow(f, g) {
+  const row = el('div', 'frow');
+  const main = el('div', 'main');
+  let title = f.name;
+  if (f.kind === 'movie') title = f.title + (f.year ? ' (' + f.year + ')' : '');
+  else if (f.kind === 'episode') title = 'S' + String(f.season).padStart(2, '0') + 'E' + String(f.number).padStart(2, '0') + ' · ' + f.name;
+  main.append(el('div', 'name', title));
+  main.append(el('div', 'sub', f.rel + ' · ' + sizeText(f.size)));
+  if (f.note) main.append(el('div', 'sub' + (f.status === 'problem' ? ' bad' : ''), f.note));
+  if (f.status === 'uploading' && f.total) {
+    const bar = el('div', 'bar wide'); const fill = el('i'); fill.style.width = Math.min(100, Math.round(f.progress / f.total * 100)) + '%'; bar.append(fill);
+    main.append(bar, el('div', 'sub', sizeText(f.progress) + ' of ' + sizeText(f.total)));
+  }
+  const side = el('div', 'side');
+  const mk = (text, cls, fn) => { const b = el('button', 'btn sm ' + cls, text); b.type = 'button'; b.onclick = () => fn(b); return b; };
+  const cancel = () => mk('Cancel', 'ghost', b => runLocal('cancel', {ids: [f.id]}, b, 'Taken out of the line.'));
+  switch (f.status) {
+    case 'local': side.append(pill('Only here'), mk('Upload', '', b => uploadIds([f.id], b))); break;
+    case 'waiting': side.append(pill('Waiting', 'accent'), cancel()); break;
+    case 'uploading': side.append(pill('Uploading', 'accent')); break;
+    case 'checking': side.append(pill('In Telegram, checking', 'accent')); break;
+    case 'synced': side.append(pill('In Telegram', 'ok'), mk('Delete local copy', 'danger', b => deleteFiles([f], b, f.name))); break;
+    case 'problem':
+      side.append(pill('Needs a look', 'bad'));
+      if (f.state === 'mismatch') side.append(mk('Upload again', '', b => uploadIds([f.id], b)));
+      side.append(cancel());
+      break;
+  }
+  row.append(main, side);
+  return row;
+}
+
+async function runLocal(action, body, btn, okText) {
+  if (btn) busy(btn, true);
+  localBusy = true;
+  try {
+    const res = await localApi(action, body);
+    if (okText) say('local-msg', okText, 'ok');
+    await loadLocal(true);
+    return res;
+  } catch (e) {
+    say('local-msg', e.message, 'bad');
+    toast(e.message, true);
+  } finally {
+    localBusy = false;
+    if (btn) busy(btn, false);
+  }
+}
+
+async function uploadIds(ids, btn) {
+  const res = await runLocal('upload', {ids}, btn);
+  if (!res) return;
+  const text = res.done ? 'Queued ' + plural(res.done, 'file') + ' (' + sizeText(res.bytes) + ').' + (res.skipped ? ' ' + res.skipped + ' skipped, already sent or waiting.' : '') : 'Nothing to queue. ' + res.skipped + ' were already sent or waiting.';
+  say('local-msg', text, res.done ? 'ok' : '');
+  if (res.done) toast('Queued ' + plural(res.done, 'file'));
+}
+
+async function deleteFiles(list, btn, label) {
+  const total = list.reduce((n, f) => n + f.size, 0);
+  const what = list.length === 1 ? '“' + label + '”' : plural(list.length, 'file') + (label ? ' of ' + label : '');
+  const ok = await confirmBox('Delete from this computer?',
+    'This deletes ' + what + ' (' + sizeText(total) + ') from this computer for good. ' + (list.length === 1 ? 'It is' : 'Each one is') + ' in the Telegram channel, and Jellyfin has read it from there. The channel copy stays.',
+    list.length === 1 ? 'Delete the local copy' : 'Delete ' + list.length + ' local copies');
+  if (!ok) return;
+  const res = await runLocal('delete', {ids: list.map(f => f.id)}, btn);
+  reportDelete(res);
+}
+
+function reportDelete(res) {
+  if (!res) return;
+  const bad = (res.errors || []).slice(0, 3).join(' ');
+  if (res.done) {
+    say('local-msg', 'Deleted ' + plural(res.done, 'file') + ' and freed ' + sizeText(res.bytes) + '.' + (res.errors && res.errors.length ? ' Kept ' + res.errors.length + ': ' + bad : ''), res.errors && res.errors.length ? '' : 'ok');
+    toast('Freed ' + sizeText(res.bytes));
+  } else {
+    say('local-msg', 'Nothing was deleted.' + (bad ? ' ' + bad : ''), 'bad');
+  }
+}
+
+$('local-add-btn').onclick = async () => {
+  const path = $('local-add').value.trim();
+  if (!path) { say('local-msg', 'Type the full path of a folder.', 'bad'); return; }
+  const res = await runLocal('folder', {add: path}, $('local-add-btn'), 'Folder added. Scanning it now.');
+  if (res) { $('local-add').value = ''; setTimeout(() => loadLocal(true), 1500); }
+};
+$('local-add').addEventListener('keydown', e => { if (e.key === 'Enter') $('local-add-btn').click(); });
+$('local-scan').onclick = async () => {
+  await runLocal('scan', {}, $('local-scan'), 'Scanned.');
+};
+$('local-signin').onclick = openLogin;
+$('local-upload-all').onclick = () => {
+  const only = allLocalFiles(localData || {}).filter(f => f.status === 'local');
+  if (only.length) uploadIds(only.map(f => f.id), $('local-upload-all'));
+};
+$('local-delete-synced').onclick = async () => {
+  const synced = allLocalFiles(localData || {}).filter(f => f.status === 'synced');
+  if (!synced.length) return;
+  const total = synced.reduce((n, f) => n + f.size, 0);
+  const ok = await confirmBox('Delete every local copy that is in Telegram?',
+    'This deletes ' + plural(synced.length, 'file') + ' (' + sizeText(total) + ') from this computer for good. Each one is in the Telegram channel, and Jellyfin has read it from there. The channel copies stay. Files that are only here are not touched.',
+    'Delete ' + synced.length + ' local copies');
+  if (!ok) return;
+  const res = await runLocal('delete_synced', {}, $('local-delete-synced'));
+  reportDelete(res);
+};
+// Progress and states move on their own, so the open tab asks again every few seconds.
+setInterval(() => { if (!document.hidden && !$('tab-local').hidden && $('login-modal').hidden && !confirmClose) loadLocal(false); }, 4000);
+
+// ---- Channels ----
+const backChoices = [[1, '1 day'], [3, '3 days'], [7, '1 week'], [14, '2 weeks'], [30, '1 month'], [90, '3 months'], [180, '6 months'], [365, '1 year'], [0, 'No limit, all history']];
+const srcApi = (action, body) => api('/panel/sources/' + action, body || {});
+let srcSeen = '', srcDirty = false;
+const srcFields = {look_back_days:'src-back', every_minutes:'src-every', min_minutes:'src-minmin', min_mb:'src-minmb', max_gb:'src-maxgb', max_per_day:'src-day', pause_seconds:'src-pause', skip_words:'src-skip', only_words:'src-only'};
+function fillBack(value) {
+  const sel = $('src-back');
+  sel.replaceChildren();
+  const choices = backChoices.slice();
+  if (!choices.some(c => c[0] === value)) choices.push([value, value + ' days']);
+  for (const [v, label] of choices) { const o = el('option', '', label); o.value = String(v); sel.append(o); }
+  sel.value = String(value);
+}
+function fillRules(set) {
+  fillBack(set.look_back_days);
+  for (const [key, id] of Object.entries(srcFields)) if (key !== 'look_back_days') $(id).value = set[key] ?? '';
+  $('src-need').setAttribute('aria-checked', set.need_title ? 'true' : 'false');
+}
+function readRules() {
+  const out = {};
+  for (const [key, id] of Object.entries(srcFields)) out[key] = (key === 'skip_words' || key === 'only_words') ? $(id).value.trim() : Number($(id).value || 0);
+  out.need_title = $('src-need').getAttribute('aria-checked') === 'true';
+  return out;
+}
+async function loadSources(force) {
+  try {
+    const v = await api('/panel/sources');
+    const text = JSON.stringify(v);
+    if (force || text !== srcSeen) { srcSeen = text; drawSources(v, force); }
+  } catch (e) { if (force) say('src-msg', e.message, 'bad'); }
+}
+function ago(unix) {
+  if (!unix) return 'not checked yet';
+  const sec = Math.max(0, Math.round(Date.now() / 1000 - unix));
+  return sec < 90 ? 'just now' : sec < 5400 ? Math.round(sec / 60) + ' min ago' : sec < 172800 ? Math.round(sec / 3600) + ' h ago' : Math.round(sec / 86400) + ' days ago';
+}
+function drawSources(v, force) {
+  const set = v.settings || {};
+  $('src-switch-label').textContent = set.enabled ? 'Copying from channels is on' : 'Copying from channels is off';
+  $('src-toggle').setAttribute('aria-checked', set.enabled ? 'true' : 'false');
+  const bits = [];
+  if (set.enabled) bits.push(v.running ? 'Checking now' : 'Next check within ' + set.every_minutes + ' minutes');
+  bits.push(v.today + ' copied today' + (set.max_per_day ? ' of ' + set.max_per_day : ''));
+  $('src-switch-meta').textContent = bits.join(' · ');
+  const noAccount = !(v.accounts && v.accounts.healthy);
+  $('src-account').hidden = !noAccount;
+  if (v.note) say('src-msg', v.note, ''); else if ($('src-msg').className.indexOf('bad') < 0) say('src-msg', '');
+  $('src-last').textContent = v.last_pass ? 'Last check ' + ago(v.last_pass) : '';
+  if (force || !srcDirty) fillRules(set);
+
+  const list = $('src-list');
+  list.replaceChildren();
+  const names = {};
+  for (const src of v.sources || []) {
+    names[src.id] = src.title || src.username || String(src.channel_id);
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const title = el('div', 'title');
+    title.append(el('span', 'avatar', (src.title || src.username || '#')[0].toUpperCase()));
+    const t = el('div'); t.append(el('div', '', src.title || ('Channel ' + src.channel_id)));
+    const meta = el('div', 'meta');
+    meta.append(src.username ? '@' + src.username : '-100' + src.channel_id);
+    if (src.no_forwards) meta.append(pill('copying forbidden', 'bad'));
+    else if (src.error) meta.append(pill('problem', 'bad'));
+    else if (!src.enabled) meta.append(pill('paused', 'warn'));
+    else if (src.in_progress) meta.append(pill('going through history', 'accent'));
+    else if (src.last_scan) meta.append(pill('up to date', 'ok'));
+    else meta.append(pill('waiting for the first check', 'accent'));
+    meta.append(src.copied + ' copied');
+    if (src.last_scan) meta.append('checked ' + ago(src.last_scan));
+    t.append(meta);
+    if (src.error) t.append(el('div', 'meta', src.error));
+    title.append(t); main.append(title);
+    const acts = el('div', 'actions'); acts.style.marginTop = '0';
+    if (!src.no_forwards) {
+      const pause = el('button', 'btn ghost sm', src.enabled ? 'Pause' : 'Resume'); pause.type = 'button';
+      pause.onclick = async () => { try { await srcApi('pause', {id:src.id, enabled:!src.enabled}); loadSources(true); } catch (e) { say('src-msg', e.message, 'bad'); } };
+      acts.append(pause);
+    }
+    const strict = el('button', 'btn ghost sm', src.strict ? 'Strict: on' : 'Strict: off'); strict.type = 'button';
+    strict.title = 'Strict keeps only files whose name shows a year or an episode number. Use it for a channel that posts everything.';
+    strict.onclick = async () => { try { await srcApi('strict', {id:src.id, strict:!src.strict}); loadSources(true); } catch (e) { say('src-msg', e.message, 'bad'); } };
+    acts.append(strict);
+    const del = el('button', 'btn danger sm', 'Remove'); del.type = 'button';
+    del.onclick = async () => { try { await srcApi('remove', {id:src.id}); toast('Channel removed'); loadSources(true); } catch (e) { say('src-msg', e.message, 'bad'); } };
+    acts.append(del);
+    row.append(main, acts);
+    list.append(row);
+  }
+  if (!(v.sources || []).length) list.append(el('div', 'empty', 'No channel yet. Add one above.'));
+
+  const recent = $('src-recent');
+  recent.replaceChildren();
+  for (const r of v.recent || []) {
+    const row = el('div', 'item');
+    const main = el('div', 'main'); main.append(el('div', 'title', r.name));
+    main.append(el('div', 'meta', [names[r.source_id], fmtBytes(r.size), ago(r.updated), r.error].filter(Boolean).join(' · ')));
+    row.append(main, pill(r.state === 'copied' ? 'copied' : 'skipped', r.state === 'copied' ? 'ok' : 'warn'));
+    recent.append(row);
+  }
+  if (!(v.recent || []).length) recent.append(el('div', 'empty', 'Nothing copied yet.'));
+}
+$('src-toggle').onclick = async () => {
+  const on = $('src-toggle').getAttribute('aria-checked') !== 'true';
+  try {
+    await srcApi('settings', {enabled:on});
+    say('src-msg', on ? 'On. The first check starts now.' : 'Off. What was copied stays in the library.', 'ok');
+    loadSources(true);
+  } catch (e) { say('src-msg', e.message, 'bad'); }
+};
+$('src-add').onclick = async () => {
+  const value = $('src-input').value.trim();
+  if (!value) { say('src-add-msg', 'Enter a channel id or username.', 'bad'); return; }
+  busy($('src-add'), true);
+  say('src-add-msg', 'Asking Telegram…');
+  try {
+    const res = await srcApi('add', {channel:value});
+    $('src-input').value = '';
+    say('src-add-msg', res.source && res.source.no_forwards ? 'Added, but its owner forbids copying files out of it.' : 'Added.', res.source && res.source.no_forwards ? 'bad' : 'ok');
+    loadSources(true);
+  } catch (e) { say('src-add-msg', e.message, 'bad'); }
+  busy($('src-add'), false);
+};
+$('src-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('src-add').click(); });
+$('src-check').onclick = async () => { try { await srcApi('check'); toast('Checking'); setTimeout(() => loadSources(true), 1200); } catch (e) { say('src-msg', e.message, 'bad'); } };
+$('src-rescan').onclick = async () => { try { await srcApi('rescan'); toast('Every channel will be looked at again'); setTimeout(() => loadSources(true), 1200); } catch (e) { say('src-msg', e.message, 'bad'); } };
+$('src-need').onclick = () => { $('src-need').setAttribute('aria-checked', $('src-need').getAttribute('aria-checked') === 'true' ? 'false' : 'true'); srcDirty = true; };
+document.querySelectorAll('#tab-sources .cols input, #tab-sources .cols select, #src-skip, #src-only').forEach(n => { n.addEventListener('input', () => { srcDirty = true; }); });
+$('src-save').onclick = async () => {
+  try {
+    await srcApi('settings', readRules());
+    srcDirty = false;
+    say('src-rules-msg', 'Saved.', 'ok'); toast('Rules saved');
+    loadSources(true);
+  } catch (e) { say('src-rules-msg', e.message, 'bad'); }
+};
+$('src-signin').onclick = openLogin;
+setInterval(() => { if (!document.hidden && !$('tab-sources').hidden && $('login-modal').hidden) loadSources(false); }, 5000);
+
+show(location.hash.slice(1) || 'overview');
+api('/panel/state').then(draw).catch(e => { toast(e.message, true); say('bot-msg', e.message, 'bad'); });
+// Keep queue and upload progress fresh. Only the downloads view redraws, so nothing being typed is lost.
+setInterval(() => { if (!document.hidden && $('login-modal').hidden) api('/panel/state').then(s => drawDownloads(s.downloads)).catch(() => {}); }, 8000);
 </script>
 </body>
 </html>

@@ -60,6 +60,14 @@ type Options struct {
 	Downloads func(context.Context) (any, error)
 	// DownloadDo runs one panel action: login, logout, enable or pace.
 	DownloadDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Local reports the videos already on this computer. Nil hides the Local files tab.
+	Local func(context.Context) (any, error)
+	// LocalDo runs one action of that tab: scan, folder, upload, cancel, delete or delete_synced.
+	LocalDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Sources reports the Telegram channels that videos are copied from. Nil hides that tab.
+	Sources func(context.Context) (any, error)
+	// SourceDo runs one action of that tab: add, remove, pause, settings, check or rescan.
+	SourceDo func(r *http.Request, action string, body map[string]any) (any, error)
 }
 
 // New serves /panel and /panel/.
@@ -74,6 +82,10 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/downloads/login", p.guard(p.handleDownloadLogin))
 	mux.HandleFunc("POST /panel/downloads/logout", p.guard(p.handleDownloadLogout))
 	mux.HandleFunc("POST /panel/downloads/pace", p.guard(p.handleDownloadPace))
+	mux.HandleFunc("GET /panel/local", p.guard(p.handleLocal))
+	mux.HandleFunc("POST /panel/local/{action}", p.guard(p.handleLocalAction))
+	mux.HandleFunc("GET /panel/sources", p.guard(p.handleSources))
+	mux.HandleFunc("POST /panel/sources/{action}", p.guard(p.handleSourceAction))
 	return mux
 }
 
@@ -144,6 +156,8 @@ type state struct {
 	Seerr     bool      `json:"seerr"`
 	Fladder   bool      `json:"fladder"`
 	Downloads any       `json:"downloads,omitempty"`
+	Local     bool      `json:"local"`
+	Sources   bool      `json:"sources"`
 	Accounts  []Account `json:"accounts"`
 }
 
@@ -213,6 +227,86 @@ func (p *panel) downloadAction(w http.ResponseWriter, r *http.Request, action st
 		return
 	}
 	out, err := p.o.DownloadDo(r, action, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if out == nil {
+		out = map[string]any{"ok": true}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *panel) handleLocal(w http.ResponseWriter, r *http.Request) {
+	if p.o.Local == nil {
+		writeError(w, http.StatusNotFound, "local files are not available")
+		return
+	}
+	out, err := p.o.Local(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// localActions are the only things the Local files tab can ask for.
+var localActions = map[string]bool{"scan": true, "folder": true, "upload": true, "cancel": true, "delete": true, "delete_synced": true}
+
+func (p *panel) handleLocalAction(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("action")
+	if p.o.LocalDo == nil || !localActions[action] {
+		writeError(w, http.StatusNotFound, "unknown action")
+		return
+	}
+	// Choosing which folders of this computer the panel may read is limited to this computer or
+	// Tailscale, like signing in to an account: the panel is plain HTTP.
+	if action == "folder" && !trustedClient(r) {
+		writeError(w, http.StatusForbidden, "Choose folders from this computer or over Tailscale. The panel is plain HTTP.")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		body = map[string]any{}
+	}
+	out, err := p.o.LocalDo(r, action, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if out == nil {
+		out = map[string]any{"ok": true}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *panel) handleSources(w http.ResponseWriter, r *http.Request) {
+	if p.o.Sources == nil {
+		writeError(w, http.StatusNotFound, "channel sources are not available")
+		return
+	}
+	out, err := p.o.Sources(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+// sourceActions are the only things the Channels tab can ask for.
+var sourceActions = map[string]bool{"add": true, "remove": true, "pause": true, "strict": true, "settings": true, "check": true, "rescan": true}
+
+func (p *panel) handleSourceAction(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("action")
+	if p.o.SourceDo == nil || !sourceActions[action] {
+		writeError(w, http.StatusNotFound, "unknown action")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		body = map[string]any{}
+	}
+	out, err := p.o.SourceDo(r, action, body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -483,6 +577,8 @@ func (p *panel) snapshot() (state, error) {
 			s.Addresses = append(s.Addresses, address{URL: raw, Away: awayAddress(raw)})
 		}
 	}
+	s.Local = p.o.Local != nil
+	s.Sources = p.o.Sources != nil
 	return s, nil
 }
 

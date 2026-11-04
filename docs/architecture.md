@@ -23,6 +23,7 @@
 | `internal/stack` | qBittorrent, Radarr, Sonarr, Bitmagnet and Postgres, started on demand and configured over their APIs |
 | `internal/autoupload` | Polls Radarr and Sonarr, uploads one file per session, and deletes the disk copy after a probe |
 | `internal/downloads` | Panel switch. A failure here is logged and does not stop playback |
+| `internal/tgsource` | Walks other Telegram channels with a signed-in account and forwards films and series into the library channel server side. Progress and what was copied live in the catalog |
 
 ## Reading a video
 

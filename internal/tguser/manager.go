@@ -61,6 +61,8 @@ type live struct {
 	done      atomic.Int64
 	total     atomic.Int64
 	errText   atomic.Value // string
+	// hashes caches channel access hashes for this account. Only the session loop touches it.
+	hashes map[int64]int64
 }
 
 type call struct {

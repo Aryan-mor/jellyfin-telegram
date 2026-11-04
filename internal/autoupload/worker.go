@@ -76,6 +76,10 @@ type Worker struct {
 	// pass that started it. It ends when the switch is turned off or the program stops. When nil,
 	// the context of the pass is used.
 	Ctx context.Context
+	// Local makes this worker handle only the files a person chose in the panel (catalog.KindLocal),
+	// and leave Radarr and Sonarr rows alone. The other worker does the reverse. A local file that is
+	// probed stays on disk, because only the person decides to delete it, and Lib is not used.
+	Local bool
 
 	inflight sync.Map
 }
@@ -142,10 +146,37 @@ func (w *Worker) warn(msg string, err error) {
 
 // RunOnce does a single pass. Uploads that are already running are left alone.
 func (w *Worker) RunOnce(ctx context.Context) error {
-	w.Guard(ctx)
-	if w.Lib == nil {
-		return nil
+	if !w.Local {
+		w.Guard(ctx)
+		if w.Lib == nil {
+			return nil
+		}
+		if err := w.importItems(ctx); err != nil {
+			return err
+		}
 	}
+	rows, err := w.Cat.ListUploads(ctx)
+	if err != nil {
+		return err
+	}
+	var ready []catalog.Upload
+	for _, row := range rows {
+		if (row.Kind == catalog.KindLocal) != w.Local {
+			continue
+		}
+		if err := w.advance(ctx, row); err != nil {
+			w.warn("upload "+row.FileName, err)
+		}
+		if row.State == catalog.UploadQueued || row.State == catalog.UploadUploading || row.State == catalog.UploadFailed {
+			ready = append(ready, row)
+		}
+	}
+	w.dispatch(ctx, ready)
+	return nil
+}
+
+// importItems records every file Radarr and Sonarr have imported.
+func (w *Worker) importItems(ctx context.Context) error {
 	items, err := w.Lib.List(ctx)
 	if err != nil {
 		return err
@@ -189,20 +220,6 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 			}
 		}
 	}
-	rows, err := w.Cat.ListUploads(ctx)
-	if err != nil {
-		return err
-	}
-	var ready []catalog.Upload
-	for _, row := range rows {
-		if err := w.advance(ctx, row); err != nil {
-			w.warn("upload "+row.FileName, err)
-		}
-		if row.State == catalog.UploadQueued || row.State == catalog.UploadUploading || row.State == catalog.UploadFailed {
-			ready = append(ready, row)
-		}
-	}
-	w.dispatch(ctx, ready)
 	return nil
 }
 
@@ -219,6 +236,9 @@ func (w *Worker) advance(ctx context.Context, row catalog.Upload) error {
 	case catalog.UploadIndexed:
 		return w.markProbed(ctx, row)
 	case catalog.UploadProbed:
+		if w.Local {
+			return nil
+		}
 		return w.cleanup(ctx, row)
 	}
 	return nil
@@ -310,6 +330,11 @@ func (w *Worker) uploadOne(ctx context.Context, row catalog.Upload, session int6
 		}
 	}
 	id, err := w.Sessions.Upload(ctx, session, row.Path, row.FileName, row.Caption, nil)
+	if errors.Is(err, tguser.ErrBusy) {
+		// The other worker took this account a moment ago. The file is not at fault, so it waits.
+		_ = w.Cat.SetUpload(ctx, row.ID, row.State, row.MessageID, 0, "waiting: the account is sending another file")
+		return
+	}
 	if err != nil {
 		_ = w.Cat.SetUpload(ctx, row.ID, catalog.UploadFailed, 0, session, err.Error())
 		return

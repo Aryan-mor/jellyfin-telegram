@@ -280,3 +280,82 @@ func Sanitize(seg string) string {
 	}
 	return out
 }
+
+var (
+	reSeasonDir = regexp.MustCompile(`(?i)^(?:season|series|saison|staffel|s)[\s._-]*0*(\d{1,2})$`)
+	reSpecials  = regexp.MustCompile(`(?i)^specials?$`)
+	// reLooseEpisode reads a file that is only a number, or "E05" or "Episode 5", inside a season folder.
+	reLooseEpisode = regexp.MustCompile(`(?i)^\W*(?:e(?:p(?:isode)?)?[\s._-]*)?0*(\d{1,3})(?:\W|$)`)
+)
+
+// ParsePath reads a file the way Jellyfin does: the file name first, then the folders above it.
+// rel is the path below the media folder, with forward slashes, and holds the file name last.
+// A show folder gives the title of an episode, and a season folder gives its season. Folders only
+// fill in what the file name leaves out, so a folder such as "Action" never renames a film.
+func ParsePath(rel string) Parsed {
+	rel = strings.Trim(path.Clean(strings.ReplaceAll(rel, `\`, "/")), "/")
+	parts := strings.Split(rel, "/")
+	file := parts[len(parts)-1]
+	p := Parse(file, "")
+
+	season, hasSeason := 0, false
+	var named []string // folders that are not season folders, nearest first
+	for i := len(parts) - 2; i >= 0; i-- {
+		dir := parts[i]
+		if m := reSeasonDir.FindStringSubmatch(dir); m != nil {
+			if !hasSeason {
+				season, _ = strconv.Atoi(m[1])
+				hasSeason = true
+			}
+			continue
+		}
+		if reSpecials.MatchString(dir) {
+			if !hasSeason {
+				season, hasSeason = 0, true
+			}
+			continue
+		}
+		named = append(named, dir)
+	}
+
+	if !p.Episode && hasSeason {
+		stem := strings.TrimSpace(reExt.ReplaceAllString(file, ""))
+		if m := reLooseEpisode.FindStringSubmatch(stem); m != nil {
+			n, _ := strconv.Atoi(m[1])
+			// A number that looks like a year is not an episode.
+			if n > 0 && !(n >= 1900 && n <= 2099) {
+				p.Episode, p.Season, p.Number = true, season, n
+				p.Title = ""
+			}
+		}
+	}
+	if p.Episode && hasSeason && p.Season == 0 && season > 0 {
+		p.Season = season
+	}
+
+	// The nearest folder that names something is the show, or the film.
+	var folder Parsed
+	for _, dir := range named {
+		if f := Parse(dir, ""); f.Title != "" {
+			folder = f
+			break
+		}
+	}
+	switch {
+	case p.Episode && folder.Title != "":
+		p.Title, p.Year, p.TMDBID = folder.Title, folder.Year, folder.TMDBID
+	case p.Title == "" && folder.Title != "":
+		p.Title, p.Year, p.TMDBID = folder.Title, folder.Year, folder.TMDBID
+	case folder.Title != "" && strings.EqualFold(folder.Title, p.Title):
+		if p.Year == 0 {
+			p.Year = folder.Year
+		}
+		if p.TMDBID == 0 {
+			p.TMDBID = folder.TMDBID
+		}
+	}
+	if p.Episode && p.Title == "" {
+		p.Episode = false
+	}
+	return p
+}
