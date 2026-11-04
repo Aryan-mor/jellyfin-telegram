@@ -4,7 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="color-scheme" content="light dark">
-<title>jellyfin-telegram</title>
+<title>jellyfin-telegram panel</title>
+<meta name="description" content="Settings for jellyfin-telegram: Telegram account, torrents, channels, bots and addresses.">
+<meta name="robots" content="noindex,nofollow">
+<meta name="referrer" content="no-referrer">
+<meta name="theme-color" content="#6a4fd6">
+<link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%236a4fd6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232fa8e8%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23g%29%22%2F%3E%3Crect%20x%3D%2212%22%20y%3D%2216%22%20width%3D%2240%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%224%22%2F%3E%3Cpath%20d%3D%22M27%2026l12%206-12%206z%22%20fill%3D%22%23fff%22%2F%3E%3C%2Fsvg%3E">
+<link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%236a4fd6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232fa8e8%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23g%29%22%2F%3E%3Crect%20x%3D%2212%22%20y%3D%2216%22%20width%3D%2240%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%224%22%2F%3E%3Cpath%20d%3D%22M27%2026l12%206-12%206z%22%20fill%3D%22%23fff%22%2F%3E%3C%2Fsvg%3E">
 <style>
 :root {
   --bg:#f5f5f9; --surface:#fff; --surface-2:#f0f0f6; --text:#18181f; --muted:#5f5f70; --line:#e2e2ea;
@@ -214,6 +220,7 @@ details.grp .cat-body { padding:0 12px 4px; }
     <nav>
       <button type="button" data-tab="overview" aria-selected="true"><svg class="i"><use href="#i-home"/></svg>Overview</button>
       <button type="button" data-tab="accounts"><svg class="i"><use href="#i-key"/></svg>Sign in</button>
+      <button type="button" data-tab="telegram"><svg class="i"><use href="#i-phone"/></svg>Telegram account<span class="dot" id="dot-tg" hidden></span></button>
       <button type="button" data-tab="local" hidden><svg class="i"><use href="#i-disk"/></svg>Local files</button>
       <div class="group">Telegram</div>
       <button type="button" data-tab="bots"><svg class="i"><use href="#i-bot"/></svg>Bots<span class="dot" id="dot-bots" hidden></span></button>
@@ -223,7 +230,7 @@ details.grp .cat-body { padding:0 12px 4px; }
       <button type="button" data-tab="away"><svg class="i"><use href="#i-globe"/></svg>Away from home</button>
       <button type="button" data-tab="downloads"><svg class="i"><use href="#i-down"/></svg>Torrents</button>
       <button type="button" data-tab="sources" hidden><svg class="i"><use href="#i-chan"/></svg>Channels</button>
-      <button type="button" data-tab="provider"><svg class="i"><use href="#i-bot"/></svg>Bot provider</button>
+      <button type="button" data-tab="provider" hidden><svg class="i"><use href="#i-bot"/></svg>Bot provider</button>
     </nav>
     </div>
     <div class="side-foot"><span>Panel</span><button class="btn icon" id="theme" type="button" aria-label="Switch light or dark theme"><svg class="i"><use href="#i-sun"/></svg></button></div>
@@ -391,12 +398,6 @@ details.grp .cat-body { padding:0 12px 4px; }
         <div id="dl-msg" class="alert"></div>
       </div>
       <div class="card">
-        <h2>Telegram accounts</h2>
-        <p>These accounts are shared by torrents, local files and channels. A file larger than the account can send is refused, not split. Sign-in works from this computer or over Tailscale only. More accounts move the queue faster, but one file still uploads through one account. The session is stored in <code>data/users</code> and is not encrypted, so keep that folder like a password.</p>
-        <div id="dl-sessions" class="list"></div>
-        <div class="actions" style="margin-top:14px"><button id="dl-add" class="btn" type="button">Add account</button></div>
-      </div>
-      <div class="card">
         <h2>Pace</h2>
         <p>These limits apply to every account that does not set its own. They are cautious guesses. Telegram has not published a limit. A flood wait doubles that account's rest until the end of the day.</p>
         <div class="cols">
@@ -411,6 +412,17 @@ details.grp .cat-body { padding:0 12px 4px; }
       </div>
       <div class="card"><h2>Stack</h2><div id="dl-stack" class="list"></div></div>
       <div class="card"><h2>Queue</h2><div id="dl-queue" class="list"></div></div>
+    </section>
+
+    <!-- Telegram account -->
+    <section id="tab-telegram" hidden>
+      <div class="page-head"><h1>Telegram account</h1><p>Sign in first. Torrents, Channels and the other tools below it open once an account is signed in, and each has its own switch. The account must be an admin of the library channel with permission to post.</p></div>
+      <div class="card">
+        <div id="acct-sessions" class="list"></div>
+        <div class="actions" style="margin-top:14px"><button id="acct-add" class="btn" type="button">Add account</button></div>
+        <div id="acct-msg" class="alert"></div>
+        <p style="margin-top:14px">A file larger than the account can send is refused, not split. Sign-in works from this computer or over Tailscale only. More accounts move the queue faster, but one file still uploads through one account. The session is stored in <code>data/users</code> and is not encrypted, so keep that folder like a password.</p>
+      </div>
     </section>
 
     <!-- Channels -->
@@ -435,7 +447,7 @@ details.grp .cat-body { padding:0 12px 4px; }
             <li>A link to a message also works, such as <code>https://t.me/c/1234567890/5</code>. An invite link (<code>t.me/+…</code>) does not.</li>
           </ol>
         </details>
-        <div class="field"><label for="src-input">Channel id or username</label><input id="src-input" autocomplete="off" spellcheck="false" placeholder="-1001234567890 or @channelname"></div>
+        <div class="field"><label for="src-input">Channel id or username</label><input id="src-input" type="search" name="source-channel-ref" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="-1001234567890 or @channelname"></div>
         <div class="actions"><button id="src-add" class="btn" type="button">Add channel</button></div>
         <div id="src-add-msg" class="alert"></div>
       </div>
@@ -518,7 +530,7 @@ details.grp .cat-body { padding:0 12px 4px; }
 const embedded = "__PANEL_CODE__";
 const code = new URLSearchParams(location.search).get('code') || embedded;
 const $ = id => document.getElementById(id);
-const tabs = ['overview', 'accounts', 'local', 'bots', 'api', 'channel', 'away', 'downloads', 'sources', 'provider'];
+const tabs = ['overview', 'accounts', 'telegram', 'local', 'bots', 'api', 'channel', 'away', 'downloads', 'sources', 'provider'];
 const api = async (path, body) => {
   const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
   const data = await res.json().catch(() => ({}));
@@ -553,6 +565,8 @@ function show(name) {
     document.querySelector('[data-tab="' + tab + '"]').setAttribute('aria-selected', tab === name ? 'true' : 'false');
   }
   if (location.hash !== '#' + name) history.replaceState(null, '', '#' + name);
+  const label = document.querySelector('[data-tab="' + name + '"]');
+  document.title = (label ? label.textContent.trim() + ' · ' : '') + 'jellyfin-telegram';
   window.scrollTo(0, 0);
   if (name === 'local') loadLocal(true);
   if (name === 'sources') loadSources(true);
@@ -644,9 +658,14 @@ function draw(s) {
   $('link-seerr').hidden = !s.seerr;
   $('link-fladder').hidden = !s.fladder;
   $('link-fladder-releases').hidden = !s.fladder;
-  document.querySelector('[data-tab="downloads"]').hidden = !s.downloads;
+  // Signing in comes first. Everything that posts with the account opens after it.
+  const signedIn = ((s.telegram && s.telegram.sessions) || []).length > 0;
+  drawSessions(s.telegram && s.telegram.sessions);
+  $('dot-tg').hidden = signedIn;
+  document.querySelector('[data-tab="provider"]').hidden = !signedIn;
+  document.querySelector('[data-tab="downloads"]').hidden = !s.downloads || !signedIn;
   document.querySelector('[data-tab="local"]').hidden = !s.local;
-  document.querySelector('[data-tab="sources"]').hidden = !s.sources;
+  document.querySelector('[data-tab="sources"]').hidden = !s.sources || !signedIn;
   $('st-dl-tile').hidden = !s.downloads;
   drawDownloads(s.downloads);
 }
@@ -721,34 +740,6 @@ function drawDownloads(d) {
     $('dl-daily').value = d.pace.DailyGB ?? d.pace.daily_gb ?? '';
     $('dl-hours').value = d.pace.Hours ?? d.pace.hours ?? '';
   }
-  const sessions = $('dl-sessions');
-  sessions.replaceChildren();
-  for (const ses of d.sessions || []) {
-    const row = el('div', 'item');
-    const main = el('div', 'main');
-    const title = el('div', 'title');
-    const nm = ses.username ? '@' + ses.username : (ses.phone || ('user ' + ses.user_id));
-    title.append(el('span', 'avatar', nm.replace('@', '').replace('+', '')[0] || 'U'));
-    const t = el('div'); t.append(el('div', '', nm));
-    const meta = el('div', 'meta');
-    const cap = Math.round((ses.max_bytes||0)/1000/1000);
-    meta.append(pill(ses.connected ? 'connected' : 'not connected', ses.connected ? 'ok' : 'warn'), pill(ses.admin ? 'admin' : 'not an admin', ses.admin ? 'ok' : 'bad'), pill(ses.premium ? 'Premium' : 'Standard'));
-    if (cap) meta.append(cap + ' MB limit');
-    if (ses.error) meta.append(pill(ses.error, 'bad'));
-    t.append(meta);
-    if (ses.busy && ses.total) {
-      const bar = el('div', 'bar'); bar.style.marginTop = '8px';
-      const fill = el('i'); fill.style.width = Math.min(100, Math.round(ses.progress / ses.total * 100)) + '%'; bar.append(fill);
-      t.append(bar, el('div', 'meta', 'Uploading ' + fmtBytes(ses.progress) + ' of ' + fmtBytes(ses.total)));
-    }
-    title.append(t); main.append(title);
-    const btn = el('button', 'btn danger sm', 'Sign out'); btn.type = 'button';
-    btn.onclick = async () => { try { await api('/panel/downloads/logout', {user_id:ses.user_id}); toast('Signed out'); draw(await api('/panel/state')); } catch (e) { say('dl-msg', e.message, 'bad'); } };
-    row.append(main, btn);
-    sessions.append(row);
-  }
-  if (!(d.sessions || []).length) sessions.append(el('div', 'empty', 'No Telegram account is signed in.'));
-
   const stack = $('dl-stack');
   stack.replaceChildren();
   const line = (text, cls) => { const r = el('div', 'item'); r.append(el('div', 'main', text)); if (cls) r.append(pill(cls[0], cls[1])); stack.append(r); };
@@ -779,6 +770,36 @@ $('dl-toggle').onclick = async () => {
     draw(await api('/panel/state'));
   } catch (e) { say('dl-msg', e.message, 'bad'); }
 };
+
+function drawSessions(list) {
+  const sessions = $('acct-sessions');
+  sessions.replaceChildren();
+  for (const ses of list || []) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const title = el('div', 'title');
+    const nm = ses.username ? '@' + ses.username : (ses.phone || ('user ' + ses.user_id));
+    title.append(el('span', 'avatar', nm.replace('@', '').replace('+', '')[0] || 'U'));
+    const t = el('div'); t.append(el('div', '', nm));
+    const meta = el('div', 'meta');
+    const cap = Math.round((ses.max_bytes||0)/1000/1000);
+    meta.append(pill(ses.connected ? 'connected' : 'not connected', ses.connected ? 'ok' : 'warn'), pill(ses.admin ? 'admin' : 'not an admin', ses.admin ? 'ok' : 'bad'), pill(ses.premium ? 'Premium' : 'Standard'));
+    if (cap) meta.append(cap + ' MB limit');
+    if (ses.error) meta.append(pill(ses.error, 'bad'));
+    t.append(meta);
+    if (ses.busy && ses.total) {
+      const bar = el('div', 'bar'); bar.style.marginTop = '8px';
+      const fill = el('i'); fill.style.width = Math.min(100, Math.round(ses.progress / ses.total * 100)) + '%'; bar.append(fill);
+      t.append(bar, el('div', 'meta', 'Uploading ' + fmtBytes(ses.progress) + ' of ' + fmtBytes(ses.total)));
+    }
+    title.append(t); main.append(title);
+    const btn = el('button', 'btn danger sm', 'Sign out'); btn.type = 'button';
+    btn.onclick = async () => { try { await api('/panel/downloads/logout', {user_id:ses.user_id}); toast('Signed out'); draw(await api('/panel/state')); } catch (e) { say('acct-msg', e.message, 'bad'); } };
+    row.append(main, btn);
+    sessions.append(row);
+  }
+  if (!(list || []).length) sessions.append(el('div', 'empty', 'No Telegram account is signed in.'));
+}
 
 // Signing in takes up to three steps. Telegram is asked for a code only after the phone number is
 // sent, and for the two-step password only if the account has one.
@@ -831,8 +852,8 @@ async function nextLogin() {
     if (res.step === 'done') {
       await closeLogin(false);
       // The account stays signed in even when it cannot post yet. The list shows why.
-      if (res.warning) say('dl-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
-      else { say('dl-msg', 'Signed in.', 'ok'); toast('Signed in'); }
+      if (res.warning) say('acct-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
+      else { say('acct-msg', 'Signed in.', 'ok'); toast('Signed in'); }
       draw(await api('/panel/state'));
     } else {
       showLoginStep(res.step);
@@ -846,7 +867,7 @@ async function nextLogin() {
   loginBusy = false;
   busy($('login-next'), false);
 }
-$('dl-add').onclick = openLogin;
+$('acct-add').onclick = openLogin;
 $('login-next').onclick = nextLogin;
 $('login-cancel').onclick = () => closeLogin(true);
 $('login-input').addEventListener('keydown', e => { if (e.key === 'Enter') nextLogin(); });
@@ -1258,7 +1279,7 @@ setInterval(() => { if (!document.hidden && !$('tab-sources').hidden && $('login
 show(location.hash.slice(1) || 'overview');
 api('/panel/state').then(draw).catch(e => { toast(e.message, true); say('bot-msg', e.message, 'bad'); });
 // Keep queue and upload progress fresh. Only the downloads view redraws, so nothing being typed is lost.
-setInterval(() => { if (!document.hidden && $('login-modal').hidden) api('/panel/state').then(s => drawDownloads(s.downloads)).catch(() => {}); }, 8000);
+setInterval(() => { if (!document.hidden && $('login-modal').hidden) api('/panel/state').then(s => { drawDownloads(s.downloads); drawSessions(s.telegram && s.telegram.sessions); }).catch(() => {}); }, 8000);
 </script>
 </body>
 </html>

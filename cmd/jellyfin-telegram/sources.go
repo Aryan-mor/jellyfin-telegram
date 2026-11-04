@@ -126,3 +126,11 @@ func sourcesDo(svc *tgsource.Service) func(*http.Request, string, map[string]any
 	}
 	return sourceActions(svc)
 }
+
+// sessionsView lists the signed-in accounts for the panel's account tab.
+func sessionsView(users *tguser.Manager) func() any {
+	if users == nil {
+		return nil
+	}
+	return func() any { return users.Views() }
+}
