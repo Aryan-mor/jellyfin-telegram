@@ -16,7 +16,7 @@ func TestFileFromMessage(t *testing.T) {
 		Attributes: []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: "Heat.1995.mkv"}},
 		Thumbs:     []tg.PhotoSizeClass{&tg.PhotoSize{Type: "m", W: 90, H: 90}},
 	}
-	f := fileFromMessage(message(doc, "a caption"), 55)
+	f := fileFromMessage(message(doc, "a caption"), 55, false)
 	if f == nil {
 		t.Fatal("video not recognised")
 	}
@@ -49,20 +49,20 @@ func TestFileFromMessageRecognisesVideos(t *testing.T) {
 			Attributes: []tg.DocumentAttributeClass{name("Movie.zip")}}, false},
 	}
 	for _, tc := range tests {
-		if got := fileFromMessage(message(tc.doc, ""), 1) != nil; got != tc.want {
+		if got := fileFromMessage(message(tc.doc, ""), 1, false) != nil; got != tc.want {
 			t.Errorf("%s: got %v, want %v", tc.label, got, tc.want)
 		}
 	}
 }
 
 func TestFileFromMessageIgnoresOtherMessages(t *testing.T) {
-	if fileFromMessage(&tg.Message{ID: 1, Message: "just text"}, 1) != nil {
+	if fileFromMessage(&tg.Message{ID: 1, Message: "just text"}, 1, false) != nil {
 		t.Error("text message treated as a file")
 	}
-	if fileFromMessage(&tg.Message{ID: 1, Media: &tg.MessageMediaPhoto{}}, 1) != nil {
+	if fileFromMessage(&tg.Message{ID: 1, Media: &tg.MessageMediaPhoto{}}, 1, false) != nil {
 		t.Error("photo treated as a file")
 	}
-	if fileFromMessage(&tg.Message{ID: 1, Media: &tg.MessageMediaDocument{Document: &tg.DocumentEmpty{}}}, 1) != nil {
+	if fileFromMessage(&tg.Message{ID: 1, Media: &tg.MessageMediaDocument{Document: &tg.DocumentEmpty{}}}, 1, false) != nil {
 		t.Error("empty document treated as a file")
 	}
 }

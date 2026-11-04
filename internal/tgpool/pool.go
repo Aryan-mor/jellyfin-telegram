@@ -161,6 +161,59 @@ func (p *Pool) FetchBlock(ctx context.Context, messageID int, docID, block, size
 	return buf[:want], nil
 }
 
+// inChannel reads a channel other than the one the bots were started for.
+type inChannel interface {
+	messagesIn(ctx context.Context, channelID int64, ids []int) ([]media.Message, error)
+	getBlockIn(ctx context.Context, channelID int64, messageID int, docID, offset int64, limit int) ([]byte, error)
+}
+
+// FetchIn returns one block from channelID. Channel 0 is the main channel.
+func (p *Pool) FetchIn(ctx context.Context, channelID int64, messageID int, docID, block, size int64) ([]byte, error) {
+	offset := block * media.BlockSize
+	want := min(media.BlockSize, size-offset)
+	if want <= 0 {
+		return nil, fmt.Errorf("block %d is past the end of a %d byte file", block, size)
+	}
+	buf := make([]byte, 0, want)
+	for int64(len(buf)) < want {
+		off := offset + int64(len(buf))
+		limit := int(media.BlockSize - off%media.BlockSize)
+		var data []byte
+		err := p.call(ctx, messageID, func(w worker) error {
+			in, ok := w.(inChannel)
+			if !ok {
+				return errors.New("this bot cannot read another channel")
+			}
+			var err error
+			data, err = in.getBlockIn(ctx, channelID, messageID, docID, off, limit)
+			return err
+		})
+		if err != nil {
+			return nil, err
+		}
+		if len(data) == 0 {
+			return nil, fmt.Errorf("telegram returned no data at offset %d of message %d", off, messageID)
+		}
+		buf = append(buf, data...)
+	}
+	return buf[:want], nil
+}
+
+// MessagesIn looks up message ids in channelID. Videos and photos sent as files are returned.
+func (p *Pool) MessagesIn(ctx context.Context, channelID int64, ids []int) ([]media.Message, error) {
+	var out []media.Message
+	err := p.call(ctx, 0, func(w worker) error {
+		in, ok := w.(inChannel)
+		if !ok {
+			return errors.New("this bot cannot read another channel")
+		}
+		var err error
+		out, err = in.messagesIn(ctx, channelID, ids)
+		return err
+	})
+	return out, err
+}
+
 // Messages looks up message ids in the channel.
 func (p *Pool) Messages(ctx context.Context, ids []int) ([]media.Message, error) {
 	var out []media.Message

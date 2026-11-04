@@ -320,7 +320,7 @@ details.grp .cat-body { padding:0 12px 4px; }
 
     <!-- Channel -->
     <section id="tab-channel" hidden>
-      <div class="page-head"><h1>Channel</h1><p>Main receives everything. A mirror receives only the parts you choose.</p></div>
+      <div class="page-head"><h1>Channel</h1><p>Main receives films and series. Home videos is personal footage only. A mirror receives the parts you choose.</p></div>
       <div class="card">
         <h2>Main</h2>
         <p>The private Telegram channel that holds your videos. Everything is sent here.</p>
@@ -348,6 +348,24 @@ details.grp .cat-body { padding:0 12px 4px; }
           </div>
         </div>
         <div id="channel-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Home videos</h2>
+        <p>Personal videos and photos. Their own Telegram channel, and a Jellyfin library called Home Videos and Photos. Nothing arrives from torrents, news, or other channels. You post in this channel, or you sync folders from this computer. Every bot must be an admin, with permission to post. Saving the channel needs a restart.</p>
+        <div id="home-problem" class="notice" hidden></div>
+        <div class="field"><label for="home-channel">Channel link or id</label><input id="home-channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5 or -100…"></div>
+        <div class="actions"><button id="home-save" class="btn" type="button">Save channel</button></div>
+        <div id="home-channel-msg" class="alert"></div>
+        <h2>This computer</h2>
+        <p>Folders are sent only when you press Sync. The local copy stays until you delete it yourself.</p>
+        <div id="home-folders" class="list"></div>
+        <div class="field" style="margin-top:14px"><label for="home-add">Add a folder</label><input id="home-add" autocomplete="off" spellcheck="false" placeholder="D:\Home\Videos"></div>
+        <div class="actions">
+          <button id="home-add-btn" class="btn" type="button">Add folder</button>
+          <button id="home-sync" class="btn" type="button">Sync into the channel</button>
+        </div>
+        <div id="home-msg" class="alert"></div>
+        <div id="home-files" class="list" style="margin-top:14px"></div>
       </div>
       <div class="card">
         <h2>Mirror</h2>
@@ -691,6 +709,7 @@ function show(name) {
   document.title = (label ? label.textContent.trim() + ' · ' : '') + 'jellyfin-telegram';
   window.scrollTo(0, 0);
   if (name === 'local') loadLocal(true);
+  if (name === 'channel') loadHome();
   if (name === 'sources' || name === 'news') loadSources(true);
 }
 
@@ -831,6 +850,66 @@ async function save(body, btn, msg) {
 }
 
 document.querySelectorAll('nav button').forEach(btn => { btn.onclick = () => show(btn.dataset.tab); });
+
+async function loadHome() {
+  let s;
+  try { s = await api('/panel/home'); } catch (e) { say('home-msg', e.message, 'bad'); return; }
+  if (s.channel) $('home-channel').placeholder = 'Current: ' + s.channel;
+  const problem = $('home-problem');
+  problem.hidden = !s.problem;
+  problem.textContent = s.problem || '';
+  const folders = $('home-folders');
+  folders.replaceChildren();
+  for (const f of s.folders || []) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    main.append(el('div', 'title', f.path), el('div', 'meta', f.error || (f.files + ' files')));
+    const btn = el('button', 'btn ghost sm', 'Remove'); btn.type = 'button';
+    btn.onclick = async () => {
+      try { await api('/panel/home/folder', {path: f.path, remove: true}); loadHome(); }
+      catch (e) { say('home-msg', e.message, 'bad'); }
+    };
+    row.append(main, btn);
+    folders.append(row);
+  }
+  if (!(s.folders || []).length) folders.append(el('div', 'empty', 'No folder yet.'));
+  const files = $('home-files');
+  files.replaceChildren();
+  for (const f of (s.files || []).slice(0, 80)) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    main.append(el('div', 'title', f.name), el('div', 'meta', f.kind + ' · ' + f.status + (f.note ? ' · ' + f.note : '')));
+    row.append(main);
+    files.append(row);
+  }
+}
+$('home-save').onclick = async () => {
+  const btn = $('home-save');
+  busy(btn, true);
+  say('home-channel-msg', 'Saving…');
+  try {
+    await api('/panel/home/channel', {channel: $('home-channel').value.trim()});
+    say('home-channel-msg', 'Saved. Restart jellyfin-telegram. Make every bot an admin of this channel.', 'ok');
+    $('home-channel').value = '';
+    loadHome();
+  } catch (e) { say('home-channel-msg', e.message, 'bad'); }
+  busy(btn, false);
+};
+$('home-add-btn').onclick = async () => {
+  try { await api('/panel/home/folder', {path: $('home-add').value.trim()}); $('home-add').value = ''; say('home-msg', 'Folder added.', 'ok'); loadHome(); }
+  catch (e) { say('home-msg', e.message, 'bad'); }
+};
+$('home-sync').onclick = async () => {
+  const btn = $('home-sync');
+  busy(btn, true);
+  try {
+    const out = await api('/panel/home/sync', {});
+    say('home-msg', (out.queued || 0) + ' files queued. They upload one at a time.', 'ok');
+    loadHome();
+  } catch (e) { say('home-msg', e.message, 'bad'); }
+  busy(btn, false);
+};
+
 document.querySelectorAll('[data-reveal]').forEach(b => { b.onclick = () => { const i = $(b.dataset.reveal); i.type = i.type === 'password' ? 'text' : 'password'; }; });
 window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 $('add-btn').onclick = () => changeBots({add: $('add').value.trim()});

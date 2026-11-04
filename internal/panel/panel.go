@@ -64,6 +64,10 @@ type Options struct {
 	Local func(context.Context) (any, error)
 	// LocalDo runs one action of that tab: scan, folder, upload, cancel, delete or delete_synced.
 	LocalDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Home reports the personal Home Videos and Photos library. Nil hides that tab.
+	Home func(context.Context) (any, error)
+	// HomeDo runs folder or sync. The channel itself is saved by the panel.
+	HomeDo func(r *http.Request, action string, body map[string]any) (any, error)
 	// Sessions lists the signed-in Telegram accounts. Nil hides the account tab.
 	Sessions func() any
 	// Sources reports the Telegram channels that videos are copied from. Nil hides that tab.
@@ -90,6 +94,9 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/downloads/pace", p.guard(p.handleDownloadPace))
 	mux.HandleFunc("GET /panel/local", p.guard(p.handleLocal))
 	mux.HandleFunc("POST /panel/local/{action}", p.guard(p.handleLocalAction))
+	mux.HandleFunc("GET /panel/home", p.guard(p.handleHome))
+	mux.HandleFunc("POST /panel/home/channel", p.guard(p.handleHomeChannel))
+	mux.HandleFunc("POST /panel/home/{action}", p.guard(p.handleHomeAction))
 	mux.HandleFunc("GET /panel/sources", p.guard(p.handleSources))
 	mux.HandleFunc("POST /panel/sources/{action}", p.guard(p.handleSourceAction))
 	mux.HandleFunc("POST /panel/mirrors/{action}", p.guard(p.handleMirrorAction))
@@ -244,6 +251,80 @@ func (p *panel) downloadAction(w http.ResponseWriter, r *http.Request, action st
 		return
 	}
 	out, err := p.o.DownloadDo(r, action, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if out == nil {
+		out = map[string]any{"ok": true}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *panel) handleHome(w http.ResponseWriter, r *http.Request) {
+	if p.o.Home == nil {
+		writeError(w, http.StatusNotFound, "the personal library is not available")
+		return
+	}
+	out, err := p.o.Home(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+func (p *panel) handleHomeChannel(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Channel string `json:"channel"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	cur, err := readFile(p.o.EnvPath)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	var id int64
+	if strings.TrimSpace(body.Channel) != "" {
+		id, err = config.ParseChannelID(body.Channel)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "the channel must be a link to one of its messages, or its id")
+			return
+		}
+		if id == cur.channel {
+			writeError(w, http.StatusBadRequest, "that is the main channel")
+			return
+		}
+	}
+	value := ""
+	if id != 0 {
+		value = fmt.Sprint(id)
+	}
+	if err := setup.UpdateEnv(p.o.EnvPath, map[string]string{"HOME_CHANNEL_ID": value}); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restart": true})
+}
+
+func (p *panel) handleHomeAction(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("action")
+	if p.o.HomeDo == nil || (action != "folder" && action != "sync") {
+		writeError(w, http.StatusNotFound, "unknown action")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && action != "sync" {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	out, err := p.o.HomeDo(r, action, body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

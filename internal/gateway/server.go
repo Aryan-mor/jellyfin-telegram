@@ -23,6 +23,10 @@ type FileLookup interface {
 type Options struct {
 	Token     string
 	ChannelID int64
+	// HomeChannelID is the personal channel. Zero means that library is off.
+	HomeChannelID int64
+	// HomeFiles is the catalog of the personal channel. Nil with a home channel id refuses those streams.
+	HomeFiles FileLookup
 	Readahead int
 	// BackgroundBytesPerSecond limits requests marked with BackgroundHeader.
 	BackgroundBytesPerSecond int64
@@ -58,11 +62,24 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request) {
 	}
 	channel, err1 := strconv.ParseInt(r.PathValue("channel"), 10, 64)
 	messageID, err2 := strconv.Atoi(r.PathValue("message"))
-	if err1 != nil || err2 != nil || channel != s.opts.ChannelID {
+	files := s.files
+	if err1 != nil || err2 != nil {
 		http.NotFound(w, r)
 		return
 	}
-	file, err := s.files.Get(r.Context(), messageID)
+	switch channel {
+	case s.opts.ChannelID:
+	case s.opts.HomeChannelID:
+		if s.opts.HomeChannelID == 0 || s.opts.HomeFiles == nil {
+			http.NotFound(w, r)
+			return
+		}
+		files = s.opts.HomeFiles
+	default:
+		http.NotFound(w, r)
+		return
+	}
+	file, err := files.Get(r.Context(), messageID)
 	if errors.Is(err, catalog.ErrNotFound) {
 		http.NotFound(w, r)
 		return

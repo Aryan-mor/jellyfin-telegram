@@ -67,6 +67,59 @@ func (m *Manager) Upload(ctx context.Context, userID int64, filePath, name, capt
 	return id, nil
 }
 
+// UploadTo sends path into channelID. The main channel uses Upload. The account must be allowed to post there.
+func (m *Manager) UploadTo(ctx context.Context, userID, channelID int64, filePath, name, caption string, onProgress func(done, total int64)) (int, error) {
+	if channelID == 0 || channelID == m.channelID {
+		return m.Upload(ctx, userID, filePath, name, caption, onProgress)
+	}
+	lv, def, err := m.get(userID)
+	if err != nil {
+		return 0, err
+	}
+	if !lv.busy.CompareAndSwap(false, true) {
+		return 0, ErrBusy
+	}
+	defer lv.busy.Store(false)
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return 0, err
+	}
+	lv.total.Store(info.Size())
+	lv.done.Store(0)
+	defer func() {
+		lv.done.Store(0)
+		lv.total.Store(0)
+	}()
+	bps := int64(lv.meta.pace(def).MBPerSec) * 1000 * 1000
+	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		hash, err := channelAccess(ctx, api, channelID)
+		if err != nil {
+			return nil, fmt.Errorf("cannot post in that channel: %w", err)
+		}
+		return sendFile(ctx, api, channelID, hash, filePath, name, caption, info.Size(), bps, func(done, total int64) {
+			lv.done.Store(done)
+			lv.total.Store(total)
+			if onProgress != nil {
+				onProgress(done, total)
+			}
+		})
+	})
+	if err != nil {
+		if fatalAuth(err) {
+			lv.errText.Store(err.Error())
+			lv.meta.Error = err.Error()
+			_ = lv.store.writeMeta(lv.meta)
+			lv.connected.Store(false)
+		}
+		return 0, err
+	}
+	id, _ := val.(int)
+	if id == 0 {
+		return 0, errors.New("telegram did not report the new message id")
+	}
+	return id, nil
+}
+
 // FindMessage looks through healthy sessions for a document already posted with this name and size.
 // A crash after send and before the row is saved must not post the file again.
 func (m *Manager) FindMessage(ctx context.Context, name string, size int64) (int, bool, error) {

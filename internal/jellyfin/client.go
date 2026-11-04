@@ -141,6 +141,33 @@ func (c *Client) post(ctx context.Context, path string, body, out any) error {
 }
 
 // RefreshLibrary starts a library scan and returns at once.
+// EnsureCollection creates a Jellyfin library when that name is missing.
+func (c *Client) EnsureCollection(ctx context.Context, name, kind, dir string) error {
+	var existing []struct {
+		Name string `json:"Name"`
+	}
+	if err := c.do(ctx, http.MethodGet, "/Library/VirtualFolders", nil, &existing); err != nil {
+		return err
+	}
+	for _, f := range existing {
+		if f.Name == name {
+			return nil
+		}
+	}
+	body, err := json.Marshal(map[string]any{
+		"LibraryOptions": map[string]any{
+			"EnableRealtimeMonitor":  false,
+			"SaveSubtitlesWithMedia": false,
+			"PathInfos":              []map[string]string{{"Path": dir}},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	q := url.Values{"name": {name}, "collectionType": {kind}, "refreshLibrary": {"false"}}
+	return c.send(ctx, http.MethodPost, "/Library/VirtualFolders", q, body, nil)
+}
+
 func (c *Client) RefreshLibrary(ctx context.Context) error {
 	return c.do(ctx, http.MethodPost, "/Library/Refresh", nil, nil)
 }

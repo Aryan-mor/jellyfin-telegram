@@ -47,6 +47,9 @@ CREATE TABLE IF NOT EXISTS uploads (
 // Radarr or Sonarr imported. Its RemoteID is a stable number made from the file's path.
 const KindLocal = "local"
 
+// KindHome marks a file a person chose to send to the personal channel.
+const KindHome = "home"
+
 // Upload is one file on its way to the channel. Kind is movie or episode for a file that Radarr or
 // Sonarr imported, and KindLocal for a file the person chose in the panel.
 type Upload struct {

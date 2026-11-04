@@ -22,9 +22,11 @@ import (
 
 // Config is the full service configuration.
 type Config struct {
-	APIID          int
-	APIHash        string
-	ChannelID      int64 // bare id, without the -100 prefix
+	APIID     int
+	APIHash   string
+	ChannelID int64 // bare id, without the -100 prefix
+	// HomeChannelID is the personal Home Videos and Photos channel. Zero leaves that library off.
+	HomeChannelID  int64
 	BotTokens      []string
 	BotConcurrency int
 
@@ -63,6 +65,8 @@ type Config struct {
 	// LocalMediaDirs are folders of videos already on this computer. The panel lists them and uploads
 	// the ones a person chooses. Nothing is uploaded or deleted without that choice.
 	LocalMediaDirs []string
+	// HomeMediaDirs are folders synced only into the personal channel, and only when a person asks.
+	HomeMediaDirs []string
 
 	// DownloadsEnabled turns on Radarr, Sonarr, qBittorrent, Bitmagnet and the channel uploader.
 	// It needs Seerr, stays off until a person turns it on, and only works once a healthy admin
@@ -143,6 +147,16 @@ func Load(envPath string) (Config, error) {
 		fail("TELEGRAM_CHANNEL_ID: %v", err)
 	}
 	c.ChannelID = id
+	if raw := strings.TrimSpace(get("HOME_CHANNEL_ID", "")); raw != "" {
+		home, err := ParseChannelID(raw)
+		if err != nil {
+			fail("HOME_CHANNEL_ID: %v", err)
+		} else if home == c.ChannelID {
+			fail("HOME_CHANNEL_ID is the main channel")
+		} else {
+			c.HomeChannelID = home
+		}
+	}
 
 	c.BotTokens, err = ParseTokens(get("TELEGRAM_BOT_TOKENS", ""))
 	if err != nil {
@@ -192,6 +206,12 @@ func Load(envPath string) (Config, error) {
 	c.FladderManaged = withJellyfin && strings.EqualFold(get("FLADDER_MANAGED", "false"), "true")
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
+	}
+	for _, dir := range strings.Split(get("HOME_MEDIA_DIRS", ""), "|") {
+		dir = strings.TrimSpace(dir)
+		if dir != "" {
+			c.HomeMediaDirs = append(c.HomeMediaDirs, dir)
+		}
 	}
 	for _, dir := range strings.Split(get("LOCAL_MEDIA_DIRS", ""), "|") {
 		if dir = strings.TrimSpace(dir); dir != "" {

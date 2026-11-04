@@ -39,6 +39,10 @@ func (s *fakeSource) Messages(_ context.Context, ids []int) ([]media.Message, er
 
 func (s *fakeSource) Thumbnail(context.Context, int) ([]byte, error) { return s.thumb, s.thumbErr }
 
+func (s *fakeSource) Download(context.Context, int, int64, int64) ([]byte, error) {
+	return s.thumb, s.thumbErr
+}
+
 func (s *fakeSource) DeleteMessages(_ context.Context, ids []int) error {
 	s.deleted = append(s.deleted, ids...)
 	for _, id := range ids {
@@ -208,23 +212,24 @@ func TestSameNameDifferentMessagesDoNotCollide(t *testing.T) {
 	}
 }
 
-func TestUnmatchableMovieGetsLocalMetadata(t *testing.T) {
+func TestUnidentifiedMovieIsSkipped(t *testing.T) {
 	r := newRig(t)
 	r.src.thumb = []byte("jpeg-bytes")
-	r.src.video(1, "Family Trip.mp4", "Summer <2020> & friends")
-	m := r.src.msgs[1]
-	m.File.HasThumb = true
-	if _, err := r.idx.Sync(context.Background(), FullWindow); err != nil {
-		t.Fatal(err)
+	r.src.video(1, "Vikidrama Doctor.mp4", "not a film")
+	r.src.msgs[1].File.HasThumb = true
+	r.src.video(2, "Heat.1995.mkv", "")
+	added, err := r.idx.Sync(context.Background(), FullWindow)
+	if err != nil || added != 1 {
+		t.Fatalf("added %d, %v", added, err)
 	}
-	nfo := r.read(t, "Movies/Family Trip/movie.nfo")
-	for _, want := range []string{"<title>Family Trip</title>", "Summer &lt;2020&gt; &amp; friends", "<lockdata>true</lockdata>"} {
-		if !strings.Contains(nfo, want) {
-			t.Errorf("nfo misses %q:\n%s", want, nfo)
-		}
+	if r.exists("Movies/Vikidrama Doctor") || r.exists("Movies/Vikidrama Doctor/movie.nfo") {
+		t.Error("unidentified file entered the library")
 	}
-	if got := r.read(t, "Movies/Family Trip/poster.jpg"); got != "jpeg-bytes" {
-		t.Errorf("poster = %q", got)
+	if _, err := r.cat.Get(context.Background(), 1); !errors.Is(err, catalog.ErrNotFound) {
+		t.Errorf("catalog kept the unidentified file: %v", err)
+	}
+	if !r.exists("Movies/Heat (1995)/Heat (1995).strm") {
+		t.Error("identified film was skipped with it")
 	}
 }
 
@@ -241,20 +246,17 @@ func TestMatchableMovieHasNoLocalMetadata(t *testing.T) {
 	}
 }
 
-func TestThumbnailFailureKeepsTheVideo(t *testing.T) {
+func TestThumbnailFailureDoesNotKeepAnUnidentifiedVideo(t *testing.T) {
 	r := newRig(t)
 	r.src.thumbErr = errors.New("no thumb")
 	r.src.video(1, "Family Trip.mp4", "")
 	r.src.msgs[1].File.HasThumb = true
 	added, err := r.idx.Sync(context.Background(), FullWindow)
-	if err != nil || added != 1 {
+	if err != nil || added != 0 {
 		t.Fatalf("added %d, %v", added, err)
 	}
-	if !r.exists("Movies/Family Trip/Family Trip.strm") || !r.exists("Movies/Family Trip/movie.nfo") {
-		t.Error("files missing")
-	}
-	if r.exists("Movies/Family Trip/poster.jpg") {
-		t.Error("empty poster written")
+	if r.exists("Movies/Family Trip") {
+		t.Error("unidentified file entered the library")
 	}
 }
 
@@ -446,6 +448,29 @@ func TestDeletedVideoTakesOnlyItsOwnArchiveWithIt(t *testing.T) {
 
 type fakeIdent map[string]int
 
+func TestPersonalChannelKeepsVideoAndPhoto(t *testing.T) {
+	r := newRig(t)
+	r.idx.SetPersonal()
+	r.src.thumb = []byte("jpeg-bytes")
+	r.src.video(1, "Birthday.mp4", "home")
+	r.src.msgs[2] = media.Message{ID: 2, Exists: true, File: &media.File{
+		MessageID: 2, ChannelID: 5, DocID: 200, Size: 10, MIME: "image/jpeg", FileName: "Picnic.jpg", Date: time.Unix(2, 0),
+	}}
+	added, err := r.idx.Sync(context.Background(), FullWindow)
+	if err != nil || added != 2 {
+		t.Fatalf("added %d, %v", added, err)
+	}
+	if !r.exists("Home/Birthday tg1.strm") {
+		t.Error("home video missing")
+	}
+	if got := r.read(t, "Home/Picnic tg2.jpg"); got != "jpeg-bytes" {
+		t.Errorf("photo = %q", got)
+	}
+	if r.exists("Movies") && r.exists("Movies/Birthday") {
+		t.Error("personal file entered Movies")
+	}
+}
+
 func (f fakeIdent) Movie(_ context.Context, title string) (int, bool, error) {
 	id, ok := f[title]
 	return id, ok, nil
@@ -472,12 +497,12 @@ func TestNewTitleWithoutYearGetsTMDBID(t *testing.T) {
 func TestIdentifyFixesALockedTitle(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	r.src.video(1, "Family Trip.mp4", "caption text")
-	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+	rel := "Movies/Family Trip/Family Trip.strm"
+	if err := r.cat.Put(ctx, media.File{MessageID: 1, ChannelID: 5, DocID: 9, Size: 10, MIME: "video/mp4", FileName: "Family Trip.mp4", Caption: "caption text", RelPath: rel, Date: time.Unix(1, 0)}); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.Contains(r.read(t, "Movies/Family Trip/movie.nfo"), "lockdata") {
-		t.Fatal("expected a locked local nfo first")
+	if err := r.idx.lib.WriteUnmatchedSidecars(rel, "Family Trip", "caption text", nil); err != nil {
+		t.Fatal(err)
 	}
 	r.idx.SetIdentifier(fakeIdent{"Family Trip": 77})
 	changed, err := r.idx.Identify(ctx)
@@ -492,18 +517,24 @@ func TestIdentifyFixesALockedTitle(t *testing.T) {
 	}
 }
 
-func TestIdentifyLeavesAnUnknownTitleAlone(t *testing.T) {
+func TestIdentifyRemovesAnUnknownTitle(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()
-	r.src.video(1, "Family Trip.mp4", "caption text")
-	r.idx.SetIdentifier(fakeIdent{})
-	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+	rel := "Movies/Vikidrama Doctor/Vikidrama Doctor.strm"
+	if err := r.cat.Put(ctx, media.File{MessageID: 1, ChannelID: 5, DocID: 9, Size: 10, MIME: "video/mp4", FileName: "Vikidrama Doctor.mp4", RelPath: rel, Date: time.Unix(1, 0)}); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := r.idx.lib.WriteStrm(rel, 1); err != nil {
+		t.Fatal(err)
+	}
+	r.idx.SetIdentifier(fakeIdent{})
 	if changed, err := r.idx.Identify(ctx); err != nil || len(changed) != 0 {
 		t.Fatalf("changed %d, %v", len(changed), err)
 	}
-	if !strings.Contains(r.read(t, "Movies/Family Trip/movie.nfo"), "lockdata") {
-		t.Error("local metadata should stay")
+	if r.exists(rel) {
+		t.Error("unidentified file stayed in the library")
+	}
+	if _, err := r.cat.Get(ctx, 1); !errors.Is(err, catalog.ErrNotFound) {
+		t.Errorf("catalog kept it: %v", err)
 	}
 }

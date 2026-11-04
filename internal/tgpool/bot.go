@@ -39,6 +39,11 @@ var videoExtensions = map[string]bool{
 	".ts": true, ".m2ts": true, ".wmv": true, ".flv": true, ".mpg": true, ".mpeg": true,
 }
 
+var imageExtensions = map[string]bool{
+	".jpg": true, ".jpeg": true, ".png": true, ".gif": true, ".webp": true,
+	".heic": true, ".heif": true, ".tif": true, ".tiff": true, ".bmp": true,
+}
+
 var audioExtensions = map[string]bool{
 	".mp3": true, ".flac": true, ".m4a": true, ".aac": true,
 	".ogg": true, ".opus": true, ".wav": true, ".wma": true,
@@ -119,6 +124,8 @@ type bot struct {
 	channel     *tg.InputChannel
 	st          BotStatus
 	locations   map[int]location
+	extra       map[int64]*tg.InputChannel
+	extraLoc    map[string]location
 	settledOnce sync.Once
 	settledCh   chan struct{}
 }
@@ -395,7 +402,7 @@ func (b *bot) messages(ctx context.Context, ids []int) ([]media.Message, error) 
 		case *tg.Message:
 			found[m.ID] = media.Message{
 				ID: m.ID, Exists: true,
-				File:       fileFromMessage(m, b.channelID),
+				File:       fileFromMessage(m, b.channelID, false),
 				Attachment: attachmentFromMessage(m),
 			}
 		case *tg.MessageService:
@@ -519,7 +526,129 @@ func documentOf(m *tg.Message) *tg.Document {
 	return doc
 }
 
-func fileFromMessage(m *tg.Message, channelID int64) *media.File {
+func (b *bot) messagesIn(ctx context.Context, channelID int64, ids []int) ([]media.Message, error) {
+	if channelID == 0 || channelID == b.channelID {
+		return b.messages(ctx, ids)
+	}
+	api, _, err := b.conn()
+	if err != nil {
+		return nil, err
+	}
+	channel, err := b.inputFor(ctx, api, channelID)
+	if err != nil {
+		return nil, err
+	}
+	input := make([]tg.InputMessageClass, len(ids))
+	for i, id := range ids {
+		input[i] = &tg.InputMessageID{ID: id}
+	}
+	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{Channel: channel, ID: input})
+	if err != nil {
+		return nil, fmt.Errorf("channels.getMessages: %w", err)
+	}
+	found := map[int]media.Message{}
+	for _, raw := range rawMessages(res) {
+		switch m := raw.(type) {
+		case *tg.Message:
+			found[m.ID] = media.Message{
+				ID: m.ID, Exists: true,
+				File:       fileFromMessage(m, channelID, true),
+				Attachment: attachmentFromMessage(m),
+			}
+		case *tg.MessageService:
+			found[m.ID] = media.Message{ID: m.ID, Exists: true}
+		}
+	}
+	out := make([]media.Message, 0, len(ids))
+	for _, id := range ids {
+		if m, ok := found[id]; ok {
+			out = append(out, m)
+		} else {
+			out = append(out, media.Message{ID: id})
+		}
+	}
+	return out, nil
+}
+
+func (b *bot) inputFor(ctx context.Context, api *tg.Client, channelID int64) (*tg.InputChannel, error) {
+	b.mu.RLock()
+	if in, ok := b.extra[channelID]; ok {
+		b.mu.RUnlock()
+		return in, nil
+	}
+	b.mu.RUnlock()
+	ch, err := resolveChannel(ctx, api, channelID)
+	if err != nil {
+		return nil, err
+	}
+	in := ch.AsInput()
+	b.mu.Lock()
+	if b.extra == nil {
+		b.extra = map[int64]*tg.InputChannel{}
+	}
+	b.extra[channelID] = in
+	b.mu.Unlock()
+	return in, nil
+}
+
+func (b *bot) getBlockIn(ctx context.Context, channelID int64, messageID int, docID, offset int64, limit int) ([]byte, error) {
+	if channelID == 0 || channelID == b.channelID {
+		return b.getBlock(ctx, messageID, docID, offset, limit)
+	}
+	loc, err := b.locationIn(ctx, channelID, messageID, docID)
+	if err != nil {
+		return nil, err
+	}
+	api, _, err := b.conn()
+	if err != nil {
+		return nil, err
+	}
+	return readFile(ctx, api, loc.input, offset, limit)
+}
+
+func (b *bot) locationIn(ctx context.Context, channelID int64, messageID int, docID int64) (location, error) {
+	key := strconv.FormatInt(channelID, 10) + ":" + strconv.Itoa(messageID)
+	b.mu.RLock()
+	loc, ok := b.extraLoc[key]
+	b.mu.RUnlock()
+	if ok && (docID == 0 || loc.docID == docID) {
+		return loc, nil
+	}
+	api, _, err := b.conn()
+	if err != nil {
+		return location{}, err
+	}
+	channel, err := b.inputFor(ctx, api, channelID)
+	if err != nil {
+		return location{}, err
+	}
+	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+		Channel: channel,
+		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: messageID}},
+	})
+	if err != nil {
+		return location{}, fmt.Errorf("channels.getMessages: %w", err)
+	}
+	var doc *tg.Document
+	for _, m := range rawMessages(res) {
+		if msg, ok := m.(*tg.Message); ok && msg.ID == messageID {
+			doc = documentOf(msg)
+		}
+	}
+	if doc == nil || (docID != 0 && doc.ID != docID) {
+		return location{}, fmt.Errorf("%w: message %d", ErrMessageGone, messageID)
+	}
+	loc = location{docID: doc.ID, input: doc.AsInputDocumentFileLocation(""), doc: doc}
+	b.mu.Lock()
+	if b.extraLoc == nil {
+		b.extraLoc = map[string]location{}
+	}
+	b.extraLoc[key] = loc
+	b.mu.Unlock()
+	return loc, nil
+}
+
+func fileFromMessage(m *tg.Message, channelID int64, photos bool) *media.File {
 	doc := documentOf(m)
 	if doc == nil {
 		return nil
@@ -547,8 +676,12 @@ func fileFromMessage(m *tg.Message, channelID int64) *media.File {
 	if !isAudio && !voice && (strings.HasPrefix(doc.MimeType, "audio/") || audioExtensions[ext]) {
 		isAudio = true
 	}
-	// A voice note is not music. A music video stays a video.
-	if !isVideo && (!isAudio || voice) {
+	isImage := photos && (strings.HasPrefix(doc.MimeType, "image/") || imageExtensions[ext])
+	// A voice note is not music. A music video stays a video. The personal channel also keeps photos sent as files.
+	if !isVideo && !isImage && (!isAudio || voice) {
+		return nil
+	}
+	if photos && !isVideo && !isImage {
 		return nil
 	}
 	return &media.File{

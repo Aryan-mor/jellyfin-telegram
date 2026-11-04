@@ -28,7 +28,7 @@ func New(root, baseURL, token string, channel int64) *Library {
 
 // Prepare creates the top-level folders that Jellyfin libraries point at.
 func (l *Library) Prepare() error {
-	for _, d := range []string{"Movies", "Shows"} {
+	for _, d := range []string{"Movies", "Shows", "Home"} {
 		if err := os.MkdirAll(filepath.Join(l.root, d), 0o755); err != nil {
 			return err
 		}
@@ -118,8 +118,14 @@ func (l *Library) RemoveUnmatchedSidecars(rel string) error {
 	return nil
 }
 
-// Remove deletes a .strm file, then every parent folder holding no other .strm file.
-// The Movies and Shows folders themselves are kept.
+// WriteBytes stores a small file, such as a personal photo, under the library root.
+func (l *Library) WriteBytes(rel string, data []byte) error {
+	_, err := l.writeIfChanged(rel, data)
+	return err
+}
+
+// Remove deletes a file, then every parent folder holding no other .strm file.
+// The Movies, Shows and Home folders themselves are kept.
 func (l *Library) Remove(rel string) error {
 	full, err := l.resolve(rel)
 	if err != nil {

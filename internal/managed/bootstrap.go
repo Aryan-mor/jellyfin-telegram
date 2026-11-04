@@ -35,6 +35,8 @@ type Bootstrap struct {
 	// MoviesDir and ShowsDir are the folders the two libraries read.
 	MoviesDir string
 	ShowsDir  string
+	// HomeDir is the personal Home Videos and Photos folder. Empty skips that library.
+	HomeDir string
 	// Language is the user's language, or empty.
 	Language string
 }
@@ -187,7 +189,11 @@ func (b *Bootstrap) libraries(ctx context.Context, admin *apiClient) error {
 	for _, lib := range []struct{ name, kind, dir string }{
 		{"Movies", "movies", b.MoviesDir},
 		{"Shows", "tvshows", b.ShowsDir},
+		{"Home Videos and Photos", "homevideos", b.HomeDir},
 	} {
+		if lib.dir == "" {
+			continue
+		}
 		if have[lib.name] {
 			continue
 		}
