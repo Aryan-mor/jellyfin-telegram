@@ -275,7 +275,33 @@ Rules the uploader keeps:
 - **The torrent is found from the grab history** before the file is deleted, and only a record naming that movie or episode counts. A file holding several episodes unmonitors all of them.
 - **The disk guard runs on every pass**, including when setting up the apps fails. It stops the torrents below the free-space minimum and later starts only those, remembered by a marker file in the download folder.
 - **Sessions reconnect** with a growing delay after a dropped connection, but not after a revoked session or a lost admin right. A panel request that arrives with forwarding headers is not treated as this computer.
+- **Missing titles are searched for again** every `DOWNLOADS_SEARCH_EVERY_MINUTES` (60), by the commands `MissingMoviesSearch` and `MissingEpisodeSearch`. Radarr and Sonarr search once when a title is added and afterwards read only the newest items of an indexer's feed. Bitmagnet adds hundreds of torrents a minute and learns of a release at an unpredictable time, so without the repeat a title it did not know yet would never be looked for again. It only runs while an account is ready to upload and the disk has room. Both commands were checked on the live servers.
+- **Bitmagnet is not a search engine.** It stores what it overhears on the DHT, so a search can only find torrents it has already seen. Recent releases are about three to six times as dense in its index as releases from the 2000s, and single episodes outnumber whole seasons. A film that is still in cinemas is not searched for at all while its minimum availability is `released`.
 - **Containers are removed when the program ends**, so nothing keeps downloading unwatched.
+
+Checked against live containers (`go test -tags live ./internal/stack` with `JFTG_LIVE_DIR` set): the five containers start, Radarr and Sonarr get a root folder, one download client, an enabled Bitmagnet indexer and the size caps, qBittorrent accepts `max_ratio=0`, a hardlink across the bind mount on Windows has two links, and a second or forced pass changes nothing. Two things only a real server showed: the quality definition update answers 202 and applies a moment later, and the default Ultra-HD profile allows nothing but 2160p, so only the profile Seerr uses is changed.
+
+End-to-end run on 2026-11-04 with Sintel (CC-BY, 129 MB) and one signed-in non-Premium account:
+Seerr request, Radarr, qBittorrent (web seed, about 20 s), import with a hardlink, upload at 8 MB/s
+(15 s), a bot reading back the first and last block (`verified`), the indexer, Jellyfin's probe, then
+cleanup. Afterwards Radarr had no file and was unmonitored, the torrent and the local file were gone,
+Jellyfin listed the film (14.8 min, h264, aac, a subtitle track), range reads through the gateway
+answered 206 at both ends, and Seerr showed it as available. Radarr removed the finished torrent
+itself after the import, so the program's own torrent deletion is a second safety net.
+
+Four more things only the live run showed:
+
+- A queue that goes quiet must say why. A file now carries "waiting: @account rests for 4m" when no
+  account can take it.
+- An upload cannot run under the context of the pass that started it. A pass lasts seconds and an
+  upload minutes, so every upload died with its pass. Uploads now have their own context, which ends
+  when the switch is turned off or the program stops.
+- Seerr's Node gives each connection attempt 250 ms. Reaching a published loopback port through
+  Docker Desktop is sometimes slower, so Seerr failed at random with an empty error, even towards
+  Jellyfin, and once stopped the whole program during setup. Seerr now runs with
+  `--no-network-family-autoselection` and reaches Radarr and Sonarr by container name over the
+  shared network. Its setup is retried five times.
+- Updating a server in Seerr must not send its id in the body. Seerr refuses it as read-only.
 
 ## Not verified yet
 
@@ -290,10 +316,10 @@ Rules the uploader keeps:
 - Long sessions, where `FLOOD_PREMIUM_WAIT` may appear after tens of gigabytes.
 - A whole library. Extraction has run on 3 files.
 - The real upload speed of a user session, which may change the default pace.
-- Whether a hardlink works on the download bind mount. If it does not, Radarr copies and the file uses twice the space until the upload finishes.
-- `max_ratio=0` with the stop action in this qBittorrent build.
-- The history query Radarr and Sonarr answer for the torrent id, and `episode?episodeFileId=` on Sonarr. Both are checked against the record's own ids, but not yet against a live server.
-- Bitmagnet v0.10.1 starting with these worker keys. The tag exists, the keys were taken from its documentation.
+- A film found by Bitmagnet itself. Its index starts empty and no release has been found by search yet. The release in the end-to-end run below was handed to Radarr directly.
+- Series: Sonarr's import, season packs, a file holding two episodes, and `episode?episodeFileId=` on a real import. The film path is checked, the series path only has unit tests and request-shape checks.
+- A Premium account, a file larger than the account can send (`too_big`), flood waits, and long sessions.
+- A `mismatch` after a real corrupted upload. It has a unit test only.
 - Seerr, inside its container, reaching Radarr and Sonarr on the loopback ports through `host.docker.internal`.
 - A bot reading a Premium upload larger than 2 GB.
 - The download stack on Linux. It is built with `CGO_ENABLED=0`, and the containers are the same images.

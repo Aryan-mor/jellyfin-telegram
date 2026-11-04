@@ -37,6 +37,8 @@ type memSessions struct {
 	views []tguser.View
 	mu    sync.Mutex
 	sent  []int64
+	// hold, when set, keeps an upload running until it is closed.
+	hold chan struct{}
 }
 
 func (m *memSessions) Healthy() []tguser.View { return m.views }
@@ -61,6 +63,9 @@ func (m *memSessions) Upload(ctx context.Context, userID int64, path, name, capt
 	m.mu.Lock()
 	m.sent = append(m.sent, userID)
 	m.mu.Unlock()
+	if m.hold != nil {
+		<-m.hold
+	}
 	return int(userID), nil
 }
 func (m *memSessions) FindMessage(context.Context, string, int64) (int, bool, error) {

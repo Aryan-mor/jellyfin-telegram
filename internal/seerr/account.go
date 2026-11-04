@@ -17,6 +17,19 @@ type loginFile struct {
 	Password string `json:"password"`
 }
 
+// ReadLoginAccount returns the Jellyfin account made for Seerr, without making one when it is missing.
+func ReadLoginAccount(root string) (user, password string, ok bool) {
+	raw, err := os.ReadFile(filepath.Join(root, "jellyfin.json"))
+	if err != nil {
+		return "", "", false
+	}
+	var saved loginFile
+	if json.Unmarshal(raw, &saved) != nil || saved.User == "" || saved.Password == "" {
+		return "", "", false
+	}
+	return saved.User, saved.Password, true
+}
+
 // LoginAccount returns the Jellyfin user and password Seerr should keep using.
 func LoginAccount(root string) (string, string, error) {
 	path := filepath.Join(root, "jellyfin.json")

@@ -10,7 +10,12 @@ import (
 
 // PrepareDir creates the shared download tree and checks that this user can write it.
 func PrepareDir(dir string) error {
-	for _, sub := range []string{"torrents", filepath.Join("media", "movies"), filepath.Join("media", "tv")} {
+	// The category folders are made here, not left to qBittorrent. It only creates one with its first
+	// torrent, and until then Radarr and Sonarr report that the download folder does not exist.
+	for _, sub := range []string{
+		filepath.Join("torrents", "movies"), filepath.Join("torrents", "tv"),
+		filepath.Join("media", "movies"), filepath.Join("media", "tv"),
+	} {
 		if err := os.MkdirAll(filepath.Join(dir, sub), 0o755); err != nil {
 			return err
 		}

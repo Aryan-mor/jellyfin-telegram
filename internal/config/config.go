@@ -67,6 +67,9 @@ type Config struct {
 	DownloadsDir string
 	// DownloadsMinFreeGB pauses qBittorrent when the volume has less than this much free.
 	DownloadsMinFreeGB int
+	// DownloadsSearchEveryMinutes is how often Radarr and Sonarr look again for what is still missing.
+	// Zero turns the repeat off.
+	DownloadsSearchEveryMinutes int
 	// BitmagnetDBMaxGB stops the DHT crawler once Postgres reaches this size. Search stays on.
 	BitmagnetDBMaxGB int
 
@@ -192,6 +195,10 @@ func Load(envPath string) (Config, error) {
 	c.DownloadsMinFreeGB = getInt("DOWNLOADS_MIN_FREE_GB", 20, fail)
 	if c.DownloadsMinFreeGB < 0 {
 		fail("DOWNLOADS_MIN_FREE_GB must not be negative")
+	}
+	c.DownloadsSearchEveryMinutes = getInt("DOWNLOADS_SEARCH_EVERY_MINUTES", 60, fail)
+	if c.DownloadsSearchEveryMinutes < 0 {
+		fail("DOWNLOADS_SEARCH_EVERY_MINUTES must not be negative")
 	}
 	c.BitmagnetDBMaxGB = getInt("BITMAGNET_DB_MAX_GB", 40, fail)
 	if c.BitmagnetDBMaxGB < 0 {

@@ -79,6 +79,10 @@ func Handler(o Options) http.Handler {
 		mux.HandleFunc("/seerr", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/seerr/", http.StatusTemporaryRedirect)
 		})
+		// Fladder stores this Seerr as http://this-port/seerr, then calls an absolute
+		// /api/v1 path. That join drops /seerr, so the browser asks this port for /api/v1.
+		// Seerr is what answers there. Jellyfin has no such path.
+		mux.Handle("/api/v1/", passThrough(o.Seerr))
 	}
 	if o.Fladder != nil {
 		proxy := passThrough(o.Fladder)

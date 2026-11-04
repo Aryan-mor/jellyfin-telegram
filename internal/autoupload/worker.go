@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
@@ -71,6 +72,10 @@ type Worker struct {
 	MinFree  uint64
 	Log      *slog.Logger
 	Now      func() time.Time
+	// Ctx is what an upload runs under. It outlives one pass, because a file takes longer than the
+	// pass that started it. It ends when the switch is turned off or the program stops. When nil,
+	// the context of the pass is used.
+	Ctx context.Context
 
 	inflight sync.Map
 }
@@ -237,16 +242,24 @@ func (w *Worker) dispatch(ctx context.Context, rows []catalog.Upload) {
 		var pick int64
 		var best time.Duration
 		found := false
-		for _, view := range w.Sessions.Healthy() {
+		var why []string
+		healthy := w.Sessions.Healthy()
+		for _, view := range healthy {
+			name := "@" + view.Username
+			if view.Username == "" {
+				name = fmt.Sprintf("user %d", view.UserID)
+			}
 			if used[view.UserID] || view.Busy {
+				why = append(why, name+" is sending another file")
 				continue
 			}
 			gate := w.Sessions.Gate(view.UserID, row.Size, w.now())
 			if gate.Reason != "" && !gate.Ready {
-				_ = w.Cat.SetUpload(ctx, row.ID, row.State, row.MessageID, 0, gate.Reason)
+				why = append(why, name+": "+gate.Reason)
 				continue
 			}
 			if !gate.Ready {
+				why = append(why, fmt.Sprintf("%s rests for %s more", name, gate.Wait.Round(time.Second)))
 				continue
 			}
 			if !found || gate.Wait < best {
@@ -256,15 +269,25 @@ func (w *Worker) dispatch(ctx context.Context, rows []catalog.Upload) {
 			}
 		}
 		if !found {
+			// Say what the file waits for, so a quiet queue is not a mystery.
+			note := "waiting: no signed-in account is ready"
+			if len(why) > 0 {
+				note = "waiting: " + strings.Join(why, "; ")
+			}
+			_ = w.Cat.SetUpload(ctx, row.ID, row.State, row.MessageID, 0, note)
 			continue
 		}
 		used[pick] = true
 		row := row
 		session := pick
 		w.inflight.Store(row.ID, struct{}{})
+		upload := ctx
+		if w.Ctx != nil {
+			upload = w.Ctx
+		}
 		go func() {
 			defer w.inflight.Delete(row.ID)
-			w.uploadOne(ctx, row, session)
+			w.uploadOne(upload, row, session)
 		}()
 	}
 }

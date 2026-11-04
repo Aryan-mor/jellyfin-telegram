@@ -219,9 +219,10 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	radarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.RadarrPort))
 	sonarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.SonarrPort))
 	options := front.Options{
-		Gateway:    gw,
-		Setup:      wizard.Handler(),
-		Panel:      settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl),
+		Gateway: gw,
+		Setup:   wizard.Handler(),
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl,
+			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
 		Fladder:    fladderTarget,
@@ -323,7 +324,6 @@ func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat 
 		seerrBase = seerrTarget.String()
 		seerrKey, _ = seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
 	}
-	host, _, _ := seerrJellyfin(cfg)
 	// Docker reads a relative -v path as a volume name, so both folders must be absolute.
 	downloadsDir, err := filepath.Abs(cfg.DownloadsDir)
 	if err != nil {
@@ -337,7 +337,7 @@ func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat 
 	}
 	runner := &stack.Runner{
 		Downloads: downloadsDir, ConfigDir: stackDir,
-		SeerrURL: seerrBase, SeerrKey: seerrKey, PublicBase: publicBase(cfg), JellyfinHost: host,
+		SeerrURL: seerrBase, SeerrKey: seerrKey, PublicBase: publicBase(cfg),
 		MaxDBGB: cfg.BitmagnetDBMaxGB, Log: log,
 	}
 	svc := downloads.New(cfg.DownloadsEnabled)
@@ -347,6 +347,7 @@ func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat 
 	svc.Cat = cat
 	svc.Defaults = pace
 	svc.MinFree = cfg.DownloadsMinFreeGB
+	svc.SearchEvery = time.Duration(cfg.DownloadsSearchEveryMinutes) * time.Minute
 	svc.Log = log
 	worker := &autoupload.Worker{
 		Cat: cat, Verify: pool, Dir: downloadsDir,
@@ -359,12 +360,13 @@ func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat 
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
-		Code:    code,
-		EnvPath: envPath,
-		Seerr:   seerr,
-		Fladder: fladder,
+		Accounts: accounts,
+		Code:     code,
+		EnvPath:  envPath,
+		Seerr:    seerr,
+		Fladder:  fladder,
 		Downloads: func(ctx context.Context) (any, error) {
 			if dl == nil {
 				return nil, nil
@@ -406,6 +408,10 @@ func downloadActions(dl *downloads.Service) func(*http.Request, string, map[stri
 			}
 			return map[string]any{"ok": true}, nil
 		case "login":
+			if cancel, _ := body["cancel"].(bool); cancel {
+				dl.Users.CancelLogin()
+				return map[string]any{"ok": true}, nil
+			}
 			if phone, _ := body["phone"].(string); phone != "" {
 				return dl.Users.BeginLogin(r.Context(), phone)
 			}
@@ -531,7 +537,7 @@ func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credential
 		}
 	}
 	public := publicBase(cfg)
-	err = seerr.Setup{
+	setupSeerr := seerr.Setup{
 		URL:               srv.URL(),
 		APIKey:            key,
 		JellyfinHost:      host,
@@ -541,7 +547,9 @@ func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credential
 		JellyfinPublicURL: public,
 		ApplicationURL:    strings.TrimRight(public, "/") + "/seerr",
 		Language:          cfg.SubtitleLanguage,
-	}.Run(ctx)
+	}
+	// Seerr reaching Jellyfin can fail once at random right after it starts. That must not stop the player.
+	err = retry(ctx, 5, 5*time.Second, log, "Seerr setup", func() error { return setupSeerr.Run(ctx) })
 	if err != nil {
 		return "", err
 	}

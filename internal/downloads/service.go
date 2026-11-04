@@ -28,6 +28,8 @@ type Service struct {
 	Defaults tguser.Pace
 	MinFree  int
 	Log      *slog.Logger
+	// SearchEvery is how often missing titles are searched for again. Zero turns it off.
+	SearchEvery time.Duration
 
 	mu     sync.Mutex
 	on     bool
@@ -35,6 +37,62 @@ type Service struct {
 	wake   chan struct{}
 	// run is held for a whole pass, so a switch-off cannot race a pass that recreates containers.
 	run sync.Mutex
+	// uploads is the context uploads run under. A pass is shorter than an upload, so it cannot own it.
+	uploads       context.Context
+	cancelUploads context.CancelFunc
+	lastSearch    time.Time
+}
+
+// searchDue says whether the interval since the last repeat search has passed.
+func searchDue(last, now time.Time, every time.Duration) bool {
+	return every > 0 && (last.IsZero() || now.Sub(last) >= every)
+}
+
+// maybeSearch looks again for missing titles when it is time. It does nothing while no account could
+// upload what is found, or while the disk is nearly full, because a download then has nowhere to go.
+func (s *Service) maybeSearch(ctx context.Context) {
+	s.mu.Lock()
+	due := searchDue(s.lastSearch, time.Now(), s.SearchEvery)
+	s.mu.Unlock()
+	if !due || s.Runner == nil || s.Users == nil || len(s.Users.Healthy()) == 0 {
+		return
+	}
+	if free, err := diskspace.Free(s.Runner.Downloads); err == nil && s.MinFree > 0 && free < uint64(s.MinFree)<<30 {
+		return
+	}
+	if err := s.Runner.SearchMissing(ctx); err != nil {
+		if s.Log != nil && ctx.Err() == nil {
+			s.Log.Warn("searching for missing titles", "err", err)
+		}
+		return
+	}
+	s.mu.Lock()
+	s.lastSearch = time.Now()
+	s.mu.Unlock()
+	if s.Log != nil {
+		s.Log.Info("looked again for missing titles", "next", s.SearchEvery)
+	}
+}
+
+// uploadContext returns the context uploads run under, made from the program's own context.
+func (s *Service) uploadContext(root context.Context) context.Context {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.uploads == nil || s.uploads.Err() != nil {
+		s.uploads, s.cancelUploads = context.WithCancel(root)
+	}
+	return s.uploads
+}
+
+// stopUploads ends the uploads that are running. The files stay on disk and are sent again later.
+func (s *Service) stopUploads() {
+	s.mu.Lock()
+	cancel := s.cancelUploads
+	s.uploads, s.cancelUploads = nil, nil
+	s.mu.Unlock()
+	if cancel != nil {
+		cancel()
+	}
 }
 
 // New prepares the service. on is the value loaded from the settings file.
@@ -81,6 +139,7 @@ func (s *Service) tick(ctx context.Context) {
 	// Turning the switch off waits for a pass that is still running, and cancels it.
 	s.run.Lock()
 	defer s.run.Unlock()
+	root := ctx
 	tctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	s.mu.Lock()
@@ -96,6 +155,9 @@ func (s *Service) tick(ctx context.Context) {
 		s.Runner.SetCapMB(float64(s.Users.LargestCap()) / (1 << 20))
 	}
 	reconcileErr := s.Runner.Reconcile(ctx)
+	if reconcileErr == nil {
+		s.maybeSearch(ctx)
+	}
 	if s.Worker == nil {
 		return
 	}
@@ -110,6 +172,7 @@ func (s *Service) tick(ctx context.Context) {
 		}
 	}
 	s.Worker.Lib = lib
+	s.Worker.Ctx = s.uploadContext(root)
 	if reconcileErr != nil {
 		// The apps may be half set up, but qBittorrent keeps downloading, so the disk guard still runs.
 		s.Worker.Guard(ctx)
@@ -140,6 +203,14 @@ func (s *Service) library(snap stack.Status) *autoupload.Source {
 func (s *Service) SetEnabled(ctx context.Context, on bool) error {
 	if on {
 		if s.Users == nil || len(s.Users.Healthy()) == 0 {
+			// A signed-in account that cannot post stays on the panel with its reason. Say which.
+			if s.Users != nil {
+				for _, v := range s.Users.Views() {
+					if v.Error != "" {
+						return fmt.Errorf("no signed-in account can post in the channel yet: %s", v.Error)
+					}
+				}
+			}
 			return fmt.Errorf("sign in at least one account that is an admin of the channel")
 		}
 		if err := stack.Available(); err != nil {
@@ -172,6 +243,7 @@ func (s *Service) SetEnabled(ctx context.Context, on bool) error {
 		if cancel != nil {
 			cancel()
 		}
+		s.stopUploads()
 		s.run.Lock()
 		if s.Runner != nil {
 			_ = s.Runner.ForgetSeerr(ctx)
@@ -254,6 +326,7 @@ func (s *Service) Status(ctx context.Context) (map[string]any, error) {
 	s.mu.Lock()
 	pace := s.Defaults
 	on := s.on
+	lastSearch := s.lastSearch
 	s.mu.Unlock()
 	if sessions == nil {
 		sessions = []tguser.View{}
@@ -262,8 +335,9 @@ func (s *Service) Status(ctx context.Context) (map[string]any, error) {
 		queue = []map[string]any{}
 	}
 	return map[string]any{
-		"enabled": on, "error": snap.Error, "ready": snap.Ready, "dir": dir,
+		"enabled": on, "error": snap.Error, "warning": snap.Warning, "ready": snap.Ready, "dir": dir,
 		"free_bytes": snap.FreeBytes, "min_free_gb": s.MinFree, "crawler": snap.Crawler,
+		"last_search": lastSearch.Unix(), "search_every_minutes": int(s.SearchEvery / time.Minute),
 		"radarr_user": snap.RadarrUser, "radarr_password": snap.RadarrPassword,
 		"sonarr_user": snap.SonarrUser, "sonarr_password": snap.SonarrPassword,
 		"containers": snap.Containers, "sessions": sessions, "queue": queue,

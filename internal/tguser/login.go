@@ -26,6 +26,8 @@ const (
 // LoginResult is one step of signing a user account in.
 type LoginResult struct {
 	Step LoginStep `json:"step"`
+	// Warning is set when the account signed in but cannot post in the channel yet.
+	Warning string `json:"warning,omitempty"`
 }
 
 type pendingLogin struct {
@@ -35,6 +37,8 @@ type pendingLogin struct {
 	step     chan LoginStep
 	done     chan error
 	cancel   context.CancelFunc
+	// warning is written before done is sent, so the reader of done sees it.
+	warning string
 }
 
 type codeAuth struct {
@@ -124,6 +128,18 @@ func (m *Manager) BeginLogin(ctx context.Context, phone string) (LoginResult, er
 	return m.waitStep(ctx, p)
 }
 
+// CancelLogin ends a sign-in the user walked away from, so the next one can start at once.
+func (m *Manager) CancelLogin() {
+	p := m.current()
+	if p == nil {
+		return
+	}
+	if p.cancel != nil {
+		p.cancel()
+	}
+	m.clearPending(p)
+}
+
 // SubmitCode continues a sign-in that is waiting for the Telegram code.
 func (m *Manager) SubmitCode(ctx context.Context, code string) (LoginResult, error) {
 	return m.submit(ctx, code, false)
@@ -170,7 +186,7 @@ func (m *Manager) waitStep(ctx context.Context, p *pendingLogin) (LoginResult, e
 		if err != nil {
 			return LoginResult{}, err
 		}
-		return LoginResult{Step: StepDone}, nil
+		return LoginResult{Step: StepDone, Warning: p.warning}, nil
 	case <-ctx.Done():
 		return LoginResult{}, ctx.Err()
 	}
@@ -206,22 +222,29 @@ func (m *Manager) runLogin(ctx context.Context, store *fileStore, p *pendingLogi
 			_, _ = api.AuthLogOut(ctx)
 			return errors.New("this account is already signed in")
 		}
-		hash, err := channelAccess(ctx, api, m.channelID)
-		if err != nil {
-			_, _ = api.AuthLogOut(ctx)
-			return err
-		}
-		ok, err := canPost(ctx, api, m.channelID, hash)
-		if err != nil || !ok {
-			_, _ = api.AuthLogOut(ctx)
-			if err != nil {
-				return err
-			}
-			return errors.New("this account must be the channel creator, or an admin allowed to post")
-		}
+		// An account without access to the channel stays signed in. The session is kept with the
+		// reason, so being made an admin later fixes it, and the panel says what is missing.
 		meta := Meta{
 			UserID: self.ID, Phone: firstNonEmpty(p.phone, self.Phone), Username: self.Username,
-			Premium: self.Premium, Admin: true, AccessHash: hash, ChannelID: m.channelID,
+			Premium: self.Premium, ChannelID: m.channelID,
+		}
+		hash, err := channelAccess(ctx, api, m.channelID)
+		if err != nil {
+			p.warning = err.Error()
+			meta.Error = err.Error()
+		} else {
+			meta.AccessHash = hash
+			ok, err := canPost(ctx, api, m.channelID, hash)
+			switch {
+			case err != nil:
+				p.warning = err.Error()
+				meta.Error = err.Error()
+			case !ok:
+				p.warning = errNotAdmin.Error()
+				meta.Error = errNotAdmin.Error()
+			default:
+				meta.Admin = true
+			}
 		}
 		if err := store.writeMeta(meta); err != nil {
 			return err

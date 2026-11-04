@@ -6,11 +6,14 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
 // channelFake answers like tgpool.Pool: the last argument is the size of the whole file.
@@ -125,5 +128,67 @@ func TestGuardLeavesTorrentsAloneWhenItNeverStoppedThem(t *testing.T) {
 	}
 	if lib.resumed != 0 {
 		t.Fatalf("resumed %d torrents that this program never stopped", lib.resumed)
+	}
+}
+
+func TestAnUploadOutlivesThePassThatStartedIt(t *testing.T) {
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cat.Close()
+	dir := t.TempDir()
+	path := filepath.Join(dir, "a.mkv")
+	if err := os.WriteFile(path, []byte("video"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	lib := &memLib{items: []Item{{Kind: "movie", RemoteID: 1, OwnerID: 2, Path: path, Size: 5, FileName: "A (2010).mkv", Caption: "A (2010)"}}}
+	sessions := &memSessions{hold: make(chan struct{}), views: []tguser.View{
+		{UserID: 1, Username: "u", Admin: true, Connected: true, MaxBytes: tguser.MaxBytes(false), Pace: tguser.Pace{DailyGB: 50}},
+	}}
+	forever, stop := context.WithCancel(context.Background())
+	defer stop()
+	w := &Worker{Cat: cat, Lib: lib, Sessions: sessions, Ctx: forever}
+
+	pass, endPass := context.WithCancel(context.Background())
+	if err := w.RunOnce(pass); err != nil {
+		t.Fatal(err)
+	}
+	// The pass is over while the file is still going up, as in the service, where a pass is short.
+	endPass()
+	close(sessions.hold)
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		row, _, _ := cat.FindUpload(context.Background(), "movie", 1)
+		if row.State == catalog.UploadSent {
+			return
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	row, _, _ := cat.FindUpload(context.Background(), "movie", 1)
+	t.Fatalf("the upload died with its pass, state %s", row.State)
+}
+
+func TestAWaitingFileSaysWhatItWaitsFor(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cat.Close()
+	lib := &memLib{items: []Item{{Kind: "movie", RemoteID: 1, OwnerID: 2, Path: "x", Size: 5, FileName: "A (2010).mkv", Caption: "A"}}}
+	// This account is only allowed to send between 01:00 and 02:00, and it is 12:00.
+	sessions := &memSessions{views: []tguser.View{
+		{UserID: 1, Username: "u", Admin: true, Connected: true, MaxBytes: tguser.MaxBytes(false), Pace: tguser.Pace{Hours: "01-02"}},
+	}}
+	noon := func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.Local) }
+	w := &Worker{Cat: cat, Lib: lib, Sessions: sessions, Now: noon}
+	if err := w.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	row, _, _ := cat.FindUpload(ctx, "movie", 1)
+	if row.State != catalog.UploadQueued || !strings.Contains(row.Error, "@u rests for") {
+		t.Fatalf("state %s note %q", row.State, row.Error)
 	}
 }

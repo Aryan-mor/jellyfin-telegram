@@ -70,14 +70,14 @@ func TestConfigureIsIdempotent(t *testing.T) {
 			_, _ = w.Write([]byte("indexer test failed"))
 		case strings.Contains(r.URL.Path, "/api/v3/indexer"):
 			if r.Method == http.MethodPost {
-				indexers = []map[string]any{{"id": 4, "name": "Bitmagnet", "enable": false}}
+				indexers = []map[string]any{{"id": 4, "name": "Bitmagnet", "enableAutomaticSearch": false}}
 				writeJSON(w, indexers[0])
 				return
 			}
 			if !strings.Contains(r.URL.RawQuery, "forceSave=true") {
 				t.Error("enable without forceSave")
 			}
-			indexers[0]["enable"] = true
+			indexers[0]["enableAutomaticSearch"] = true
 			w.WriteHeader(http.StatusAccepted)
 		default:
 			t.Errorf("unexpected %s %s", r.Method, r.URL.String())
