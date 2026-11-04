@@ -30,6 +30,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
@@ -237,7 +238,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		options.Jellyfin = target
 	}
 	entry.Set(front.Handler(options))
-	go dl.Run(ctx)
+	if dl != nil {
+		go dl.Run(ctx)
+	}
 	log.Info("serving", "addr", cfg.GatewayListen)
 
 	var prober *jellyfin.Prober
@@ -273,6 +276,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	fmt.Printf("\nSettings panel:\n    %s/panel\n\n", cfg.LoopbackURL())
 
 	idx := indexer.New(pool, cat, lib, store, log)
+	if cfg.JellyfinEnabled() {
+		idx.SetIdentifier(jellyfin.Identifier{Client: jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey)})
+	}
 	loopDone := make(chan struct{})
 	go func() {
 		defer close(loopDone)
@@ -304,6 +310,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 }
 
 func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, seerrTarget *url.URL, log *slog.Logger) *downloads.Service {
+	if seerrTarget == nil {
+		return nil // downloads are part of Seerr
+	}
 	pace := tguser.Pace{
 		MBPerSec: cfg.UploadMBPerSec, RestMinutes: cfg.UploadRestMinutes,
 		LongEveryGB: cfg.UploadLongRestEveryGB, LongRestMinutes: cfg.UploadLongRestMinutes,
@@ -853,6 +862,24 @@ func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prob
 		}
 	}
 
+	// identify looks up movies posted without a year. probe then scans the new .nfo files, and
+	// refresh makes Jellyfin drop what it had kept for them.
+	identify := func() []media.File {
+		changed, err := idx.Identify(ctx)
+		if err != nil && ctx.Err() == nil {
+			log.Warn("cannot identify titles", "err", err)
+		}
+		return changed
+	}
+	refresh := func(changed []media.File) {
+		if prober == nil || len(changed) == 0 {
+			return
+		}
+		if err := prober.RefreshMetadata(ctx, changed); err != nil && ctx.Err() == nil {
+			log.Warn("cannot refresh metadata", "err", err)
+		}
+	}
+
 	if err := idx.Rewrite(ctx); err != nil {
 		log.Error("cannot refresh .strm files", "err", err)
 	}
@@ -862,8 +889,10 @@ func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prob
 	}
 	log.Info("initial sync finished", "added", added)
 	reconcile()
+	changed := identify()
 	warmUp(ctx, cat, pool, log)
 	probe(true)
+	refresh(changed)
 
 	syncTick := time.NewTicker(cfg.SyncInterval)
 	defer syncTick.Stop()
@@ -886,7 +915,9 @@ func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prob
 				log.Error("cannot refresh .strm files", "err", err)
 			}
 			reconcile()
+			changed := identify()
 			probe(true)
+			refresh(changed)
 		}
 	}
 }

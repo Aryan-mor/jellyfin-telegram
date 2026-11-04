@@ -417,3 +417,67 @@ func TestDeletedVideoTakesOnlyItsOwnArchiveWithIt(t *testing.T) {
 		t.Errorf("deleted %v, want only the archive of the removed video", r.src.deleted)
 	}
 }
+
+type fakeIdent map[string]int
+
+func (f fakeIdent) Movie(_ context.Context, title string) (int, bool, error) {
+	id, ok := f[title]
+	return id, ok, nil
+}
+
+func TestNewTitleWithoutYearGetsTMDBID(t *testing.T) {
+	r := newRig(t)
+	r.idx.SetIdentifier(fakeIdent{"Family Trip": 77})
+	r.src.thumb = []byte("jpeg-bytes")
+	r.src.video(1, "Family Trip.mp4", "caption text")
+	r.src.msgs[1].File.HasThumb = true
+	if _, err := r.idx.Sync(context.Background(), FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	nfo := r.read(t, "Movies/Family Trip/movie.nfo")
+	if !strings.Contains(nfo, "<tmdbid>77</tmdbid>") || strings.Contains(nfo, "lockdata") || strings.Contains(nfo, "<plot>") {
+		t.Errorf("nfo = %s", nfo)
+	}
+	if r.exists("Movies/Family Trip/poster.jpg") {
+		t.Error("local poster would hide the TMDB poster")
+	}
+}
+
+func TestIdentifyFixesALockedTitle(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	r.src.video(1, "Family Trip.mp4", "caption text")
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(r.read(t, "Movies/Family Trip/movie.nfo"), "lockdata") {
+		t.Fatal("expected a locked local nfo first")
+	}
+	r.idx.SetIdentifier(fakeIdent{"Family Trip": 77})
+	changed, err := r.idx.Identify(ctx)
+	if err != nil || len(changed) != 1 {
+		t.Fatalf("changed %d, %v", len(changed), err)
+	}
+	if nfo := r.read(t, "Movies/Family Trip/movie.nfo"); !strings.Contains(nfo, "<tmdbid>77</tmdbid>") || strings.Contains(nfo, "lockdata") {
+		t.Errorf("nfo = %s", nfo)
+	}
+	if changed, _ := r.idx.Identify(ctx); len(changed) != 0 {
+		t.Errorf("second pass changed %d files", len(changed))
+	}
+}
+
+func TestIdentifyLeavesAnUnknownTitleAlone(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	r.src.video(1, "Family Trip.mp4", "caption text")
+	r.idx.SetIdentifier(fakeIdent{})
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	if changed, err := r.idx.Identify(ctx); err != nil || len(changed) != 0 {
+		t.Fatalf("changed %d, %v", len(changed), err)
+	}
+	if !strings.Contains(r.read(t, "Movies/Family Trip/movie.nfo"), "lockdata") {
+		t.Error("local metadata should stay")
+	}
+}

@@ -68,8 +68,8 @@ func TestLoadValid(t *testing.T) {
 	if c.JellyfinEnabled() {
 		t.Error("jellyfin should be off")
 	}
-	if !c.JellyfinManaged || !c.SeerrManaged || !c.FladderManaged {
-		t.Error("a private Jellyfin, Seerr and Fladder are the default")
+	if !c.JellyfinManaged || c.SeerrManaged || c.FladderManaged {
+		t.Error("a private Jellyfin is the default, Seerr and Fladder are opt-in")
 	}
 	if c.DownloadsEnabled || c.UploadMBPerSec != 8 || c.UploadDailyGB != 50 || c.DownloadsMinFreeGB != 20 || c.BitmagnetDBMaxGB != 40 {
 		t.Errorf("download defaults = %+v", c)
@@ -154,24 +154,37 @@ func TestEnsureGatewayTokenPersists(t *testing.T) {
 	}
 }
 
-func TestSeerrFollowsPrivateJellyfin(t *testing.T) {
-	c, err := load(t, validEnv+"SEERR_MANAGED=false\n")
-	if err != nil || !c.JellyfinManaged || c.SeerrManaged {
-		t.Fatalf("skip seerr: %+v, %v", c, err)
+func TestSeerrAndFladderAreOptIn(t *testing.T) {
+	c, err := load(t, validEnv+"SEERR_MANAGED=true\n")
+	if err != nil || !c.JellyfinManaged || !c.SeerrManaged || c.FladderManaged {
+		t.Fatalf("seerr only: %+v, %v", c, err)
 	}
-	c, err = load(t, validEnv+"JELLYFIN_MANAGED=false\nGATEWAY_PUBLIC_URL=http://127.0.0.1:8097\n")
-	if err != nil || c.JellyfinManaged || c.SeerrManaged {
+	c, err = load(t, validEnv+"JELLYFIN_MANAGED=false\nSEERR_MANAGED=true\nFLADDER_MANAGED=true\nGATEWAY_PUBLIC_URL=http://127.0.0.1:8097\n")
+	if err != nil || c.JellyfinManaged || c.SeerrManaged || c.FladderManaged {
 		t.Fatalf("no server: %+v, %v", c, err)
 	}
 	c, err = load(t, validEnv+`JELLYFIN_URL=http://127.0.0.1:8096
 JELLYFIN_API_KEY=abc
 GATEWAY_PUBLIC_URL=http://127.0.0.1:8097
+SEERR_MANAGED=true
+FLADDER_MANAGED=true
 `)
 	if err != nil || c.JellyfinManaged || !c.SeerrManaged || !c.FladderManaged {
-		t.Fatalf("existing Jellyfin should still start Seerr and Fladder: %+v, %v", c, err)
+		t.Fatalf("existing Jellyfin can still get Seerr and Fladder: %+v, %v", c, err)
 	}
 	if err := c.ValidateServe(); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestDownloadsNeedSeerr(t *testing.T) {
+	c, err := load(t, validEnv+"DOWNLOADS_ENABLED=true\n")
+	if err != nil || c.DownloadsEnabled {
+		t.Fatalf("downloads without seerr: %+v, %v", c, err)
+	}
+	c, err = load(t, validEnv+"SEERR_MANAGED=true\nDOWNLOADS_ENABLED=true\n")
+	if err != nil || !c.DownloadsEnabled {
+		t.Fatalf("downloads with seerr: %+v, %v", c, err)
 	}
 }
 

@@ -54,13 +54,15 @@ type Config struct {
 	// JellyfinManaged means this program installs and runs Jellyfin itself.
 	JellyfinManaged bool
 	// SeerrManaged means this program runs Seerr against the configured Jellyfin.
-	// It is on unless SEERR_MANAGED=false, including when Jellyfin is one you already run.
+	// It is off until SEERR_MANAGED=true, and works with a Jellyfin you already run too.
 	SeerrManaged bool
-	// FladderManaged means this program runs the Fladder web client, with Seerr filled in.
+	// FladderManaged means this program runs the Fladder web client, with Seerr filled in when
+	// Seerr is on. It is off until FLADDER_MANAGED=true.
 	FladderManaged bool
 
 	// DownloadsEnabled turns on Radarr, Sonarr, qBittorrent, Bitmagnet and the channel uploader.
-	// It stays off until a person turns it on, and only after a healthy admin session exists.
+	// It needs Seerr, stays off until a person turns it on, and only works once a healthy admin
+	// session exists.
 	DownloadsEnabled bool
 	// DownloadsDir is the bind-mounted volume shared by qBittorrent, Radarr and Sonarr.
 	// Empty resolves to DATA_DIR/downloads.
@@ -182,12 +184,13 @@ func Load(envPath string) (Config, error) {
 	}
 	c.JellyfinManaged = c.JellyfinURL == "" && !strings.EqualFold(get("JELLYFIN_MANAGED", "true"), "false")
 	withJellyfin := c.JellyfinManaged || c.JellyfinURL != ""
-	c.SeerrManaged = managedDefault(get("SEERR_MANAGED", ""), withJellyfin)
-	c.FladderManaged = managedDefault(get("FLADDER_MANAGED", ""), withJellyfin)
+	c.SeerrManaged = withJellyfin && strings.EqualFold(get("SEERR_MANAGED", "false"), "true")
+	c.FladderManaged = withJellyfin && strings.EqualFold(get("FLADDER_MANAGED", "false"), "true")
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
 	}
-	c.DownloadsEnabled = strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")
+	// Downloads are part of Seerr: it is what asks Radarr and Sonarr for a title.
+	c.DownloadsEnabled = c.SeerrManaged && strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")
 	c.DownloadsDir = get("DOWNLOADS_DIR", "")
 	if c.DownloadsDir == "" {
 		c.DownloadsDir = filepath.Join(c.DataDir, "downloads")
@@ -351,17 +354,6 @@ func ParseTokens(s string) ([]string, error) {
 		return nil, errors.New("at least one bot token is required")
 	}
 	return out, nil
-}
-
-func managedDefault(raw string, whenJellyfin bool) bool {
-	switch strings.ToLower(raw) {
-	case "false":
-		return false
-	case "":
-		return whenJellyfin
-	default:
-		return true
-	}
 }
 
 func get(key, def string) string {
