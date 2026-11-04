@@ -19,6 +19,15 @@ When you press play, this service reads the video from Telegram through a pool o
 it to Jellyfin as an ordinary HTTP stream, with seeking.
 
 <p align="center">
+  <a href="https://aryanmoradi.com/work/jellyfin-telegram">
+    <img src="https://aryanmoradi.com/video/jellyfin-telegram.gif" alt="A short video of how jellyfin-telegram works" width="90%">
+  </a>
+</p>
+
+New here? [This page explains what jellyfin-telegram is](https://aryanmoradi.com/work/jellyfin-telegram),
+with the full video. Feel free to contribute: see [Contributing](#contributing).
+
+<p align="center">
   <img src="docs/images/architecture.svg" alt="How jellyfin-telegram connects Telegram and Jellyfin" width="90%">
 </p>
 
@@ -271,6 +280,27 @@ Set `JELLYFIN_URL` and `JELLYFIN_API_KEY` instead of using the managed copy. Set
    to an address both the container and your clients can reach, such as the host's LAN address.
    `JELLYFIN_URL` is the address as seen from this service.
 
+### Apps that find the server by themselves
+
+Android TV, and other apps that search the network for a server, ask Jellyfin where it is and get
+its own port (8096). They then talk to Jellyfin directly and skip this service. Streams still play,
+but fixes made here do not reach the app. One of them is a Jellyfin 10.11 bug that gives external
+subtitles a file path instead of an address: the app asks for a path that does not exist, the
+subtitle never shows, and playback freezes for about 15 seconds on start and after every seek.
+
+With your own Jellyfin, this service sets *Published Server URIs* to `all=` followed by
+`GATEWAY_PUBLIC_URL` at startup, so these apps find this service instead. It does so only when
+`GATEWAY_PUBLIC_URL` is not a loopback address and you have no `all=` entry of your own. If you
+configure by hand, do the same in *Dashboard > Networking > Published Server URIs*:
+
+```
+all=http://192.168.1.20:8097
+```
+
+Then remove the server in the app and let it find the server again, because an app keeps the
+address it saved earlier. You can also type the address `http://192.168.1.20:8097` into the app.
+The managed Jellyfin answers no network searches, so it needs none of this.
+
 ## Opening it from another device
 
 - **Same network:** open the address printed at startup, for example `http://192.168.1.20:8097`.
@@ -453,7 +483,8 @@ behaviour.
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) and follow the
+Feel free to contribute! Bug fixes, ideas and pull requests are all welcome. Please read
+[CONTRIBUTING.md](CONTRIBUTING.md) and follow the
 [Code of Conduct](CODE_OF_CONDUCT.md). Bug reports and feature requests go in
 [GitHub Issues](https://github.com/Aryan-mor/jellyfin-telegram/issues).
 

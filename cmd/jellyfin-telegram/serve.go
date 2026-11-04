@@ -254,6 +254,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 
 	var prober *jellyfin.Prober
 	if cfg.JellyfinEnabled() {
+		if !cfg.JellyfinManaged {
+			publishAddress(ctx, cfg, log)
+		}
 		prober = jellyfin.NewProber(jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey), cat, engine, log)
 		prober.StreamURL = lib.StreamURL
 		if err := setupSubtitles(ctx, cfg, cat, pool, prober, log); err != nil {
@@ -1056,4 +1059,24 @@ func checkChannelUnchanged(ctx context.Context, cat *catalog.Catalog, channel in
 			all[0].ChannelID, channel)
 	}
 	return nil
+}
+
+// publishAddress tells the user's own Jellyfin to announce this service's address when clients search
+// the network. Without it an app such as Android TV finds Jellyfin's own port first, bypasses this
+// service, and loses its fixes. The managed server never answers such searches, so it needs nothing.
+func publishAddress(ctx context.Context, cfg config.Config, log *slog.Logger) {
+	u, err := url.Parse(cfg.GatewayPublicURL)
+	if err != nil || u.Host == "" {
+		return
+	}
+	if ip := net.ParseIP(u.Hostname()); (ip != nil && ip.IsLoopback()) || strings.EqualFold(u.Hostname(), "localhost") {
+		return
+	}
+	changed, err := jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey).PublishAddress(ctx, cfg.GatewayPublicURL)
+	switch {
+	case err != nil:
+		log.Warn("could not set the address Jellyfin announces; set Published Server URIs by hand", "err", err)
+	case changed:
+		log.Info("Jellyfin now announces this service's address to apps that search the network", "address", cfg.GatewayPublicURL)
+	}
 }

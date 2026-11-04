@@ -359,3 +359,30 @@ func (c *Client) send(ctx context.Context, method, path string, q url.Values, bo
 	}
 	return json.NewDecoder(res.Body).Decode(out)
 }
+
+// PublishAddress makes Jellyfin announce address as its own to clients that search the network, such
+// as the Android TV app, which would otherwise find Jellyfin's own port and bypass this service. An
+// "all=" entry the user already set is left alone. It reports whether anything was written.
+func (c *Client) PublishAddress(ctx context.Context, address string) (bool, error) {
+	var cfg map[string]json.RawMessage
+	if err := c.do(ctx, http.MethodGet, "/System/Configuration/network", nil, &cfg); err != nil {
+		return false, err
+	}
+	var entries []string
+	if raw := cfg["PublishedServerUriBySubnet"]; len(raw) > 0 {
+		if err := json.Unmarshal(raw, &entries); err != nil {
+			return false, err
+		}
+	}
+	for _, e := range entries {
+		if strings.HasPrefix(strings.ToLower(strings.TrimSpace(e)), "all=") {
+			return false, nil
+		}
+	}
+	list, err := json.Marshal(append(entries, "all="+address))
+	if err != nil {
+		return false, err
+	}
+	cfg["PublishedServerUriBySubnet"] = list
+	return true, c.post(ctx, "/System/Configuration/network", cfg, nil)
+}

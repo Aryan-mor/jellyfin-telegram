@@ -245,3 +245,20 @@ func TestSwitchChangesHandlerAtRuntime(t *testing.T) {
 		t.Errorf("after set: %d", rec.Code)
 	}
 }
+
+func TestExternalSubtitleGetsARealAddress(t *testing.T) {
+	in := `{"MediaSources":[{"Id":"abc","MediaStreams":[` +
+		`{"Index":0,"Type":"Video"},` +
+		`{"Index":3,"Codec":"subrip","DeliveryMethod":"External","DeliveryUrl":"D:\\Library\\x.fas.srt"},` +
+		`{"Index":4,"Codec":"ass","DeliveryMethod":"External","DeliveryUrl":"/Videos/1/abc/Subtitles/4/0/Stream.ass"}]}]}`
+	out := string(fixSubtitleURLs("/Items/1-2/PlaybackInfo", []byte(in)))
+	if !strings.Contains(out, `"/Videos/1-2/abc/Subtitles/3/0/Stream.srt"`) {
+		t.Errorf("the file path was kept: %s", out)
+	}
+	if !strings.Contains(out, `"/Videos/1/abc/Subtitles/4/0/Stream.ass"`) {
+		t.Errorf("a good address changed: %s", out)
+	}
+	if got := string(fixSubtitleURLs("/Items/1-2/Images", []byte(in))); got != in {
+		t.Error("an unrelated answer was rewritten")
+	}
+}

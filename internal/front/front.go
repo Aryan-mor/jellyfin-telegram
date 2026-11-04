@@ -5,6 +5,7 @@ package front
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"net"
 	"net/http"
@@ -146,6 +147,7 @@ func rewriteBody(res *http.Response, streamBase string) error {
 		return err
 	}
 	body = bytes.ReplaceAll(body, []byte(streamBase+"/s/"), []byte(base+"/s/"))
+	body = fixSubtitleURLs(res.Request.URL.Path, body)
 	res.Body = io.NopCloser(bytes.NewReader(body))
 	res.ContentLength = int64(len(body))
 	res.Header.Set("Content-Length", strconv.Itoa(len(body)))
@@ -198,4 +200,53 @@ func fromLoopback(r *http.Request) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// fixSubtitleURLs repairs a Jellyfin 10.11 bug. When a client's profile lists the format "subrip",
+// which Android TV does, an external subtitle gets its file path as DeliveryUrl instead of the
+// /Videos/.../Subtitles/... address. The client then asks for a path like /D:/Library/x.srt, gets
+// 404, and playback stalls until the player gives up on the track. Writing the address Jellyfin
+// itself uses for every other profile fixes it for any client.
+func fixSubtitleURLs(path string, body []byte) []byte {
+	parts := strings.Split(strings.Trim(path, "/"), "/")
+	if len(parts) != 3 || !strings.EqualFold(parts[0], "items") || !strings.EqualFold(parts[2], "playbackinfo") ||
+		!bytes.Contains(body, []byte(`"DeliveryUrl"`)) {
+		return body
+	}
+	var doc map[string]any
+	dec := json.NewDecoder(bytes.NewReader(body))
+	dec.UseNumber()
+	if dec.Decode(&doc) != nil {
+		return body
+	}
+	changed := false
+	sources, _ := doc["MediaSources"].([]any)
+	for _, src := range sources {
+		source, _ := src.(map[string]any)
+		sourceID, _ := source["Id"].(string)
+		streams, _ := source["MediaStreams"].([]any)
+		for _, st := range streams {
+			stream, _ := st.(map[string]any)
+			delivery, _ := stream["DeliveryUrl"].(string)
+			index, ok := stream["Index"].(json.Number)
+			if !ok || sourceID == "" || stream["DeliveryMethod"] != "External" || delivery == "" ||
+				strings.HasPrefix(delivery, "/") || strings.Contains(delivery, "://") {
+				continue
+			}
+			ext, _ := stream["Codec"].(string)
+			if ext = strings.ToLower(ext); ext == "subrip" || ext == "" {
+				ext = "srt"
+			}
+			stream["DeliveryUrl"] = "/Videos/" + parts[1] + "/" + sourceID + "/Subtitles/" + index.String() + "/0/Stream." + ext
+			changed = true
+		}
+	}
+	if !changed {
+		return body
+	}
+	fixed, err := json.Marshal(doc)
+	if err != nil {
+		return body
+	}
+	return fixed
 }
