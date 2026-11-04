@@ -32,6 +32,11 @@ type Values struct {
 	Language    string `json:"language"`
 	JellyfinURL string `json:"jellyfin_url"`
 	JellyfinKey string `json:"jellyfin_key"`
+	// Fladder, Seerr and Downloads are the optional parts. Downloads is part of Seerr, so asking
+	// for it turns Seerr on too.
+	Fladder   bool `json:"fladder"`
+	Seerr     bool `json:"seerr"`
+	Downloads bool `json:"downloads"`
 }
 
 // BotReport is the result of trying one bot.
@@ -206,6 +211,9 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		"SUBTITLE_LANGUAGE":   language,
 		"JELLYFIN_URL":        strings.TrimRight(strings.TrimSpace(v.JellyfinURL), "/"),
 		"JELLYFIN_API_KEY":    strings.TrimSpace(v.JellyfinKey),
+		"SEERR_MANAGED":       fmt.Sprint(v.Seerr || v.Downloads),
+		"FLADDER_MANAGED":     fmt.Sprint(v.Fladder),
+		"DOWNLOADS_ENABLED":   fmt.Sprint(v.Downloads),
 	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, "cannot write the settings file: "+err.Error())

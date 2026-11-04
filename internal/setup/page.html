@@ -27,6 +27,9 @@ summary { cursor:pointer; }
 .bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
 code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; word-break:break-all; }
 .row { margin:8px 0; }
+.opt { display:flex; gap:8px; align-items:center; font-weight:400; margin:0; }
+.opt input { width:auto; }
+.sub { margin-left:26px; }
 [hidden] { display:none !important; }
 </style>
 </head>
@@ -54,6 +57,13 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     <small>A code such as en, de, fr, fa or ja. Used to find subtitles. Leave empty to skip them.</small>
     <input id="language" maxlength="12" autocomplete="off">
 
+    <label>Extras</label>
+    <small>Jellyfin is always installed. These are optional, need Docker, and can be added later by editing the settings file.</small>
+    <div class="row"><label class="opt"><input type="checkbox" id="fladder"> Fladder, a nicer web client for Jellyfin</label></div>
+    <div class="row"><label class="opt"><input type="checkbox" id="seerr"> Seerr, to request movies and shows</label></div>
+    <div class="row sub"><label class="opt"><input type="checkbox" id="downloads" disabled> Downloader, so requests are fetched and added by themselves</label>
+      <small>Part of Seerr. After setup, sign in a Telegram account in the panel so it can post to the channel.</small></div>
+
     <details>
       <summary>I already run Jellyfin</summary>
       <small style="margin-top:8px">Leave these empty to get a private Jellyfin set up for you.</small>
@@ -69,7 +79,7 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
 
   <section id="progress" hidden>
     <h1 id="stage">Starting</h1>
-    <p>You can leave this page open. The first start downloads Jellyfin and Seerr. Seerr needs Docker.</p>
+    <p>You can leave this page open. The first start downloads Jellyfin, and any extra you ticked.</p>
     <div class="bar"><i id="fill"></i></div>
     <div id="perror" class="result bad"></div>
   </section>
@@ -99,7 +109,9 @@ const api = async (path, body) => {
   if (!res.ok) throw new Error(data.error || 'Something went wrong');
   return data;
 };
-const values = () => ({api_id:$('api_id').value, api_hash:$('api_hash').value, channel:$('channel').value, bots:$('bots').value, language:$('language').value, jellyfin_url:$('jellyfin_url').value, jellyfin_key:$('jellyfin_key').value});
+const values = () => ({api_id:$('api_id').value, api_hash:$('api_hash').value, channel:$('channel').value, bots:$('bots').value, language:$('language').value, jellyfin_url:$('jellyfin_url').value, jellyfin_key:$('jellyfin_key').value, fladder:$('fladder').checked, seerr:$('seerr').checked, downloads:$('downloads').checked});
+// The downloader is part of Seerr: it can only be ticked while Seerr is.
+$('seerr').onchange = () => { $('downloads').disabled = !$('seerr').checked; if (!$('seerr').checked) $('downloads').checked = false; };
 const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; return d; };
 
 $('go').onclick = async () => {

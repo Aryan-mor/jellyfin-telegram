@@ -19,8 +19,8 @@ The service runs as one binary on Windows and Linux. It needs no CGO, FUSE or da
 - One or more bots, each an admin of that channel, from [@BotFather](https://t.me/BotFather)
 - `api_id` and `api_hash` from [my.telegram.org](https://my.telegram.org)
 - Jellyfin 10.11.8 or 12.4 (the versions tested)
-- Docker. Seerr and the Fladder web client start with Jellyfin. Set `SEERR_MANAGED=false`
-  or `FLADDER_MANAGED=false` to skip one.
+- Docker, only if you tick an extra in the setup page. Jellyfin alone does not need it. The extras are
+  Fladder (a nicer web client), Seerr (requests) and, under Seerr, the downloader.
 
 ## Setup
 

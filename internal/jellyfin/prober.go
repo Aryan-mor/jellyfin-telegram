@@ -293,3 +293,29 @@ func (s sourceIndex) find(f media.File) (match, bool) {
 	}
 	return match{}, false
 }
+
+// RefreshMetadata makes Jellyfin read these files again. It is for a title whose folder gained a
+// TMDB id: Jellyfin keeps an earlier local lock until the item is refreshed with replacing on.
+func (p *Prober) RefreshMetadata(ctx context.Context, files []media.File) error {
+	if len(files) == 0 {
+		return nil
+	}
+	userID, err := p.client.AdminUserID(ctx)
+	if err != nil {
+		return err
+	}
+	idx, err := p.Index(ctx, userID)
+	if err != nil {
+		return err
+	}
+	for _, f := range files {
+		at, ok := idx.Locate(f)
+		if !ok {
+			continue // not scanned yet, so the first read will already use the id
+		}
+		if err := p.client.RefreshMetadata(ctx, at.Item.ID, userID); err != nil {
+			p.log.Warn("cannot refresh metadata", "message", f.MessageID, "err", err)
+		}
+	}
+	return nil
+}

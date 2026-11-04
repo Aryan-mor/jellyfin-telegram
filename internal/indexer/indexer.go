@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
@@ -43,6 +44,12 @@ type BlockRemover interface {
 	RemoveDoc(doc int64) error
 }
 
+// Identifier finds the TMDB id of a movie from its title. ok is false when the title is unknown
+// or ambiguous.
+type Identifier interface {
+	Movie(ctx context.Context, title string) (tmdbID int, ok bool, err error)
+}
+
 // Indexer syncs the channel into the catalog and library.
 type Indexer struct {
 	src    Source
@@ -51,12 +58,20 @@ type Indexer struct {
 	blocks BlockRemover
 	log    *slog.Logger
 	pace   time.Duration
+
+	ident Identifier
+	mu    sync.Mutex
+	known map[string]int // title to TMDB id, 0 for a title that did not resolve
 }
 
 // New returns an Indexer.
 func New(src Source, cat *catalog.Catalog, lib *library.Library, blocks BlockRemover, log *slog.Logger) *Indexer {
 	return &Indexer{src: src, cat: cat, lib: lib, blocks: blocks, log: log, pace: defaultPace}
 }
+
+// SetIdentifier turns on title lookup for movies that come without a year or id. Without it such
+// movies get local metadata from their caption.
+func (x *Indexer) SetIdentifier(i Identifier) { x.ident = i }
 
 // Sync walks ids after the last seen message and stops after window empty ids.
 // It returns how many videos were added.
@@ -162,6 +177,7 @@ func (x *Indexer) Reconcile(ctx context.Context) (int, error) {
 		if err := x.cat.Put(ctx, f); err != nil {
 			return 0, err
 		}
+		x.refreshSidecars(ctx, f)
 	}
 	for _, f := range gone {
 		if err := x.remove(ctx, f); err != nil {
@@ -272,10 +288,101 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 		return err
 	}
 	if !p.Matchable() {
-		x.writeSidecars(ctx, f, p)
+		x.unmatchedSidecars(ctx, f, p)
 	}
 	x.log.Info("file added", "message", f.MessageID, "path", rel)
 	return nil
+}
+
+// refreshSidecars follows an edited name or caption. The library path stays the same, but a title
+// that gained a year or id is now matchable, so the local metadata that blocked the online lookup
+// goes away. A title that is still unmatchable gets its sidecars rewritten from the new caption.
+func (x *Indexer) refreshSidecars(ctx context.Context, f media.File) {
+	p := naming.Parse(f.FileName, f.Caption)
+	if p.Episode {
+		return
+	}
+	if p.Matchable() {
+		if err := x.lib.RemoveUnmatchedSidecars(f.RelPath); err != nil {
+			x.log.Warn("cannot remove local metadata", "message", f.MessageID, "err", err)
+		}
+		return
+	}
+	x.unmatchedSidecars(ctx, f, p)
+}
+
+// unmatchedSidecars handles a title with no year or id. When the title names one TMDB entry, that
+// id is written so Jellyfin loads the real poster and details. Otherwise the caption becomes
+// local metadata.
+func (x *Indexer) unmatchedSidecars(ctx context.Context, f media.File, p naming.Parsed) {
+	if id, ok := x.identify(ctx, p); ok {
+		if err := x.lib.WriteTMDBSidecar(f.RelPath, id); err != nil {
+			x.log.Warn("cannot write TMDB id", "message", f.MessageID, "err", err)
+			return
+		}
+		x.log.Info("title identified", "message", f.MessageID, "title", p.Title, "tmdb", id)
+		return
+	}
+	x.writeSidecars(ctx, f, p)
+}
+
+func (x *Indexer) identify(ctx context.Context, p naming.Parsed) (int, bool) {
+	if x.ident == nil || p.Episode || p.Title == "" {
+		return 0, false
+	}
+	x.mu.Lock()
+	id, seen := x.known[p.Title]
+	x.mu.Unlock()
+	if seen {
+		return id, id > 0
+	}
+	tctx, cancel := context.WithTimeout(ctx, time.Minute)
+	defer cancel()
+	id, ok, err := x.ident.Movie(tctx, p.Title)
+	if err != nil {
+		x.log.Warn("cannot look up title", "title", p.Title, "err", err)
+		return 0, false // not cached, so the next pass tries again
+	}
+	if !ok {
+		id = 0
+	}
+	x.mu.Lock()
+	if x.known == nil {
+		x.known = map[string]int{}
+	}
+	x.known[p.Title] = id
+	x.mu.Unlock()
+	return id, id > 0
+}
+
+// Identify looks up movies that are already in the catalog without a year or id. It returns the
+// files whose metadata now points at a TMDB entry, so Jellyfin can be told to read them again.
+// Folder names stay as they are, which keeps watch state.
+func (x *Indexer) Identify(ctx context.Context) ([]media.File, error) {
+	if x.ident == nil {
+		return nil, nil
+	}
+	all, err := x.cat.All(ctx)
+	if err != nil {
+		return nil, err
+	}
+	var changed []media.File
+	for _, f := range all {
+		p := naming.Parse(f.FileName, f.Caption)
+		if p.Matchable() || p.Episode || x.lib.HasTMDBSidecar(f.RelPath) {
+			continue
+		}
+		id, ok := x.identify(ctx, p)
+		if !ok {
+			continue
+		}
+		if err := x.lib.WriteTMDBSidecar(f.RelPath, id); err != nil {
+			return changed, err
+		}
+		x.log.Info("title identified", "message", f.MessageID, "title", p.Title, "tmdb", id)
+		changed = append(changed, f)
+	}
+	return changed, nil
 }
 
 // writeSidecars gives Jellyfin local metadata for a title it cannot look up. Failures

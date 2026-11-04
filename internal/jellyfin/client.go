@@ -262,6 +262,50 @@ func (c *Client) UploadSubtitle(ctx context.Context, itemID, language, format, t
 	return c.send(ctx, http.MethodPost, "/Videos/"+url.PathEscape(itemID)+"/Subtitles", nil, body, nil)
 }
 
+// SearchResult is one online match for a title.
+type SearchResult struct {
+	Name        string            `json:"Name"`
+	Year        int               `json:"ProductionYear"`
+	ProviderIDs map[string]string `json:"ProviderIds"`
+}
+
+// SearchMovie asks Jellyfin's own online providers for a title. Jellyfin already holds the
+// TMDB access, so no key is needed here.
+func (c *Client) SearchMovie(ctx context.Context, name string) ([]SearchResult, error) {
+	var out []SearchResult
+	err := c.post(ctx, "/Items/RemoteSearch/Movie", map[string]any{
+		"SearchInfo": map[string]any{"Name": name},
+		"ItemId":     "00000000000000000000000000000000",
+	}, &out)
+	return out, err
+}
+
+// RefreshMetadata makes Jellyfin read an item again and replace what it holds. Jellyfin skips a
+// locked item, and an earlier local .nfo set that lock, so the lock is lifted first.
+func (c *Client) RefreshMetadata(ctx context.Context, itemID, userID string) error {
+	var dto map[string]json.RawMessage
+	q := url.Values{"userId": {userID}}
+	if err := c.do(ctx, http.MethodGet, "/Items/"+url.PathEscape(itemID), q, &dto); err != nil {
+		return err
+	}
+	if string(dto["LockData"]) == "true" {
+		dto["LockData"] = json.RawMessage("false")
+		raw, err := json.Marshal(dto)
+		if err != nil {
+			return err
+		}
+		if err := c.send(ctx, http.MethodPost, "/Items/"+url.PathEscape(itemID), nil, raw, nil); err != nil {
+			return err
+		}
+	}
+	return c.send(ctx, http.MethodPost, "/Items/"+url.PathEscape(itemID)+"/Refresh", url.Values{
+		"metadataRefreshMode": {"FullRefresh"},
+		"imageRefreshMode":    {"FullRefresh"},
+		"replaceAllMetadata":  {"true"},
+		"replaceAllImages":    {"true"},
+	}, nil, nil)
+}
+
 // Probe asks for playback information. A .strm item is probed by this call, not by a
 // library scan or a metadata refresh.
 func (c *Client) Probe(ctx context.Context, itemID, userID string) (ProbeResult, error) {
