@@ -213,11 +213,11 @@ func (s *Service) SetEnabled(ctx context.Context, on bool) error {
 			}
 			return fmt.Errorf("sign in at least one account that is an admin of the channel")
 		}
+		if s.Runner == nil {
+			return fmt.Errorf("torrent downloads need Seerr. Set SEERR_MANAGED=true and restart")
+		}
 		if err := stack.Available(); err != nil {
 			return err
-		}
-		if s.Runner == nil {
-			return fmt.Errorf("the download folder is not configured")
 		}
 		if err := stack.PrepareDir(s.Runner.Downloads); err != nil {
 			return err
@@ -306,7 +306,7 @@ func (s *Service) Status(ctx context.Context) (map[string]any, error) {
 			return nil, err
 		}
 		for _, row := range rows {
-			if row.State == catalog.UploadCleaned {
+			if row.State == catalog.UploadCleaned || row.Kind == catalog.KindLocal {
 				continue
 			}
 			queue = append(queue, map[string]any{
@@ -335,7 +335,8 @@ func (s *Service) Status(ctx context.Context) (map[string]any, error) {
 		queue = []map[string]any{}
 	}
 	return map[string]any{
-		"enabled": on, "error": snap.Error, "warning": snap.Warning, "ready": snap.Ready, "dir": dir,
+		"torrents_available": s.Runner != nil,
+		"enabled":            on, "error": snap.Error, "warning": snap.Warning, "ready": snap.Ready, "dir": dir,
 		"free_bytes": snap.FreeBytes, "min_free_gb": s.MinFree, "crawler": snap.Crawler,
 		"last_search": lastSearch.Unix(), "search_every_minutes": int(s.SearchEvery / time.Minute),
 		"radarr_user": snap.RadarrUser, "radarr_password": snap.RadarrPassword,

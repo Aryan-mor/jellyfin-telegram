@@ -43,7 +43,12 @@ CREATE TABLE IF NOT EXISTS uploads (
 	UNIQUE(kind, remote_id)
 );`
 
-// Upload is one file Radarr or Sonarr imported, on its way to the channel.
+// KindLocal marks an upload row for a video that was already on this computer, not one that
+// Radarr or Sonarr imported. Its RemoteID is a stable number made from the file's path.
+const KindLocal = "local"
+
+// Upload is one file on its way to the channel. Kind is movie or episode for a file that Radarr or
+// Sonarr imported, and KindLocal for a file the person chose in the panel.
 type Upload struct {
 	ID          int64
 	Kind        string
@@ -101,6 +106,15 @@ func (c *Catalog) SetUpload(ctx context.Context, id int64, state string, message
 		UPDATE uploads SET state=?, message_id=?, session_user=CASE WHEN ?=0 THEN session_user ELSE ? END,
 			error=?, updated_unix=? WHERE id=?`,
 		state, messageID, sessionUser, sessionUser, errText, time.Now().Unix(), id)
+	return err
+}
+
+// DeleteUpload forgets a row, so a file that never reached the channel can be chosen again.
+func (c *Catalog) DeleteUpload(ctx context.Context, id int64) error {
+	if err := c.ensureUploads(); err != nil {
+		return err
+	}
+	_, err := c.db.ExecContext(ctx, `DELETE FROM uploads WHERE id=?`, id)
 	return err
 }
 

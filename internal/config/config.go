@@ -60,6 +60,10 @@ type Config struct {
 	// Seerr is on. It is off until FLADDER_MANAGED=true.
 	FladderManaged bool
 
+	// LocalMediaDirs are folders of videos already on this computer. The panel lists them and uploads
+	// the ones a person chooses. Nothing is uploaded or deleted without that choice.
+	LocalMediaDirs []string
+
 	// DownloadsEnabled turns on Radarr, Sonarr, qBittorrent, Bitmagnet and the channel uploader.
 	// It needs Seerr, stays off until a person turns it on, and only works once a healthy admin
 	// session exists.
@@ -188,6 +192,11 @@ func Load(envPath string) (Config, error) {
 	c.FladderManaged = withJellyfin && strings.EqualFold(get("FLADDER_MANAGED", "false"), "true")
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
+	}
+	for _, dir := range strings.Split(get("LOCAL_MEDIA_DIRS", ""), "|") {
+		if dir = strings.TrimSpace(dir); dir != "" {
+			c.LocalMediaDirs = append(c.LocalMediaDirs, dir)
+		}
 	}
 	// Downloads are part of Seerr: it is what asks Radarr and Sonarr for a title.
 	c.DownloadsEnabled = c.SeerrManaged && strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")

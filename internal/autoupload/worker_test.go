@@ -187,3 +187,94 @@ func TestCleanupWaitsForProbe(t *testing.T) {
 		t.Fatalf("cleaned %+v scans %d gone %v", got, lib.scans, lib.gone)
 	}
 }
+
+func TestLocalWorkerKeepsTheFileAndTheOtherWorkerIgnoresIt(t *testing.T) {
+	ctx := context.Background()
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer cat.Close()
+	body := []byte("hello video")
+	path := filepath.Join(t.TempDir(), "a.mkv")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	row, err := cat.UpsertUpload(ctx, catalog.Upload{
+		Kind: catalog.KindLocal, RemoteID: 5, Path: path, Size: int64(len(body)),
+		FileName: "Sintel (2010).mkv", Caption: "Sintel (2010)", State: catalog.UploadQueued,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := &memSessions{views: []tguser.View{{UserID: 1, Admin: true, Connected: true, MaxBytes: tguser.MaxBytes(false), Pace: tguser.Pace{DailyGB: 50}}}}
+	now := func() time.Time { return time.Date(2026, 11, 3, 3, 0, 0, 0, time.Local) }
+
+	// The Radarr and Sonarr worker must not send a file that a person chose.
+	lib := &memLib{}
+	arr := &Worker{Cat: cat, Lib: lib, Sessions: sessions, Verify: memVerify{body: body}, Now: now}
+	if err := arr.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	sessions.mu.Lock()
+	n := len(sessions.sent)
+	sessions.mu.Unlock()
+	if n != 0 {
+		t.Fatalf("the other worker uploaded %d local files", n)
+	}
+
+	local := &Worker{Cat: cat, Sessions: sessions, Verify: memVerify{body: body}, Local: true, Now: now}
+	if err := local.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, func() bool {
+		got, _, _ := cat.FindUpload(ctx, catalog.KindLocal, 5)
+		return got.State == catalog.UploadSent
+	})
+	// Walk the row forward as the indexer and the prober would.
+	if err := cat.Put(ctx, media.File{MessageID: 1, Size: int64(len(body)), FileName: "Sintel (2010).mkv", RelPath: "a", Date: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := local.RunOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := cat.MarkProbed(ctx, 1, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 3; i++ {
+		if err := local.RunOnce(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	got, _, _ := cat.FindUpload(ctx, catalog.KindLocal, 5)
+	if got.State != catalog.UploadProbed || got.ID != row.ID {
+		t.Fatalf("state %s", got.State)
+	}
+	if _, err := os.Stat(path); err != nil {
+		t.Fatal("the local file was deleted without being asked")
+	}
+	if lib.gone || lib.scans != 0 {
+		t.Fatal("Radarr or Sonarr was touched for a local file")
+	}
+	// Even the other worker leaves a probed local row alone.
+	if err := arr.RunOnce(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if lib.gone {
+		t.Fatal("the other worker cleaned up a local file")
+	}
+}
+
+func waitFor(t *testing.T, ok func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) {
+		if ok() {
+			return
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	t.Fatal("timed out")
+}

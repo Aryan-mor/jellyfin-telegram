@@ -29,6 +29,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/localmedia"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
@@ -38,6 +39,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
@@ -216,13 +218,16 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 
 		BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
 	}, log)
-	dl := startDownloads(ctx, cfg, envPath, cat, pool, seerrTarget, log)
+	users := startUsers(ctx, cfg, log)
+	dl := startDownloads(cfg, envPath, cat, pool, users, seerrTarget, log)
+	local := startLocal(cfg, envPath, cat, pool, users, log)
+	sources := startSources(cfg, cat, users)
 	radarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.RadarrPort))
 	sonarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.SonarrPort))
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, sources,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -240,6 +245,10 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	entry.Set(front.Handler(options))
 	if dl != nil {
 		go dl.Run(ctx)
+	}
+	go local.Run(ctx)
+	if sources != nil {
+		go sources.Run(ctx)
 	}
 	log.Info("serving", "addr", cfg.GatewayListen)
 
@@ -309,25 +318,51 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	return result
 }
 
-func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, seerrTarget *url.URL, log *slog.Logger) *downloads.Service {
-	if seerrTarget == nil {
-		return nil // downloads are part of Seerr
-	}
-	pace := tguser.Pace{
+func uploadPace(cfg config.Config) tguser.Pace {
+	return tguser.Pace{
 		MBPerSec: cfg.UploadMBPerSec, RestMinutes: cfg.UploadRestMinutes,
 		LongEveryGB: cfg.UploadLongRestEveryGB, LongRestMinutes: cfg.UploadLongRestMinutes,
 		DailyGB: cfg.UploadDailyGB, Hours: cfg.UploadHours,
 	}
-	users, err := tguser.New(filepath.Join(cfg.DataDir, "users"), cfg.APIID, cfg.APIHash, cfg.ChannelID, pace, log)
+}
+
+// startUsers connects the Telegram accounts a person signed in to. Downloads and the local files tab
+// share them, so one account never sends two files at once. It returns nil when they cannot start.
+func startUsers(ctx context.Context, cfg config.Config, log *slog.Logger) *tguser.Manager {
+	users, err := tguser.New(filepath.Join(cfg.DataDir, "users"), cfg.APIID, cfg.APIHash, cfg.ChannelID, uploadPace(cfg), log)
 	if err != nil {
 		log.Warn("user sessions are off", "err", err)
-		users = nil
-	} else {
-		users.Bind(ctx)
-		if err := users.Connect(ctx); err != nil {
-			log.Warn("user sessions did not start", "err", err)
+		return nil
+	}
+	users.Bind(ctx)
+	if err := users.Connect(ctx); err != nil {
+		log.Warn("user sessions did not start", "err", err)
+	}
+	return users
+}
+
+// startLocal lists the videos already on this computer. It never starts an upload on its own.
+func startLocal(cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, log *slog.Logger) *localmedia.Service {
+	svc := localmedia.New(cfg.LocalMediaDirs)
+	svc.Cat, svc.EnvPath, svc.Log = cat, envPath, log
+	// The Telegram library of .strm files, the downloads and this program's own data are never listed.
+	for _, dir := range []string{cfg.LibraryDir, cfg.DownloadsDir, cfg.DataDir} {
+		if abs, err := filepath.Abs(dir); err == nil {
+			svc.Exclude = append(svc.Exclude, abs)
 		}
 	}
+	if users != nil {
+		svc.Accounts = users
+		svc.Worker = &autoupload.Worker{Cat: cat, Sessions: users, Verify: pool, Local: true, Log: log}
+	}
+	return svc
+}
+
+func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, seerrTarget *url.URL, log *slog.Logger) *downloads.Service {
+	if seerrTarget == nil {
+		return nil // downloads are part of Seerr
+	}
+	pace := uploadPace(cfg)
 	seerrBase, seerrKey := "", ""
 	if seerrTarget != nil {
 		seerrBase = seerrTarget.String()
@@ -369,7 +404,7 @@ func startDownloads(ctx context.Context, cfg config.Config, envPath string, cat 
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, sources *tgsource.Service, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -382,8 +417,14 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			}
 			return dl.Status(ctx)
 		},
-		DownloadDo: downloadActions(dl),
-		Verify:     verifyTelegram(dataDir, log),
+		DownloadDo: downloadActions(dl, users),
+		Local: func(ctx context.Context) (any, error) {
+			return local.State(ctx)
+		},
+		LocalDo:  localActions(local),
+		Sources:  sourcesView(sources, users),
+		SourceDo: sourcesDo(sources),
+		Verify:   verifyTelegram(dataDir, log),
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
 			for _, st := range pool.Statuses() {
@@ -404,13 +445,16 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 	})
 }
 
-func downloadActions(dl *downloads.Service) func(*http.Request, string, map[string]any) (any, error) {
+func downloadActions(dl *downloads.Service, users *tguser.Manager) func(*http.Request, string, map[string]any) (any, error) {
 	return func(r *http.Request, action string, body map[string]any) (any, error) {
-		if dl == nil || dl.Users == nil {
-			return nil, errors.New("downloads are not available")
+		if users == nil {
+			return nil, errors.New("Telegram accounts are not available")
 		}
 		switch action {
 		case "enable":
+			if dl == nil {
+				return nil, errors.New("downloads are not available")
+			}
 			on, _ := body["enabled"].(bool)
 			if err := dl.SetEnabled(r.Context(), on); err != nil {
 				return nil, err
@@ -418,19 +462,19 @@ func downloadActions(dl *downloads.Service) func(*http.Request, string, map[stri
 			return map[string]any{"ok": true}, nil
 		case "login":
 			if cancel, _ := body["cancel"].(bool); cancel {
-				dl.Users.CancelLogin()
+				users.CancelLogin()
 				return map[string]any{"ok": true}, nil
 			}
 			if phone, _ := body["phone"].(string); phone != "" {
-				return dl.Users.BeginLogin(r.Context(), phone)
+				return users.BeginLogin(r.Context(), phone)
 			}
 			if pass, _ := body["password"].(string); pass != "" {
-				return dl.Users.SubmitPassword(r.Context(), pass)
+				return users.SubmitPassword(r.Context(), pass)
 			}
 			code, _ := body["code"].(string)
-			return dl.Users.SubmitCode(r.Context(), code)
+			return users.SubmitCode(r.Context(), code)
 		case "logout":
-			return nil, dl.Users.Logout(r.Context(), int64(number(body["user_id"])))
+			return nil, users.Logout(r.Context(), int64(number(body["user_id"])))
 		case "pace":
 			p := tguser.Pace{
 				MBPerSec: int(number(body["mb_per_sec"])), RestMinutes: int(number(body["rest_minutes"])),
@@ -441,13 +485,57 @@ func downloadActions(dl *downloads.Service) func(*http.Request, string, map[stri
 				p.Hours = hours
 			}
 			if id := int64(number(body["user_id"])); id != 0 {
-				return nil, dl.Users.SetPace(id, p, true)
+				return nil, users.SetPace(id, p, true)
+			}
+			if dl == nil {
+				return nil, errors.New("downloads are not available")
 			}
 			return nil, dl.SetDefaults(p)
 		default:
 			return nil, errors.New("unknown action")
 		}
 	}
+}
+
+// localActions runs what the Local files tab asks for. Every upload and every delete starts from a
+// button press that names the files.
+func localActions(svc *localmedia.Service) func(*http.Request, string, map[string]any) (any, error) {
+	return func(r *http.Request, action string, body map[string]any) (any, error) {
+		switch action {
+		case "scan":
+			svc.Scan(r.Context())
+			return nil, nil
+		case "folder":
+			if dir, _ := body["add"].(string); dir != "" {
+				return nil, svc.AddFolder(dir)
+			}
+			if dir, _ := body["remove"].(string); dir != "" {
+				return nil, svc.RemoveFolder(dir)
+			}
+			return nil, errors.New("nothing to change")
+		case "upload":
+			return svc.Queue(r.Context(), idList(body["ids"]))
+		case "cancel":
+			return svc.Unqueue(r.Context(), idList(body["ids"]))
+		case "delete":
+			return svc.Remove(r.Context(), idList(body["ids"]))
+		case "delete_synced":
+			return svc.RemoveSynced(r.Context())
+		default:
+			return nil, errors.New("unknown action")
+		}
+	}
+}
+
+func idList(v any) []int64 {
+	list, _ := v.([]any)
+	out := make([]int64, 0, len(list))
+	for _, item := range list {
+		if n := int64(number(item)); n > 0 {
+			out = append(out, n)
+		}
+	}
+	return out
 }
 
 func number(v any) float64 {

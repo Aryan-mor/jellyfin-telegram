@@ -2,15 +2,28 @@ package tguser
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/gotd/td/tg"
 )
 
+// errNoDialog means the account has no chat with the channel.
+var errNoDialog = errors.New("this account has no dialog for the channel; open the channel once in Telegram")
+
 // channelAccess finds the channel in the account's dialogs and returns its access hash.
 // A hash of zero, which is what the bots use, does not work for a user account.
 func channelAccess(ctx context.Context, api *tg.Client, channelID int64) (int64, error) {
+	ch, err := findChannel(ctx, api, channelID)
+	if err != nil {
+		return 0, err
+	}
+	return ch.AccessHash, nil
+}
+
+// findChannel looks for the channel among the account's dialogs.
+func findChannel(ctx context.Context, api *tg.Client, channelID int64) (*tg.Channel, error) {
 	var offsetPeer tg.InputPeerClass = &tg.InputPeerEmpty{}
 	var offsetDate, offsetID int
 	for page := 0; page < 30; page++ {
@@ -21,11 +34,11 @@ func channelAccess(ctx context.Context, api *tg.Client, channelID int64) (int64,
 			Limit:      100,
 		})
 		if err != nil {
-			return 0, fmt.Errorf("read dialogs: %w", err)
+			return nil, fmt.Errorf("read dialogs: %w", err)
 		}
 		chats, dialogs, messages := dialogParts(res)
-		if hash, ok := hashFromChats(chats, channelID); ok {
-			return hash, nil
+		if ch, ok := channelFromChats(chats, channelID); ok {
+			return ch, nil
 		}
 		if len(dialogs) < 100 {
 			break
@@ -38,7 +51,17 @@ func channelAccess(ctx context.Context, api *tg.Client, channelID int64) (int64,
 			break
 		}
 	}
-	return 0, fmt.Errorf("this account has no dialog for the channel; open the channel once in Telegram")
+	return nil, errNoDialog
+}
+
+func channelFromChats(chats []tg.ChatClass, channelID int64) (*tg.Channel, bool) {
+	for _, raw := range chats {
+		ch, ok := raw.(*tg.Channel)
+		if ok && ch.ID == channelID && ch.AccessHash != 0 {
+			return ch, true
+		}
+	}
+	return nil, false
 }
 
 func hashFromChats(chats []tg.ChatClass, channelID int64) (int64, bool) {

@@ -17,6 +17,9 @@ import (
 	"github.com/gotd/td/tg"
 )
 
+// ErrBusy means the account is already sending another file. The caller tries again later.
+var ErrBusy = errors.New("this account is already uploading")
+
 // Upload sends path to the channel as a document and returns the new message id.
 // Parts stay on this one account. Extra sessions speed up the queue, not this file.
 func (m *Manager) Upload(ctx context.Context, userID int64, filePath, name, caption string, onProgress func(done, total int64)) (int, error) {
@@ -25,7 +28,7 @@ func (m *Manager) Upload(ctx context.Context, userID int64, filePath, name, capt
 		return 0, err
 	}
 	if !lv.busy.CompareAndSwap(false, true) {
-		return 0, errors.New("this account is already uploading")
+		return 0, ErrBusy
 	}
 	defer lv.busy.Store(false)
 	info, err := os.Stat(filePath)
