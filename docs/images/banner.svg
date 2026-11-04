@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="300" viewBox="0 0 1200 300">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#101827"/><stop offset="1" stop-color="#1e1b4b"/>
+    </linearGradient>
+    <linearGradient id="jf" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#aa5cc3"/><stop offset="1" stop-color="#00a4dc"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="300" rx="24" fill="url(#bg)"/>
+  <circle cx="150" cy="150" r="70" fill="#229ED9"/>
+  <path d="M112 148 L190 116 L176 190 L152 172 L138 186 L136 164 L176 128 L130 158 Z" fill="#fff"/>
+  <g stroke="#94a3b8" stroke-width="4" stroke-dasharray="10 8" fill="none"><path d="M240 150 H330"/></g>
+  <path d="M410 90 L470 205 L350 205 Z" fill="url(#jf)"/>
+  <path d="M410 135 L440 190 L380 190 Z" fill="#101827"/>
+  <text x="530" y="140" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="60" font-weight="700" fill="#f8fafc">jellyfin-telegram</text>
+  <text x="532" y="192" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="26" fill="#cbd5e1">Stream your Jellyfin library from a private Telegram channel</text>
+  <text x="532" y="232" font-family="Segoe UI, Helvetica, Arial, sans-serif" font-size="20" fill="#94a3b8">Stock Jellyfin &#183; bot pool &#183; seeking &#183; subtitles &#183; one Go binary</text>
+</svg>
