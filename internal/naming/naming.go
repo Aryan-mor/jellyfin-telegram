@@ -91,6 +91,36 @@ func Parse(fileName, caption string) Parsed {
 	return p
 }
 
+// Parts of a library channel that a mirror can receive.
+const (
+	SectionMovie  = "movie"  // a film, named with a year or a TMDB id
+	SectionSeries = "series" // an episode
+	SectionMusic  = "music"  // an audio file
+	SectionVideo  = "video"  // any other video: personal footage, not a film or a series
+)
+
+var audioExt = map[string]bool{
+	".mp3": true, ".flac": true, ".m4a": true, ".aac": true,
+	".ogg": true, ".opus": true, ".wav": true, ".wma": true,
+}
+
+// Section classifies a file for mirroring. A video with no year, id or episode number is
+// SectionVideo.
+func Section(fileName, caption, mime string) string {
+	ext := strings.ToLower(path.Ext(fileName))
+	if strings.HasPrefix(strings.ToLower(mime), "audio/") || audioExt[ext] {
+		return SectionMusic
+	}
+	p := Parse(fileName, caption)
+	if p.Episode {
+		return SectionSeries
+	}
+	if p.Year > 0 || p.TMDBID > 0 {
+		return SectionMovie
+	}
+	return SectionVideo
+}
+
 // UploadName is the file name and caption posted to the channel for one imported video.
 // Parse(fileName, caption) returns the same title, year, id, episode and label.
 func UploadName(p Parsed, ext string) (fileName, caption string) {

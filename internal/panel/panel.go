@@ -70,6 +70,10 @@ type Options struct {
 	Sources func(context.Context) (any, error)
 	// SourceDo runs one action of that tab: add, remove, pause, settings, check or rescan.
 	SourceDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Mirrors lists the channels that receive part of the main channel. Nil hides that list.
+	Mirrors func(context.Context) (any, error)
+	// MirrorDo runs add, save or remove for a mirror channel.
+	MirrorDo func(r *http.Request, action string, body map[string]any) (any, error)
 }
 
 // New serves /panel and /panel/.
@@ -88,6 +92,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/local/{action}", p.guard(p.handleLocalAction))
 	mux.HandleFunc("GET /panel/sources", p.guard(p.handleSources))
 	mux.HandleFunc("POST /panel/sources/{action}", p.guard(p.handleSourceAction))
+	mux.HandleFunc("POST /panel/mirrors/{action}", p.guard(p.handleMirrorAction))
 	return mux
 }
 
@@ -158,6 +163,7 @@ type state struct {
 	Seerr     bool      `json:"seerr"`
 	Fladder   bool      `json:"fladder"`
 	Downloads any       `json:"downloads,omitempty"`
+	Mirrors   any       `json:"mirrors,omitempty"`
 	Local     bool      `json:"local"`
 	Sources   bool      `json:"sources"`
 	Telegram  any       `json:"telegram,omitempty"`
@@ -177,6 +183,14 @@ func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
 		} else {
 			s.Downloads = d
 		}
+	}
+	if p.o.Mirrors != nil {
+		list, err := p.o.Mirrors(r.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		s.Mirrors = list
 	}
 	writeJSON(w, http.StatusOK, s)
 }
@@ -315,6 +329,29 @@ func (p *panel) handleSourceAction(w http.ResponseWriter, r *http.Request) {
 		body = map[string]any{}
 	}
 	out, err := p.o.SourceDo(r, action, body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if out == nil {
+		out = map[string]any{"ok": true}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
+
+var mirrorActions = map[string]bool{"add": true, "save": true, "remove": true}
+
+func (p *panel) handleMirrorAction(w http.ResponseWriter, r *http.Request) {
+	action := r.PathValue("action")
+	if p.o.MirrorDo == nil || !mirrorActions[action] {
+		writeError(w, http.StatusNotFound, "unknown action")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		body = map[string]any{}
+	}
+	out, err := p.o.MirrorDo(r, action, body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return

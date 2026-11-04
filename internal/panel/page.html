@@ -124,6 +124,9 @@ input:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var
 
 select { width:100%; padding:10px 12px; border:1px solid var(--line); border-radius:10px; background:var(--surface); color:inherit; font:inherit; }
 select:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+select.compact { width:auto; min-width:180px; padding:6px 10px; }
+.kinds { display:flex; flex-wrap:wrap; gap:8px 14px; margin-top:8px; }
+.kinds label { display:flex; align-items:center; gap:6px; font-size:13px; font-weight:600; }
 .rule-row { display:flex; align-items:center; justify-content:space-between; gap:14px; padding:10px 0; flex-wrap:wrap; }
 .soon { display:flex; flex-direction:column; align-items:flex-start; gap:10px; }
 
@@ -317,22 +320,92 @@ details.grp .cat-body { padding:0 12px 4px; }
 
     <!-- Channel -->
     <section id="tab-channel" hidden>
-      <div class="page-head"><h1>Channel and language</h1><p>The private Telegram channel that holds your videos.</p></div>
+      <div class="page-head"><h1>Channel</h1><p>Main receives everything. A mirror receives only the parts you choose.</p></div>
       <div class="card">
+        <h2>Main</h2>
+        <p>The private Telegram channel that holds your videos. Everything is sent here.</p>
         <details class="guide"><summary>How to set up the channel</summary>
           <ol class="steps">
             <li>In Telegram, create a private channel. A public channel is not used.</li>
             <li>Post the videos there. A useful file name looks like <code>Title.Year.mkv</code>. Or put <code>Title (Year)</code> on the first line of the caption, so Jellyfin does not guess the wrong film.</li>
             <li>Open any message in that channel, choose Copy Link, and paste it below. It looks like <code>https://t.me/c/1234567890/5</code>.</li>
             <li>Or give the channel id. Forward any message from the channel to <a href="https://t.me/id_bot" target="_blank" rel="noreferrer">@id_bot</a> or <a href="https://t.me/getidsbot" target="_blank" rel="noreferrer">@getidsbot</a>. It replies with the id, a number that starts with <code>-100</code>. Paste that number below.</li>
-            <li>The library belongs to one channel. A different channel is refused, because the stream files already point at messages in the first one.</li>
-            <li>The language is the subtitle language: a short code such as <code>en</code>, <code>de</code>, <code>fr</code>, <code>fa</code> or <code>ja</code>. Leave it empty to skip subtitles.</li>
+            <li>The library belongs to one channel. Replace is refused once videos are already indexed, because the stream files point at messages in this channel.</li>
           </ol>
         </details>
-        <div class="field"><label for="channel">Channel link or id</label><input id="channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5"></div>
-        <div class="field" style="max-width:240px"><label for="language">Subtitle language</label><input id="language" maxlength="12" autocomplete="off" placeholder="en"></div>
-        <div class="actions"><button id="save-channel" class="btn" type="button">Save channel</button></div>
+        <div id="main-current" class="item" hidden>
+          <div class="main">
+            <div class="title"><code id="main-channel-label"></code></div>
+            <div class="meta">Current main channel. Everything is sent here.</div>
+          </div>
+          <button id="replace-channel" class="btn ghost sm" type="button">Replace</button>
+        </div>
+        <div id="main-edit" hidden>
+          <div class="field"><label for="channel">Channel link or id</label><input id="channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5 or -1001234567890"></div>
+          <div class="actions">
+            <button id="save-channel" class="btn" type="button">Save channel</button>
+            <button id="cancel-channel" class="btn ghost" type="button" hidden>Cancel</button>
+          </div>
+        </div>
         <div id="channel-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Mirror</h2>
+        <p>Each mirror is another channel. Choose which parts are copied there, and which bot posts them. That bot must be an admin of the mirror and of the main channel, with permission to post in both.</p>
+        <div id="mirror-list" class="list"><div class="empty">No mirror yet.</div></div>
+        <h2>Add a mirror</h2>
+        <div class="field"><label for="mirror-channel">Channel link, id or @username</label><input id="mirror-channel" autocomplete="off" placeholder="https://t.me/c/1234567890/5 or @films"></div>
+        <div class="field"><span class="hint">General video is personal footage: a clip that is not a film, a series or music.</span>
+          <div class="kinds" id="mirror-kinds">
+            <label><input type="checkbox" value="movie" checked> Films</label>
+            <label><input type="checkbox" value="series"> Series</label>
+            <label><input type="checkbox" value="music"> Music</label>
+            <label><input type="checkbox" value="video"> General video</label>
+          </div>
+        </div>
+        <div class="field" style="max-width:320px"><label for="mirror-bot">Bot</label><select id="mirror-bot"></select></div>
+        <div class="actions"><button id="mirror-add" class="btn" type="button">Add mirror</button></div>
+        <div id="mirror-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Subtitle language</h2>
+        <p>The language to keep when a video has subtitles. Off skips subtitles.</p>
+        <div class="field" style="max-width:280px"><label for="language">Subtitle language</label>
+          <select id="language">
+            <option value="">Off</option>
+            <option value="en">English</option>
+            <option value="fa">Persian</option>
+            <option value="ar">Arabic</option>
+            <option value="de">German</option>
+            <option value="fr">French</option>
+            <option value="es">Spanish</option>
+            <option value="it">Italian</option>
+            <option value="pt">Portuguese</option>
+            <option value="nl">Dutch</option>
+            <option value="pl">Polish</option>
+            <option value="sv">Swedish</option>
+            <option value="da">Danish</option>
+            <option value="no">Norwegian</option>
+            <option value="fi">Finnish</option>
+            <option value="cs">Czech</option>
+            <option value="hu">Hungarian</option>
+            <option value="ro">Romanian</option>
+            <option value="el">Greek</option>
+            <option value="tr">Turkish</option>
+            <option value="ru">Russian</option>
+            <option value="uk">Ukrainian</option>
+            <option value="he">Hebrew</option>
+            <option value="hi">Hindi</option>
+            <option value="ja">Japanese</option>
+            <option value="ko">Korean</option>
+            <option value="zh">Chinese</option>
+            <option value="th">Thai</option>
+            <option value="vi">Vietnamese</option>
+            <option value="id">Indonesian</option>
+          </select>
+        </div>
+        <div class="actions"><button id="save-language" class="btn" type="button">Save language</button></div>
+        <div id="language-msg" class="alert"></div>
       </div>
     </section>
 
@@ -659,8 +732,8 @@ function drawAccounts(s) {
 function draw(s) {
   drawAccounts(s);
   $('api_id').value = s.api_id || '';
-  $('language').value = s.language || '';
-  if (!$('channel').value) $('channel').placeholder = 'Current channel id ' + s.channel_id;
+  setLanguage(s.language || '');
+  drawMain(s);
 
   const bots = $('bots');
   bots.replaceChildren();
@@ -687,8 +760,10 @@ function draw(s) {
   $('st-bots').textContent = healthy + ' / ' + total;
   $('st-bots-sub').textContent = healthy === total && total ? 'All bots can read the channel' : waiting ? waiting + ' connect after a restart' : 'Check the Bots tab';
   $('dot-bots').hidden = !total || (healthy + waiting === total);
-  $('st-channel').textContent = s.channel_id;
-  $('st-lang').textContent = s.language ? 'Subtitles: ' + s.language : 'Subtitles off';
+  $('st-channel').textContent = s.channel_id ? channelText(s.channel_id) : '–';
+  const mirrorCount = (s.mirrors || []).length;
+  $('st-lang').textContent = (s.language ? 'Subtitles: ' + s.language : 'Subtitles off') + (mirrorCount ? ' · ' + mirrorCount + (mirrorCount === 1 ? ' mirror' : ' mirrors') : '');
+  drawMirrors(s);
 
   const urls = $('urls');
   urls.replaceChildren();
@@ -744,7 +819,10 @@ async function save(body, btn, msg) {
     say(msg, 'Saved. Restart jellyfin-telegram to use it.', 'ok');
     toast('Saved');
     $('api_hash').value = '';
-    $('channel').value = '';
+    if (body.channel !== undefined) {
+      $('channel').value = '';
+      $('main-edit').dataset.open = '';
+    }
     draw(await api('/panel/state'));
   } catch (e) {
     say(msg, e.message, 'bad');
@@ -758,7 +836,140 @@ window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 $('add-btn').onclick = () => changeBots({add: $('add').value.trim()});
 $('add').addEventListener('keydown', e => { if (e.key === 'Enter') $('add-btn').click(); });
 $('save-api').onclick = () => save({api_id:$('api_id').value, api_hash:$('api_hash').value}, $('save-api'), 'api-msg');
-$('save-channel').onclick = () => save({channel:$('channel').value, language:$('language').value}, $('save-channel'), 'channel-msg');
+$('save-channel').onclick = () => {
+  if (!$('channel').value.trim()) { say('channel-msg', 'Paste the new channel link or id.', 'bad'); return; }
+  save({channel:$('channel').value}, $('save-channel'), 'channel-msg');
+};
+$('replace-channel').onclick = () => {
+  $('main-edit').dataset.open = '1';
+  $('main-edit').hidden = false;
+  $('cancel-channel').hidden = false;
+  $('save-channel').textContent = 'Replace channel';
+  $('channel').focus();
+};
+$('cancel-channel').onclick = () => {
+  $('main-edit').dataset.open = '';
+  $('channel').value = '';
+  $('main-edit').hidden = true;
+  say('channel-msg', '');
+};
+
+function channelText(id) { return '-100' + id; }
+
+function drawMain(s) {
+  const id = s.channel_id;
+  $('main-current').hidden = !id;
+  $('main-channel-label').textContent = id ? channelText(id) : '';
+  const editing = $('main-edit').dataset.open === '1';
+  $('main-edit').hidden = !!id && !editing;
+  $('cancel-channel').hidden = !id || !editing;
+  $('save-channel').textContent = id ? 'Replace channel' : 'Save channel';
+}
+$('save-language').onclick = () => save({language:$('language').value}, $('save-language'), 'language-msg');
+$('mirror-add').onclick = addMirror;
+
+function setLanguage(code) {
+  const sel = $('language');
+  if (code && ![...sel.options].some(o => o.value === code)) {
+    const o = el('option', '', code);
+    o.value = code;
+    sel.append(o);
+  }
+  sel.value = code || '';
+}
+
+const partLabels = {movie:'Films', series:'Series', music:'Music', video:'General video'};
+
+function drawMirrors(s) {
+  const bots = s.bots || [];
+  const sel = $('mirror-bot');
+  const sig = bots.map(b => b.id + ':' + b.name).join(',');
+  if (sel.dataset.sig !== sig) {
+    const keep = sel.value;
+    sel.replaceChildren();
+    if (!bots.length) sel.append(new Option('Add a bot first', ''));
+    for (const b of bots) sel.append(new Option(b.name, String(b.id)));
+    if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+    sel.dataset.sig = sig;
+  }
+  const list = $('mirror-list');
+  list.replaceChildren();
+  const rows = s.mirrors || [];
+  if (!rows.length) { list.append(el('div', 'empty', 'No mirror yet.')); return; }
+  for (const m of rows) {
+    const row = el('div', 'item');
+    const main = el('div', 'main');
+    const title = el('div'); title.append(el('div', '', m.title || ('Channel ' + m.channel_id)));
+    const meta = el('div', 'meta');
+    meta.append('-100' + m.channel_id);
+    meta.append(pill((m.sent || 0) + ' copied', 'ok'));
+    if (m.error) meta.append(pill(m.error, 'bad'));
+    title.append(meta);
+    const kinds = el('div', 'kinds');
+    for (const [value, label] of Object.entries(partLabels)) {
+      const lab = el('label');
+      const box = el('input'); box.type = 'checkbox'; box.value = value; box.checked = (m.kinds || []).includes(value);
+      box.onchange = () => saveMirror(m.id, botOf(row), kindsOf(row));
+      lab.append(box, document.createTextNode(' ' + label));
+      kinds.append(lab);
+    }
+    const bot = el('select', 'compact');
+    for (const b of bots) bot.append(new Option(b.name, String(b.id)));
+    if (![...bot.options].some(o => o.value === String(m.bot_id))) bot.append(new Option('bot ' + m.bot_id, String(m.bot_id)));
+    bot.value = String(m.bot_id);
+    bot.onchange = () => saveMirror(m.id, bot.value, kindsOf(row));
+    main.append(title, kinds, bot);
+    const del = el('button', 'btn danger sm', 'Remove'); del.type = 'button';
+    del.onclick = () => removeMirror(m.id, del);
+    row.append(main, del);
+    list.append(row);
+  }
+}
+
+function kindsOf(row) {
+  return [...row.querySelectorAll('input[type=checkbox]:checked')].map(n => n.value);
+}
+function botOf(row) {
+  const sel = row.querySelector('select');
+  return sel ? sel.value : '';
+}
+
+async function saveMirror(id, bot, kinds) {
+  say('mirror-msg', 'Checking the bot…');
+  try {
+    await api('/panel/mirrors/save', {id: id, bot_id: Number(bot), kinds: kinds});
+    say('mirror-msg', 'Saved. New parts are copied on their own.', 'ok');
+    draw(await api('/panel/state'));
+  } catch (e) {
+    say('mirror-msg', e.message, 'bad');
+    try { draw(await api('/panel/state')); } catch (e2) {}
+  }
+}
+
+async function addMirror() {
+  const btn = $('mirror-add');
+  const kinds = [...$('mirror-kinds').querySelectorAll('input:checked')].map(n => n.value);
+  busy(btn, true);
+  say('mirror-msg', 'Checking the bot…');
+  try {
+    await api('/panel/mirrors/add', {channel: $('mirror-channel').value.trim(), bot_id: Number($('mirror-bot').value), kinds: kinds});
+    $('mirror-channel').value = '';
+    say('mirror-msg', 'Added. Copying starts on its own.', 'ok');
+    toast('Mirror added');
+    draw(await api('/panel/state'));
+  } catch (e) { say('mirror-msg', e.message, 'bad'); }
+  busy(btn, false);
+}
+
+async function removeMirror(id, btn) {
+  busy(btn, true);
+  try {
+    await api('/panel/mirrors/remove', {id: id});
+    toast('Mirror removed');
+    draw(await api('/panel/state'));
+  } catch (e) { say('mirror-msg', e.message, 'bad'); }
+  busy(btn, false);
+}
 $('copy-share').onclick = () => copy(shareUrl);
 
 // Theme: follows the system until the person picks one.

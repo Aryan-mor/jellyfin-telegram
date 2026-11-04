@@ -166,3 +166,18 @@ func TestParsePath(t *testing.T) {
 		}
 	}
 }
+
+func TestSection(t *testing.T) {
+	cases := []struct{ file, caption, mime, want string }{
+		{"Inception.2010.mkv", "", "video/x-matroska", SectionMovie},
+		{"Lost.S01E02.mkv", "", "video/x-matroska", SectionSeries},
+		{"clip.mp4", "birthday", "video/mp4", SectionVideo},
+		{"Song.mp3", "", "audio/mpeg", SectionMusic},
+		{"voice.ogg", "", "audio/ogg", SectionMusic},
+	}
+	for _, c := range cases {
+		if got := Section(c.file, c.caption, c.mime); got != c.want {
+			t.Errorf("Section(%q) = %s, want %s", c.file, got, c.want)
+		}
+	}
+}

@@ -201,6 +201,48 @@ func (p *Pool) DeleteMessages(ctx context.Context, ids []int) error {
 	return p.call(ctx, 0, func(w worker) error { return w.deleteMessages(ctx, ids) })
 }
 
+// AcceptMirror checks that botID can post in the named channel and is an admin of the main
+// channel. It returns the channel's bare id and title.
+func (p *Pool) AcceptMirror(ctx context.Context, botID, channelID int64, username string) (int64, string, error) {
+	b, err := p.findBot(botID)
+	if err != nil {
+		return 0, "", err
+	}
+	ch, err := b.openChannel(ctx, channelID, username)
+	if err != nil {
+		return 0, "", err
+	}
+	title := ch.Title
+	if title == "" {
+		title = fmt.Sprintf("Channel %d", ch.ID)
+	}
+	return ch.ID, title, nil
+}
+
+// CopyMessage forwards one message from the main channel into channelID with that bot.
+// The author line is dropped. The returned id is zero when Telegram does not report one.
+func (p *Pool) CopyMessage(ctx context.Context, botID int64, messageID int, channelID int64) (int, error) {
+	b, err := p.findBot(botID)
+	if err != nil {
+		return 0, err
+	}
+	ch, err := b.openChannel(ctx, channelID, "")
+	if err != nil {
+		return 0, err
+	}
+	return b.forwardTo(ctx, messageID, ch)
+}
+
+func (p *Pool) findBot(id int64) (*bot, error) {
+	for _, s := range p.slots {
+		b, ok := s.w.(*bot)
+		if ok && b.id == id {
+			return b, nil
+		}
+	}
+	return nil, errors.New("that bot is not listed")
+}
+
 // Warm makes every bot read a little of one file. The first read of a bot has to open a connection
 // to the file's data center, which takes seconds, so this keeps that wait away from playback.
 func (p *Pool) Warm(ctx context.Context, messageID int, docID int64) {

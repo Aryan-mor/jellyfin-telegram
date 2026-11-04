@@ -104,6 +104,32 @@ func (r *rig) exists(rel string) bool {
 	return err == nil
 }
 
+func TestMusicStaysOutOfTheFilmLibrary(t *testing.T) {
+	r := newRig(t)
+	r.src.msgs[1] = media.Message{ID: 1, Exists: true, File: &media.File{
+		MessageID: 1, ChannelID: 5, DocID: 9, Size: 10,
+		MIME: "audio/mpeg", FileName: "Song.mp3", Date: time.Unix(1700000000, 0),
+	}}
+	added, err := r.idx.Sync(context.Background(), FullWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Fatalf("added %d", added)
+	}
+	f, err := r.cat.Get(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(f.RelPath, "Music/") || r.exists(f.RelPath) {
+		t.Fatalf("path %s exists %v", f.RelPath, r.exists(f.RelPath))
+	}
+	pending, err := r.cat.Pending(context.Background())
+	if err != nil || len(pending) != 0 {
+		t.Fatalf("pending %+v %v", pending, err)
+	}
+}
+
 func TestSyncWritesStrmFiles(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()

@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"path"
 	"strconv"
 	"strings"
 	"sync"
@@ -263,6 +264,9 @@ func (x *Indexer) Rewrite(ctx context.Context) error {
 		return err
 	}
 	for _, f := range all {
+		if strings.HasPrefix(f.RelPath, "Music/") {
+			continue
+		}
 		if _, err := x.lib.WriteStrm(f.RelPath, f.MessageID); err != nil {
 			return fmt.Errorf("write %s: %w", f.RelPath, err)
 		}
@@ -271,6 +275,9 @@ func (x *Indexer) Rewrite(ctx context.Context) error {
 }
 
 func (x *Indexer) add(ctx context.Context, f media.File) error {
+	if naming.Section(f.FileName, f.Caption, f.MIME) == naming.SectionMusic {
+		return x.addMusic(ctx, f)
+	}
 	p := naming.Parse(f.FileName, f.Caption)
 	rel := p.RelPath(f.MessageID, "")
 	taken, err := x.cat.PathTaken(ctx, rel, f.MessageID)
@@ -294,10 +301,36 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	return nil
 }
 
+// addMusic keeps a song in the catalog so a mirror can copy it, and out of the film library.
+func (x *Indexer) addMusic(ctx context.Context, f media.File) error {
+	stem := strings.TrimSpace(strings.TrimSuffix(f.FileName, path.Ext(f.FileName)))
+	if stem == "" {
+		stem = "Audio"
+	}
+	f.RelPath = path.Join("Music", naming.Sanitize(stem)+" tg"+strconv.Itoa(f.MessageID)+".strm")
+	if err := x.cat.Put(ctx, f); err != nil {
+		return err
+	}
+	if err := x.cat.MarkProbed(ctx, f.MessageID, time.Now()); err != nil {
+		return err
+	}
+	if err := x.cat.SetSubtitleOutcome(ctx, f.MessageID, "music"); err != nil {
+		return err
+	}
+	if err := x.cat.SetExtractState(ctx, f.MessageID, media.ExtractNone); err != nil {
+		return err
+	}
+	x.log.Info("music added", "message", f.MessageID, "path", f.RelPath)
+	return nil
+}
+
 // refreshSidecars follows an edited name or caption. The library path stays the same, but a title
 // that gained a year or id is now matchable, so the local metadata that blocked the online lookup
 // goes away. A title that is still unmatchable gets its sidecars rewritten from the new caption.
 func (x *Indexer) refreshSidecars(ctx context.Context, f media.File) {
+	if strings.HasPrefix(f.RelPath, "Music/") {
+		return
+	}
 	p := naming.Parse(f.FileName, f.Caption)
 	if p.Episode {
 		return
@@ -369,7 +402,7 @@ func (x *Indexer) Identify(ctx context.Context) ([]media.File, error) {
 	var changed []media.File
 	for _, f := range all {
 		p := naming.Parse(f.FileName, f.Caption)
-		if p.Matchable() || p.Episode || x.lib.HasTMDBSidecar(f.RelPath) {
+		if strings.HasPrefix(f.RelPath, "Music/") || p.Matchable() || p.Episode || x.lib.HasTMDBSidecar(f.RelPath) {
 			continue
 		}
 		id, ok := x.identify(ctx, p)
