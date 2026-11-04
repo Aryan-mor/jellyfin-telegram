@@ -39,6 +39,7 @@ type Runtime struct {
 	mu      sync.Mutex
 	cmd     *exec.Cmd
 	done    chan struct{}
+	release func()
 	commit  string
 	phase   string
 	phone   string
@@ -449,26 +450,33 @@ func (r *Runtime) Submit(text string) error {
 
 func (r *Runtime) start() error {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	if r.cmd != nil && r.cmd.Process != nil && r.cmd.ProcessState == nil {
+		r.mu.Unlock()
 		return nil
 	}
 	if !r.ready {
+		r.mu.Unlock()
 		return ErrNeedLogin
 	}
 	if err := os.WriteFile(r.driveScript(), []byte(driveScript), 0o600); err != nil {
+		r.mu.Unlock()
 		return err
 	}
 	cmd := exec.Command(r.venvPython(), r.driveScript())
 	cmd.Dir = absPath(filepath.Join(r.Root, "src"))
-	cmd.Env = append(r.env(), "FUCKJOIN_INBOX="+r.inboxPath())
-	cmd.Stdout = logWriter{r.Log}
-	cmd.Stderr = logWriter{r.Log}
+	cmd.Env = append(r.env(), "FUCKJOIN_INBOX="+r.inboxPath(), "PYTHONUNBUFFERED=1")
+	ready := make(chan struct{})
+	var once sync.Once
+	sink := logWriter{log: r.Log, ready: func() { once.Do(func() { close(ready) }) }}
+	cmd.Stdout = sink
+	cmd.Stderr = sink
 	if err := cmd.Start(); err != nil {
+		r.mu.Unlock()
 		return err
 	}
 	done := make(chan struct{})
-	r.cmd, r.done = cmd, done
+	r.cmd, r.done, r.release = cmd, done, bindLifetime(cmd.Process.Pid)
+	r.mu.Unlock()
 	go func() {
 		_ = cmd.Wait()
 		close(done)
@@ -481,18 +489,27 @@ func (r *Runtime) start() error {
 	if r.Log != nil {
 		r.Log.Info("fuckjoin running", "commit", short(r.commit))
 	}
-	return nil
+	select {
+	case <-ready:
+		return nil
+	case <-done:
+		return errors.New("fuckjoin exited before it was ready")
+	case <-time.After(45 * time.Second):
+		r.stop()
+		return errors.New("fuckjoin did not become ready")
+	}
 }
 
 const driveScript = `"""Run fuckjoin and post queued links from this same session."""
 import asyncio
+import logging
 import os
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent / "src"))
 
-from telethon import TelegramClient
+from telethon import TelegramClient, events
 import runpy
 
 _orig = TelegramClient.start
@@ -512,7 +529,15 @@ async def _inbox(client):
             path.unlink()
         except OSError:
             pass
-        await client.send_message("me", text)
+        try:
+            msg = await client.send_message("me", text)
+            # The short update for a message this client just sent has no text,
+            # so the handler would never see the link. Give it the result directly.
+            await client._dispatch_event(events.NewMessage.Event(msg))
+        except Exception:
+            logging.exception("inbox could not post the link")
+        else:
+            logging.info("inbox handed a link to Saved Messages")
 
 
 async def _start(self, *args, **kwargs):
@@ -525,14 +550,21 @@ TelegramClient.start = _start
 runpy.run_module("app", run_name="__main__")
 `
 
+// Interrupt kills a userbot that is stuck on one link, so the next link is not queued behind it.
+func (r *Runtime) Interrupt() { r.stop() }
+
 func (r *Runtime) stop() {
 	r.mu.Lock()
-	cmd, done := r.cmd, r.done
+	cmd, done, release := r.cmd, r.done, r.release
+	r.release = nil
 	r.mu.Unlock()
+	if release != nil {
+		defer release()
+	}
 	if cmd == nil || cmd.Process == nil {
 		return
 	}
-	_ = cmd.Process.Kill()
+	killTree(cmd.Process.Pid)
 	if done != nil {
 		select {
 		case <-done:
@@ -541,14 +573,18 @@ func (r *Runtime) stop() {
 	}
 }
 
-type logWriter struct{ log *slog.Logger }
+type logWriter struct {
+	log   *slog.Logger
+	ready func()
+}
 
 func (w logWriter) Write(p []byte) (int, error) {
-	if w.log != nil {
-		line := strings.TrimSpace(string(p))
-		if line != "" {
-			w.log.Info("fuckjoin", "line", line)
-		}
+	line := strings.TrimSpace(string(p))
+	if line != "" && w.ready != nil && strings.Contains(line, "Ready. Forward") {
+		w.ready()
+	}
+	if w.log != nil && line != "" {
+		w.log.Info("fuckjoin", "line", line)
 	}
 	return len(p), nil
 }

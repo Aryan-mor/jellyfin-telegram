@@ -26,6 +26,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fuckjoin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/home"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
@@ -213,15 +214,34 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		}
 	}
 
+	var homeCat *catalog.Catalog
+	var homeIdx *indexer.Indexer
+	if cfg.HomeChannelID != 0 {
+		homeCat, err = catalog.Open(filepath.Join(cfg.DataDir, "home.db"))
+		if err != nil {
+			return fmt.Errorf("open home catalog: %w", err)
+		}
+		defer homeCat.Close()
+		if err := checkChannelUnchanged(ctx, homeCat, cfg.HomeChannelID); err != nil {
+			return err
+		}
+		homeLib := library.New(cfg.LibraryDir, streamBase, token, cfg.HomeChannelID)
+		homeIdx = indexer.New(home.Reader{Pool: pool, Channel: cfg.HomeChannelID}, homeCat, homeLib, store, log)
+		homeIdx.SetPersonal()
+	}
+
 	engine := gateway.NewEngine(store, pool, log)
 	gw := gateway.Handler(engine, cat, gateway.Options{
-		Token:     token,
-		ChannelID: cfg.ChannelID,
-		Readahead: cfg.ReadaheadBlocks,
+		Token:         token,
+		ChannelID:     cfg.ChannelID,
+		HomeChannelID: cfg.HomeChannelID,
+		HomeFiles:     homeCat,
+		Readahead:     cfg.ReadaheadBlocks,
 
 		BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
 	}, log)
 	users := startUsers(ctx, cfg, log)
+	personal := startHome(cfg, envPath, cat, users, log)
 	dl := startDownloads(cfg, envPath, cat, pool, users, seerrTarget, log)
 	local := startLocal(cfg, envPath, cat, pool, users, log)
 	sources := startSources(cfg, cat, users)
@@ -231,7 +251,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, sources, news, fj,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, fj,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -251,6 +271,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		go dl.Run(ctx)
 	}
 	go local.Run(ctx)
+	go personal.Run(ctx)
 	if sources != nil {
 		go sources.Run(ctx)
 	}
@@ -265,7 +286,15 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		if !cfg.JellyfinManaged {
 			publishAddress(ctx, cfg, log)
 		}
-		prober = jellyfin.NewProber(jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey), cat, engine, log)
+		jf := jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey)
+		if homeDir, err := filepath.Abs(filepath.Join(cfg.LibraryDir, "Home")); err == nil {
+			hctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+			if err := jf.EnsureCollection(hctx, "Home Videos and Photos", "homevideos", homeDir); err != nil && ctx.Err() == nil {
+				log.Warn("home library was not created", "err", err)
+			}
+			cancel()
+		}
+		prober = jellyfin.NewProber(jf, cat, engine, log)
 		prober.StreamURL = lib.StreamURL
 		if err := setupSubtitles(ctx, cfg, cat, pool, prober, log); err != nil {
 			return err
@@ -302,7 +331,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	loopDone := make(chan struct{})
 	go func() {
 		defer close(loopDone)
-		syncLoop(ctx, cfg, idx, prober, pool, cat, log)
+		syncLoop(ctx, cfg, idx, homeIdx, prober, pool, cat, log)
 	}()
 	archiveDone := make(chan struct{})
 	go func() {
@@ -353,6 +382,20 @@ func startUsers(ctx context.Context, cfg config.Config, log *slog.Logger) *tguse
 }
 
 // startLocal lists the videos already on this computer. It never starts an upload on its own.
+func startHome(cfg config.Config, envPath string, cat *catalog.Catalog, users *tguser.Manager, log *slog.Logger) *home.Service {
+	svc := home.New(cfg.HomeMediaDirs)
+	svc.Channel, svc.Cat, svc.EnvPath, svc.Log = cfg.HomeChannelID, cat, envPath, log
+	if users != nil {
+		svc.Sender = users
+	}
+	for _, dir := range []string{cfg.LibraryDir, cfg.DownloadsDir, cfg.DataDir} {
+		if abs, err := filepath.Abs(dir); err == nil {
+			svc.Exclude = append(svc.Exclude, abs)
+		}
+	}
+	return svc
+}
+
 func startLocal(cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, log *slog.Logger) *localmedia.Service {
 	svc := localmedia.New(cfg.LocalMediaDirs)
 	svc.Cat, svc.EnvPath, svc.Log = cat, envPath, log
@@ -415,7 +458,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -432,7 +475,11 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		Local: func(ctx context.Context) (any, error) {
 			return local.State(ctx)
 		},
-		LocalDo:  localActions(local),
+		LocalDo: localActions(local),
+		Home: func(ctx context.Context) (any, error) {
+			return personal.State(ctx)
+		},
+		HomeDo:   homeActions(personal),
 		Sessions: sessionsView(users),
 		Sources:  sourcesView(sources, news, fj, users),
 		SourceDo: sourcesDo(sources, news, fj),
@@ -708,6 +755,7 @@ func finishManaged(ctx context.Context, cfg config.Config, server *managed.Serve
 		StateFile: managedCredentialsFile(cfg),
 		MoviesDir: filepath.Join(library, "Movies"),
 		ShowsDir:  filepath.Join(library, "Shows"),
+		HomeDir:   filepath.Join(library, "Home"),
 		Language:  cfg.SubtitleLanguage,
 	}
 	return b.Run(ctx)
@@ -1049,7 +1097,26 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 	}
 }
 
-func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prober *jellyfin.Prober, pool *tgpool.Pool, cat *catalog.Catalog, log *slog.Logger) {
+func syncHome(ctx context.Context, idx *indexer.Indexer, log *slog.Logger) {
+	if idx == nil {
+		return
+	}
+	if err := idx.Rewrite(ctx); err != nil && ctx.Err() == nil {
+		log.Warn("home library refresh failed", "err", err)
+	}
+	added, err := idx.Sync(ctx, indexer.IncrementalWindow)
+	if err != nil && ctx.Err() == nil {
+		log.Warn("home sync failed", "err", err)
+	}
+	if added > 0 {
+		log.Info("home sync finished", "added", added)
+	}
+	if _, err := idx.Reconcile(ctx); err != nil && ctx.Err() == nil {
+		log.Warn("home reconcile failed", "err", err)
+	}
+}
+
+func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Indexer, prober *jellyfin.Prober, pool *tgpool.Pool, cat *catalog.Catalog, log *slog.Logger) {
 	probe := func(refresh bool) {
 		if prober == nil {
 			return
@@ -1099,6 +1166,13 @@ func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prob
 	log.Info("initial sync finished", "added", added)
 	reconcile()
 	changed := identify()
+	if homeIdx != nil {
+		if added, err := homeIdx.Sync(ctx, indexer.FullWindow); err != nil && ctx.Err() == nil {
+			log.Warn("initial home sync failed", "err", err)
+		} else if added > 0 {
+			log.Info("initial home sync finished", "added", added)
+		}
+	}
 	warmUp(ctx, cat, pool, log)
 	probe(true)
 	refresh(changed)
@@ -1119,6 +1193,7 @@ func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prob
 			if added > 0 {
 				probe(true)
 			}
+			syncHome(ctx, homeIdx, log)
 		case <-reconcileTick.C:
 			if err := idx.Rewrite(ctx); err != nil {
 				log.Error("cannot refresh .strm files", "err", err)
@@ -1127,6 +1202,27 @@ func syncLoop(ctx context.Context, cfg config.Config, idx *indexer.Indexer, prob
 			changed := identify()
 			probe(true)
 			refresh(changed)
+			syncHome(ctx, homeIdx, log)
+		}
+	}
+}
+
+func homeActions(svc *home.Service) func(*http.Request, string, map[string]any) (any, error) {
+	return func(_ *http.Request, action string, body map[string]any) (any, error) {
+		switch action {
+		case "folder":
+			if body["remove"] != nil {
+				return nil, svc.RemoveFolder(fmt.Sprint(body["path"]))
+			}
+			return nil, svc.AddFolder(fmt.Sprint(body["path"]))
+		case "sync":
+			n, err := svc.Sync(context.Background())
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"queued": n}, nil
+		default:
+			return nil, errors.New("unknown action")
 		}
 	}
 }

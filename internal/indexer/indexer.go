@@ -3,6 +3,7 @@ package indexer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"path"
@@ -16,6 +17,10 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 )
+
+// errSkip means the file is not a film or an episode and was not identified, so it stays out of
+// the library. The message id still advances, and a later edit is not replayed.
+var errSkip = errors.New("unidentified")
 
 const (
 	batchSize = 100
@@ -63,7 +68,20 @@ type Indexer struct {
 	ident Identifier
 	mu    sync.Mutex
 	known map[string]int // title to TMDB id, 0 for a title that did not resolve
+
+	// personal files every video and photo under Home/, with no title lookup. It is the
+	// Home Videos and Photos channel, which nothing fills except a person.
+	personal bool
 }
+
+// Downloader reads a whole small file, used for photos in the personal library.
+type Downloader interface {
+	Download(ctx context.Context, messageID int, docID, size int64) ([]byte, error)
+}
+
+// SetPersonal puts this indexer on the personal channel: every video and photo is kept, and
+// nothing is matched to a film.
+func (x *Indexer) SetPersonal() { x.personal = true }
 
 // New returns an Indexer.
 func New(src Source, cat *catalog.Catalog, lib *library.Library, blocks BlockRemover, log *slog.Logger) *Indexer {
@@ -103,6 +121,9 @@ func (x *Indexer) Sync(ctx context.Context, window int) (int, error) {
 				continue
 			}
 			if err := x.add(ctx, *m.File); err != nil {
+				if errors.Is(err, errSkip) {
+					continue
+				}
 				return added, fmt.Errorf("add message %d: %w", m.ID, err)
 			}
 			added++
@@ -264,7 +285,7 @@ func (x *Indexer) Rewrite(ctx context.Context) error {
 		return err
 	}
 	for _, f := range all {
-		if strings.HasPrefix(f.RelPath, "Music/") {
+		if strings.HasPrefix(f.RelPath, "Music/") || !strings.HasSuffix(f.RelPath, ".strm") {
 			continue
 		}
 		if _, err := x.lib.WriteStrm(f.RelPath, f.MessageID); err != nil {
@@ -275,10 +296,26 @@ func (x *Indexer) Rewrite(ctx context.Context) error {
 }
 
 func (x *Indexer) add(ctx context.Context, f media.File) error {
+	if x.personal {
+		return x.addHome(ctx, f)
+	}
 	if naming.Section(f.FileName, f.Caption, f.MIME) == naming.SectionMusic {
 		return x.addMusic(ctx, f)
 	}
 	p := naming.Parse(f.FileName, f.Caption)
+	fromTitle := 0
+	if !p.Matchable() {
+		id, ok, err := x.identify(ctx, p)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			x.log.Info("skipped unidentified", "message", f.MessageID, "file", f.FileName, "title", p.Title)
+			return errSkip
+		}
+		// The folder name stays without the id, so a later correction does not move the item.
+		fromTitle = id
+	}
 	rel := p.RelPath(f.MessageID, "")
 	taken, err := x.cat.PathTaken(ctx, rel, f.MessageID)
 	if err != nil {
@@ -294,11 +331,88 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	if _, err := x.lib.WriteStrm(rel, f.MessageID); err != nil {
 		return err
 	}
-	if !p.Matchable() {
-		x.unmatchedSidecars(ctx, f, p)
+	if fromTitle > 0 {
+		if err := x.lib.WriteTMDBSidecar(f.RelPath, fromTitle); err != nil {
+			x.log.Warn("cannot write TMDB id", "message", f.MessageID, "err", err)
+		} else {
+			x.log.Info("title identified", "message", f.MessageID, "title", p.Title, "tmdb", fromTitle)
+		}
 	}
 	x.log.Info("file added", "message", f.MessageID, "path", rel)
 	return nil
+}
+
+// addHome keeps a personal video or photo. A photo is stored itself, because Jellyfin reads an
+// image file and not a stream pointer. A video is a .strm aimed at the personal channel.
+func (x *Indexer) addHome(ctx context.Context, f media.File) error {
+	if isImage(f) {
+		return x.addHomeImage(ctx, f)
+	}
+	rel := homePath(f, ".strm")
+	taken, err := x.cat.PathTaken(ctx, rel, f.MessageID)
+	if err != nil {
+		return err
+	}
+	if taken {
+		rel = homePath(f, " tg"+strconv.Itoa(f.MessageID)+".strm")
+	}
+	f.RelPath = rel
+	if err := x.cat.Put(ctx, f); err != nil {
+		return err
+	}
+	if _, err := x.lib.WriteStrm(rel, f.MessageID); err != nil {
+		return err
+	}
+	x.log.Info("home video added", "message", f.MessageID, "path", rel)
+	return nil
+}
+
+func (x *Indexer) addHomeImage(ctx context.Context, f media.File) error {
+	dl, ok := x.src.(Downloader)
+	if !ok {
+		return fmt.Errorf("cannot save photo %d", f.MessageID)
+	}
+	data, err := dl.Download(ctx, f.MessageID, f.DocID, f.Size)
+	if err != nil {
+		return err
+	}
+	ext := strings.ToLower(path.Ext(f.FileName))
+	if ext == "" {
+		ext = ".jpg"
+	}
+	rel := homePath(f, ext)
+	f.RelPath = rel
+	if err := x.cat.Put(ctx, f); err != nil {
+		return err
+	}
+	if err := x.lib.WriteBytes(rel, data); err != nil {
+		return err
+	}
+	x.log.Info("home photo added", "message", f.MessageID, "path", rel)
+	return nil
+}
+
+func homePath(f media.File, tail string) string {
+	stem := strings.TrimSuffix(f.FileName, path.Ext(f.FileName))
+	stem = naming.Sanitize(stem)
+	if stem == "" {
+		stem = "Item"
+	}
+	if !strings.HasPrefix(tail, " ") && !strings.HasPrefix(tail, ".") {
+		tail = " " + tail
+	}
+	return path.Join("Home", stem+" tg"+strconv.Itoa(f.MessageID)+tail)
+}
+
+func isImage(f media.File) bool {
+	if strings.HasPrefix(strings.ToLower(f.MIME), "image/") {
+		return true
+	}
+	switch strings.ToLower(path.Ext(f.FileName)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".heic", ".heif", ".tif", ".tiff", ".bmp":
+		return true
+	}
+	return false
 }
 
 // addMusic keeps a song in the catalog so a mirror can copy it, and out of the film library.
@@ -324,11 +438,10 @@ func (x *Indexer) addMusic(ctx context.Context, f media.File) error {
 	return nil
 }
 
-// refreshSidecars follows an edited name or caption. The library path stays the same, but a title
-// that gained a year or id is now matchable, so the local metadata that blocked the online lookup
-// goes away. A title that is still unmatchable gets its sidecars rewritten from the new caption.
+// refreshSidecars follows an edited name or caption. A title that gained a year or id drops its
+// local metadata. A title that still cannot be identified leaves the library.
 func (x *Indexer) refreshSidecars(ctx context.Context, f media.File) {
-	if strings.HasPrefix(f.RelPath, "Music/") {
+	if x.personal || strings.HasPrefix(f.RelPath, "Music/") || strings.HasPrefix(f.RelPath, "Home/") {
 		return
 	}
 	p := naming.Parse(f.FileName, f.Caption)
@@ -341,40 +454,40 @@ func (x *Indexer) refreshSidecars(ctx context.Context, f media.File) {
 		}
 		return
 	}
-	x.unmatchedSidecars(ctx, f, p)
-}
-
-// unmatchedSidecars handles a title with no year or id. When the title names one TMDB entry, that
-// id is written so Jellyfin loads the real poster and details. Otherwise the caption becomes
-// local metadata.
-func (x *Indexer) unmatchedSidecars(ctx context.Context, f media.File, p naming.Parsed) {
-	if id, ok := x.identify(ctx, p); ok {
-		if err := x.lib.WriteTMDBSidecar(f.RelPath, id); err != nil {
-			x.log.Warn("cannot write TMDB id", "message", f.MessageID, "err", err)
-			return
-		}
-		x.log.Info("title identified", "message", f.MessageID, "title", p.Title, "tmdb", id)
+	id, ok, err := x.identify(ctx, p)
+	if err != nil {
+		x.log.Warn("cannot look up title", "message", f.MessageID, "err", err)
 		return
 	}
-	x.writeSidecars(ctx, f, p)
+	if ok {
+		if err := x.lib.WriteTMDBSidecar(f.RelPath, id); err != nil {
+			x.log.Warn("cannot write TMDB id", "message", f.MessageID, "err", err)
+		}
+		return
+	}
+	if err := x.remove(ctx, f); err != nil {
+		x.log.Warn("cannot drop unidentified file", "message", f.MessageID, "err", err)
+		return
+	}
+	x.log.Info("removed unidentified", "message", f.MessageID, "title", p.Title)
 }
 
-func (x *Indexer) identify(ctx context.Context, p naming.Parsed) (int, bool) {
+func (x *Indexer) identify(ctx context.Context, p naming.Parsed) (int, bool, error) {
 	if x.ident == nil || p.Episode || p.Title == "" {
-		return 0, false
+		return 0, false, nil
 	}
 	x.mu.Lock()
 	id, seen := x.known[p.Title]
 	x.mu.Unlock()
 	if seen {
-		return id, id > 0
+		return id, id > 0, nil
 	}
 	tctx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	id, ok, err := x.ident.Movie(tctx, p.Title)
 	if err != nil {
 		x.log.Warn("cannot look up title", "title", p.Title, "err", err)
-		return 0, false // not cached, so the next pass tries again
+		return 0, false, err // not cached, so the next pass tries again
 	}
 	if !ok {
 		id = 0
@@ -385,14 +498,14 @@ func (x *Indexer) identify(ctx context.Context, p naming.Parsed) (int, bool) {
 	}
 	x.known[p.Title] = id
 	x.mu.Unlock()
-	return id, id > 0
+	return id, id > 0, nil
 }
 
-// Identify looks up movies that are already in the catalog without a year or id. It returns the
-// files whose metadata now points at a TMDB entry, so Jellyfin can be told to read them again.
-// Folder names stay as they are, which keeps watch state.
+// Identify looks up movies already in the catalog without a year or id. A title that names one
+// TMDB entry is linked, and the folder name stays so watch state stays. A title that does not
+// is removed, so it never sits in the film list. It returns the files that gained a TMDB id.
 func (x *Indexer) Identify(ctx context.Context) ([]media.File, error) {
-	if x.ident == nil {
+	if x.personal {
 		return nil, nil
 	}
 	all, err := x.cat.All(ctx)
@@ -402,41 +515,29 @@ func (x *Indexer) Identify(ctx context.Context) ([]media.File, error) {
 	var changed []media.File
 	for _, f := range all {
 		p := naming.Parse(f.FileName, f.Caption)
-		if strings.HasPrefix(f.RelPath, "Music/") || p.Matchable() || p.Episode || x.lib.HasTMDBSidecar(f.RelPath) {
+		if strings.HasPrefix(f.RelPath, "Music/") || strings.HasPrefix(f.RelPath, "Home/") || p.Matchable() || p.Episode || x.lib.HasTMDBSidecar(f.RelPath) {
 			continue
 		}
-		id, ok := x.identify(ctx, p)
-		if !ok {
-			continue
+		if x.ident != nil {
+			id, ok, err := x.identify(ctx, p)
+			if err != nil {
+				continue
+			}
+			if ok {
+				if err := x.lib.WriteTMDBSidecar(f.RelPath, id); err != nil {
+					return changed, err
+				}
+				x.log.Info("title identified", "message", f.MessageID, "title", p.Title, "tmdb", id)
+				changed = append(changed, f)
+				continue
+			}
 		}
-		if err := x.lib.WriteTMDBSidecar(f.RelPath, id); err != nil {
+		if err := x.remove(ctx, f); err != nil {
 			return changed, err
 		}
-		x.log.Info("title identified", "message", f.MessageID, "title", p.Title, "tmdb", id)
-		changed = append(changed, f)
+		x.log.Info("removed unidentified", "message", f.MessageID, "title", p.Title, "file", f.FileName)
 	}
 	return changed, nil
-}
-
-// writeSidecars gives Jellyfin local metadata for a title it cannot look up. Failures
-// are only logged, because the video itself is already playable.
-func (x *Indexer) writeSidecars(ctx context.Context, f media.File, p naming.Parsed) {
-	var thumb []byte
-	if f.HasThumb {
-		tctx, cancel := context.WithTimeout(ctx, callTimeout)
-		defer cancel()
-		var err error
-		if thumb, err = x.src.Thumbnail(tctx, f.MessageID); err != nil {
-			x.log.Warn("cannot read thumbnail", "message", f.MessageID, "err", err)
-		}
-	}
-	title := p.Title
-	if title == "" {
-		title = "Telegram " + strconv.Itoa(f.MessageID)
-	}
-	if err := x.lib.WriteUnmatchedSidecars(f.RelPath, title, f.Caption, thumb); err != nil {
-		x.log.Warn("cannot write sidecars", "message", f.MessageID, "err", err)
-	}
 }
 
 func (x *Indexer) remove(ctx context.Context, f media.File) error {

@@ -125,7 +125,15 @@ func (e *Engine) fetch(ctx context.Context, f media.File, block int64) ([]byte, 
 	ch := e.flight.DoChan(fmt.Sprintf("%d/%d", f.DocID, block), func() (any, error) {
 		fctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
 		defer cancel()
-		data, err := e.fetcher.FetchBlock(fctx, f.MessageID, f.DocID, block, f.Size)
+		var data []byte
+		var err error
+		if in, ok := e.fetcher.(interface {
+			FetchIn(context.Context, int64, int, int64, int64, int64) ([]byte, error)
+		}); ok && f.ChannelID != 0 {
+			data, err = in.FetchIn(fctx, f.ChannelID, f.MessageID, f.DocID, block, f.Size)
+		} else {
+			data, err = e.fetcher.FetchBlock(fctx, f.MessageID, f.DocID, block, f.Size)
+		}
 		if err != nil {
 			return nil, err
 		}

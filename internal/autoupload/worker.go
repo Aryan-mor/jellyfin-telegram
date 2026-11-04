@@ -161,7 +161,7 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 	}
 	var ready []catalog.Upload
 	for _, row := range rows {
-		if (row.Kind == catalog.KindLocal) != w.Local {
+		if row.Kind == catalog.KindHome || (row.Kind == catalog.KindLocal) != w.Local {
 			continue
 		}
 		if err := w.advance(ctx, row); err != nil {
