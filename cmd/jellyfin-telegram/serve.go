@@ -422,6 +422,7 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			return local.State(ctx)
 		},
 		LocalDo:  localActions(local),
+		Sessions: sessionsView(users),
 		Sources:  sourcesView(sources, users),
 		SourceDo: sourcesDo(sources),
 		Verify:   verifyTelegram(dataDir, log),

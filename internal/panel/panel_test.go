@@ -241,7 +241,7 @@ func TestATunnelOnThisMachineIsNotTrusted(t *testing.T) {
 }
 
 func TestPageHasTheThreeStepSignInModal(t *testing.T) {
-	for _, want := range []string{`id="login-modal"`, `data-step="phone"`, `data-step="code"`, `data-step="password"`, `id="dl-add"`} {
+	for _, want := range []string{`id="login-modal"`, `data-step="phone"`, `data-step="code"`, `data-step="password"`, `id="acct-add"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page lacks %s", want)
 		}
@@ -393,7 +393,7 @@ func TestChannelsTab(t *testing.T) {
 }
 
 func TestPageHasTheChannelsAndProviderTabs(t *testing.T) {
-	for _, want := range []string{`id="tab-sources"`, `data-tab="sources"`, `id="src-list"`, `id="src-back"`, "@id_bot", "@getidsbot", "/panel/sources/", `id="tab-provider"`, "Coming soon"} {
+	for _, want := range []string{`id="tab-sources"`, `data-tab="sources"`, `id="src-list"`, `id="src-back"`, "@id_bot", "@getidsbot", "/panel/sources/", `id="tab-provider"`, "Coming soon", `id="tab-telegram"`, `id="acct-sessions"`} {
 		if !strings.Contains(page, want) {
 			t.Errorf("the page lacks %s", want)
 		}

@@ -64,6 +64,8 @@ type Options struct {
 	Local func(context.Context) (any, error)
 	// LocalDo runs one action of that tab: scan, folder, upload, cancel, delete or delete_synced.
 	LocalDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Sessions lists the signed-in Telegram accounts. Nil hides the account tab.
+	Sessions func() any
 	// Sources reports the Telegram channels that videos are copied from. Nil hides that tab.
 	Sources func(context.Context) (any, error)
 	// SourceDo runs one action of that tab: add, remove, pause, settings, check or rescan.
@@ -158,6 +160,7 @@ type state struct {
 	Downloads any       `json:"downloads,omitempty"`
 	Local     bool      `json:"local"`
 	Sources   bool      `json:"sources"`
+	Telegram  any       `json:"telegram,omitempty"`
 	Accounts  []Account `json:"accounts"`
 }
 
@@ -579,6 +582,9 @@ func (p *panel) snapshot() (state, error) {
 	}
 	s.Local = p.o.Local != nil
 	s.Sources = p.o.Sources != nil
+	if p.o.Sessions != nil {
+		s.Telegram = map[string]any{"sessions": p.o.Sessions()}
+	}
 	return s, nil
 }
 
