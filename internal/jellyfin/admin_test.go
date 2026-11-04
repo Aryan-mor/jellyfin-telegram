@@ -50,3 +50,34 @@ func TestEnsureAdminCreatesAndUpdates(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestPublishAddressKeepsOtherSettingsAndUserChoice(t *testing.T) {
+	stored := `{"InternalHttpPort":8096,"PublishedServerUriBySubnet":["192.168.0.0/16=http://x:1"],"EnableUPnP":false}`
+	var posted map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/System/Configuration/network" {
+			t.Errorf("unexpected %s", r.URL.Path)
+		}
+		if r.Method == http.MethodGet {
+			_, _ = w.Write([]byte(stored))
+			return
+		}
+		_ = json.NewDecoder(r.Body).Decode(&posted)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := New(srv.URL, "k")
+	changed, err := c.PublishAddress(context.Background(), "http://192.168.1.5:8097")
+	if err != nil || !changed {
+		t.Fatalf("changed=%v err=%v", changed, err)
+	}
+	list, _ := posted["PublishedServerUriBySubnet"].([]any)
+	if len(list) != 2 || list[1] != "all=http://192.168.1.5:8097" || posted["InternalHttpPort"] != float64(8096) {
+		t.Errorf("posted %#v", posted)
+	}
+	posted = nil
+	stored = `{"PublishedServerUriBySubnet":["all=http://mine:9"]}`
+	if changed, err = c.PublishAddress(context.Background(), "http://192.168.1.5:8097"); err != nil || changed || posted != nil {
+		t.Errorf("a user's own entry was overwritten: changed=%v err=%v", changed, err)
+	}
+}
