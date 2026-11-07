@@ -78,6 +78,10 @@ type Options struct {
 	Mirrors func(context.Context) (any, error)
 	// MirrorDo runs add, save or remove for a mirror channel.
 	MirrorDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Forum reports the shared-library switch, its key and the trust list. Nil hides that card.
+	Forum func(context.Context) (any, error)
+	// ForumDo runs group, originals, trust_add or trust_remove.
+	ForumDo func(r *http.Request, action string, body map[string]any) (any, error)
 }
 
 // New serves /panel and /panel/.
@@ -100,6 +104,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /panel/sources", p.guard(p.handleSources))
 	mux.HandleFunc("POST /panel/sources/{action}", p.guard(p.handleSourceAction))
 	mux.HandleFunc("POST /panel/mirrors/{action}", p.guard(p.handleMirrorAction))
+	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	return mux
 }
 
@@ -175,6 +180,7 @@ type state struct {
 	Sources   bool      `json:"sources"`
 	Telegram  any       `json:"telegram,omitempty"`
 	Accounts  []Account `json:"accounts"`
+	Forum     any       `json:"forum,omitempty"`
 }
 
 func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
@@ -199,7 +205,33 @@ func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
 		}
 		s.Mirrors = list
 	}
+	if p.o.Forum != nil {
+		view, err := p.o.Forum(r.Context())
+		if err != nil {
+			s.Forum = map[string]any{"error": err.Error()}
+		} else {
+			s.Forum = view
+		}
+	}
 	writeJSON(w, http.StatusOK, s)
+}
+
+func (p *panel) handleForumAction(w http.ResponseWriter, r *http.Request) {
+	if p.o.ForumDo == nil {
+		writeError(w, http.StatusNotFound, "the shared library is not available")
+		return
+	}
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err.Error() != "EOF" {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	out, err := p.o.ForumDo(r, r.PathValue("action"), body)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (p *panel) handleAutomation(w http.ResponseWriter, r *http.Request) {

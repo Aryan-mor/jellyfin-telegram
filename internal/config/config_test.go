@@ -21,7 +21,8 @@ func clearEnv(t *testing.T) {
 			strings.HasPrefix(key, "JELLYFIN_") || strings.HasPrefix(key, "SEERR_") || strings.HasPrefix(key, "FLADDER_") || strings.HasPrefix(key, "SUBTITLE") ||
 			strings.HasPrefix(key, "UPLOAD_") || strings.HasPrefix(key, "DOWNLOADS_") || strings.HasPrefix(key, "BITMAGNET_") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
-			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" {
+			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" ||
+			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}

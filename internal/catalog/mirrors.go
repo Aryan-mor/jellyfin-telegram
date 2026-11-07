@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"errors"
 	"strings"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 )
 
 // Parts a mirror channel can receive. The order is the order they are stored and shown.
@@ -231,4 +233,43 @@ func (c *Catalog) MarkSent(ctx context.Context, mirrorID int64, messageID, destI
 		ON CONFLICT(mirror_id, message_id) DO UPDATE SET dest_id=excluded.dest_id`,
 		mirrorID, messageID, destID)
 	return err
+}
+
+// ArchiveOf returns the subtitle archive that answers a message. A row written right after the
+// archive was sent has no document id until the next sync, and is not counted yet.
+func (c *Catalog) ArchiveOf(ctx context.Context, messageID int) (media.Attachment, bool, error) {
+	var a media.Attachment
+	err := c.db.QueryRowContext(ctx, `
+		SELECT message_id, doc_id, size, file_name, reply_to FROM attachments
+		WHERE reply_to=? AND doc_id<>0 AND file_name LIKE 'jftg-subs-%' ORDER BY message_id LIMIT 1`, messageID).
+		Scan(&a.MessageID, &a.DocID, &a.Size, &a.FileName, &a.ReplyTo)
+	if errors.Is(err, sql.ErrNoRows) {
+		return media.Attachment{}, false, nil
+	}
+	return a, err == nil, err
+}
+
+// UnmirroredArchives returns the subtitle archives of videos that were copied to this mirror and
+// that have not been copied themselves. It catches up an archive that was not there yet when its
+// video went.
+func (c *Catalog) UnmirroredArchives(ctx context.Context, id int64) ([]int, error) {
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT a.message_id FROM attachments a
+		WHERE a.doc_id<>0 AND a.file_name LIKE 'jftg-subs-%'
+		  AND EXISTS (SELECT 1 FROM mirror_sent v WHERE v.mirror_id=? AND v.message_id=a.reply_to)
+		  AND NOT EXISTS (SELECT 1 FROM mirror_sent s WHERE s.mirror_id=? AND s.message_id=a.message_id)
+		ORDER BY a.message_id`, id, id)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var m int
+		if err := rows.Scan(&m); err != nil {
+			return nil, err
+		}
+		out = append(out, m)
+	}
+	return out, rows.Err()
 }

@@ -2,6 +2,7 @@ package jellyfin
 
 import (
 	"context"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -17,31 +18,81 @@ func (i Identifier) Movie(ctx context.Context, title string) (int, bool, error) 
 	if err != nil {
 		return 0, false, err
 	}
-	return pickTMDB(title, results)
+	id, _, ok, err := pickMeta(title, results)
+	return id, ok, err
+}
+
+// MovieMeta returns the TMDB id and the IMDb id of that same result.
+func (i Identifier) MovieMeta(ctx context.Context, title string) (tmdb int, imdb string, ok bool, err error) {
+	results, err := i.Client.SearchMovie(ctx, title)
+	if err != nil {
+		return 0, "", false, err
+	}
+	return pickMeta(title, results)
+}
+
+// Series returns the TMDB id when exactly one series carries the title.
+func (i Identifier) Series(ctx context.Context, title string) (int, bool, error) {
+	id, _, ok, err := i.SeriesMeta(ctx, title)
+	return id, ok, err
+}
+
+// SeriesMeta returns the TMDB id and the IMDb id of that same series.
+func (i Identifier) SeriesMeta(ctx context.Context, title string) (tmdb int, imdb string, ok bool, err error) {
+	results, err := i.Client.SearchSeries(ctx, title)
+	if err != nil {
+		return 0, "", false, err
+	}
+	return pickMeta(title, results)
 }
 
 func pickTMDB(title string, results []SearchResult) (int, bool, error) {
+	id, _, ok, err := pickMeta(title, results)
+	return id, ok, err
+}
+
+// pickMeta chooses the one TMDB entry that the title names.
+//
+// Jellyfin asks several providers, and they do not agree on a name: the TMDB entry may carry the
+// title in the server's metadata language while another provider has the original title and only
+// an IMDb id. Both are the same show when they come from the same year, so an entry counts when it
+// has the title itself, or when it has the same year as an entry that does.
+func pickMeta(title string, results []SearchResult) (int, string, bool, error) {
 	want := fold(title)
-	found := map[string]bool{}
+	years := map[int]bool{}
 	for _, r := range results {
-		if id := r.ProviderIDs["Tmdb"]; id != "" && fold(r.Name) == want {
+		if fold(r.Name) == want {
+			years[r.Year] = true
+		}
+	}
+	if len(years) == 0 {
+		return 0, "", false, nil
+	}
+	found := map[string]bool{}
+	imdb := ""
+	for _, r := range results {
+		sameShow := fold(r.Name) == want || (r.Year != 0 && years[r.Year])
+		if !sameShow {
+			continue
+		}
+		if id := r.ProviderIDs["Tmdb"]; id != "" {
 			found[id] = true
+		}
+		if imdb == "" {
+			imdb = r.ProviderIDs["Imdb"]
 		}
 	}
 	if len(found) != 1 {
-		return 0, false, nil
+		return 0, "", false, nil
 	}
 	for id := range found {
-		n := 0
-		for _, r := range id {
-			if r < '0' || r > '9' {
-				return 0, false, nil
-			}
-			n = n*10 + int(r-'0')
+		n, err := strconv.Atoi(id)
+		if err != nil || n <= 0 {
+			return 0, "", false, nil
 		}
-		return n, n > 0, nil
+		return n, imdb, true, nil
 	}
-	return 0, false, nil
+	return 0, "", false, nil
 }
 
 func fold(s string) string {

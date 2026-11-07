@@ -14,6 +14,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 type fakeSource struct {
@@ -536,5 +537,185 @@ func TestIdentifyRemovesAnUnknownTitle(t *testing.T) {
 	}
 	if _, err := r.cat.Get(ctx, 1); !errors.Is(err, catalog.ErrNotFound) {
 		t.Errorf("catalog kept it: %v", err)
+	}
+}
+
+// signedCaption is a finished library post as a bot writes it: status line, head, signed line, hashtag.
+func signedCaption(t *testing.T, meta sign.Meta) string {
+	t.Helper()
+	key, err := sign.LoadOrCreate(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if meta.Status == "" {
+		meta.Status = sign.StatusReady
+	}
+	return sign.WithHeader(meta.Status, "", "", "Title\n"+key.Sign(meta)+"\n#tm_m_603")
+}
+
+func allowCaptionsWith(marker string) Signed {
+	return Signed{Allow: func(_ context.Context, f media.File) (bool, error) {
+		return strings.Contains(f.Caption, marker), nil
+	}}
+}
+
+// With the shared library on, only a post whose line verifies is in the library. A raw file is the
+// intake's to finish, and music has no line.
+func TestSignedModeIndexesOnlyVerifiedPosts(t *testing.T) {
+	r := newRig(t)
+	r.idx.SetSigned(Signed{Allow: func(_ context.Context, f media.File) (bool, error) {
+		return strings.HasSuffix(f.Caption, "ok"), nil
+	}})
+	good := signedCaption(t, sign.Meta{Kind: "m", TMDB: 603, DocID: 200, Size: 1000}) + "ok"
+	bad := signedCaption(t, sign.Meta{Kind: "m", TMDB: 604, DocID: 300, Size: 1000})
+	r.src.video(1, "Heat.1995.mkv", "")     // raw
+	r.src.video(2, "Matrix.1999.mkv", good) // signed, accepted
+	r.src.video(3, "Dune.2021.mkv", bad)    // signed, refused
+	r.src.msgs[4] = media.Message{ID: 4, Exists: true, File: &media.File{
+		MessageID: 4, ChannelID: 5, DocID: 9, Size: 10, MIME: "audio/mpeg", FileName: "Song.mp3", Date: time.Unix(1700000000, 0),
+	}}
+	added, err := r.idx.Sync(context.Background(), IncrementalWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 2 {
+		t.Fatalf("added %d, want the accepted post and the song", added)
+	}
+	ctx := context.Background()
+	for id, want := range map[int]bool{1: false, 2: true, 3: false, 4: true} {
+		_, err := r.cat.Get(ctx, id)
+		if (err == nil) != want {
+			t.Errorf("message %d indexed = %v, want %v", id, err == nil, want)
+		}
+	}
+}
+
+// With the shared library off, a channel is read as it always was.
+func TestPlainModeIndexesRawFiles(t *testing.T) {
+	r := newRig(t)
+	r.src.video(1, "Heat.1995.mkv", "")
+	added, err := r.idx.Sync(context.Background(), IncrementalWindow)
+	if err != nil || added != 1 {
+		t.Fatalf("added %d, %v", added, err)
+	}
+}
+
+// A signed episode is placed by the season and episode in its line, which the readable head lacks,
+// and the status line above the caption does not confuse the title.
+func TestSignedEpisodeUsesItsLine(t *testing.T) {
+	r := newRig(t)
+	r.idx.SetSigned(allowCaptionsWith("#tm_m_"))
+	meta := sign.Meta{Kind: "e", TMDB: 1396, Season: 2, Episode: 5, Quality: "1080p", DocID: 900, Size: 1000}
+	key, err := sign.LoadOrCreate(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	meta.Status = sign.StatusSubtitles
+	r.src.video(1, "Breaking Bad.mkv", sign.WithHeader(meta.Status, "", "", "Breaking Bad (2008)\n"+key.Sign(meta)+"\n#tm_m_1396"))
+	if _, err := r.idx.Sync(context.Background(), IncrementalWindow); err != nil {
+		t.Fatal(err)
+	}
+	got, err := r.cat.Get(context.Background(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.HasPrefix(got.RelPath, "Shows/") || !strings.Contains(got.RelPath, "S02E05") || strings.Contains(got.RelPath, "Subtitles") {
+		t.Fatalf("path = %q", got.RelPath)
+	}
+}
+
+// A lookup that fails says nothing about the post, so Reconcile must not remove the film.
+func TestSignedReconcileKeepsAPostItCannotCheck(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	failing := 0
+	r.idx.SetSigned(Signed{Allow: func(_ context.Context, f media.File) (bool, error) {
+		if f.MessageID == failing {
+			return false, errors.New("flood wait")
+		}
+		return !strings.Contains(f.Caption, "forged"), nil
+	}})
+	for id, name := range map[int]string{1: "Heat.1995.mkv", 2: "Dune.2021.mkv", 3: "Alien.1979.mkv"} {
+		r.src.video(id, name, signedCaption(t, sign.Meta{Kind: "m", TMDB: 600 + id, DocID: int64(id) * 11, Size: 1000}))
+	}
+	if _, err := r.idx.Sync(ctx, IncrementalWindow); err != nil {
+		t.Fatal(err)
+	}
+	failing = 2
+	r.src.msgs[3].File.Caption += " forged" // no longer trusted
+	removed, err := r.idx.Reconcile(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if removed != 1 {
+		t.Fatalf("removed %d, want only the forged post", removed)
+	}
+	if _, err := r.cat.Get(ctx, 2); err != nil {
+		t.Fatalf("a post that could not be checked was removed: %v", err)
+	}
+	if _, err := r.cat.Get(ctx, 3); !errors.Is(err, catalog.ErrNotFound) {
+		t.Fatal("a forged post was kept")
+	}
+}
+
+func TestSignedSyncStopsOnACheckErrorAndRetries(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	down := true
+	r.idx.SetSigned(Signed{Allow: func(context.Context, media.File) (bool, error) {
+		if down {
+			return false, errors.New("flood wait")
+		}
+		return true, nil
+	}})
+	r.src.video(1, "Heat.1995.mkv", signedCaption(t, sign.Meta{Kind: "m", TMDB: 949, DocID: 100, Size: 1000}))
+	if _, err := r.idx.Sync(ctx, IncrementalWindow); err == nil {
+		t.Fatal("a check error was swallowed")
+	}
+	down = false
+	added, err := r.idx.Sync(ctx, IncrementalWindow)
+	if err != nil || added != 1 {
+		t.Fatalf("added %d, %v", added, err)
+	}
+}
+
+// The catalog learns that a post became ready, which is what lets a mirror copy it.
+func TestRefreshStatusFollowsAnEditedCaption(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	r.idx.SetSigned(allowCaptionsWith("#tm_m_603"))
+	waiting := signedCaption(t, sign.Meta{Kind: "m", TMDB: 603, DocID: 100, Size: 1000, Status: sign.StatusSubtitles})
+	r.src.video(1, "Matrix.1999.mkv", waiting)
+	if _, err := r.idx.Sync(ctx, IncrementalWindow); err != nil {
+		t.Fatal(err)
+	}
+	row, err := r.cat.Get(ctx, 1)
+	if err != nil || sign.IsReady(row.Caption) {
+		t.Fatalf("the post should be waiting for its subtitles: %v", err)
+	}
+	// A bot finishes the post.
+	done := signedCaption(t, sign.Meta{Kind: "m", TMDB: 603, DocID: 100, Size: 1000, Status: sign.StatusReady})
+	r.src.msgs[1].File.Caption = done
+	if err := r.idx.RefreshStatus(ctx); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = r.cat.Get(ctx, 1)
+	if !sign.IsReady(row.Caption) {
+		t.Fatalf("the catalog still has %q", row.Caption)
+	}
+	// An edit that does not verify changes nothing.
+	r.idx.SetSigned(allowCaptionsWith("never matches"))
+	r.src.msgs[1].File.Caption = waiting
+	row.Caption = waiting
+	if err := r.cat.SetCaption(ctx, 1, waiting); err != nil {
+		t.Fatal(err)
+	}
+	r.src.msgs[1].File.Caption = done
+	if err := r.idx.RefreshStatus(ctx); err != nil {
+		t.Fatal(err)
+	}
+	row, _ = r.cat.Get(ctx, 1)
+	if sign.IsReady(row.Caption) {
+		t.Fatal("a caption that does not verify marked the post ready")
 	}
 }

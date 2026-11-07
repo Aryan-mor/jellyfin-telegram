@@ -155,6 +155,35 @@ func (m *Manager) FindMessage(ctx context.Context, name string, size int64) (int
 	return 0, false, nil
 }
 
+// InReady reports that the channel already has a post with this lookup hashtag.
+func (m *Manager) InReady(ctx context.Context, tag string) (bool, error) {
+	if m == nil || strings.TrimSpace(tag) == "" {
+		return false, nil
+	}
+	lv, err := m.pick(ctx)
+	if err != nil {
+		return false, err
+	}
+	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		req := &tg.MessagesSearchRequest{
+			Peer:   &tg.InputPeerChannel{ChannelID: m.channelID, AccessHash: lv.meta.AccessHash},
+			Q:      tag,
+			Filter: &tg.InputMessagesFilterEmpty{},
+			Limit:  5,
+		}
+		res, err := api.MessagesSearch(ctx, req)
+		if err != nil {
+			return false, err
+		}
+		return len(searchMessages(res)) > 0, nil
+	})
+	if err != nil {
+		return false, err
+	}
+	found, _ := val.(bool)
+	return found, nil
+}
+
 func sendFile(ctx context.Context, api *tg.Client, channelID, accessHash int64, filePath, name, caption string, size, bps int64, progress func(done, total int64)) (int, error) {
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -179,7 +208,7 @@ func sendFile(ctx context.Context, api *tg.Client, channelID, accessHash int64, 
 	if kind == "" {
 		kind = "application/octet-stream"
 	}
-	res, err := api.MessagesSendMedia(ctx, &tg.MessagesSendMediaRequest{
+	req := &tg.MessagesSendMediaRequest{
 		Peer: &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
 		Media: &tg.InputMediaUploadedDocument{
 			File:      file,
@@ -191,7 +220,8 @@ func sendFile(ctx context.Context, api *tg.Client, channelID, accessHash int64, 
 		},
 		Message:  caption,
 		RandomID: int64(binary.LittleEndian.Uint64(randomID[:])),
-	})
+	}
+	res, err := api.MessagesSendMedia(ctx, req)
 	if err != nil {
 		return 0, fmt.Errorf("messages.sendMedia: %w", err)
 	}

@@ -13,6 +13,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 )
 
@@ -47,7 +48,25 @@ type Worker struct {
 	SubtitlesRoot string              // Jellyfin's data/subtitles folder as seen from here
 	StreamURL     func(messageID int) string
 	Log           *slog.Logger
+	// Forum claims a file before extraction and signs the caption again once the archive exists.
+	// Nil keeps channel mode, where there is no claim.
+	Forum Forum
 }
+
+// Forum is the supergroup claim. Claim is false when another installation holds the file.
+type Forum interface {
+	Claim(ctx context.Context, f media.File) (bool, error)
+	// Resign marks the post ready. archiveHash names the subtitle archive, or is empty when the
+	// file has none.
+	Resign(ctx context.Context, f media.File, archiveHash string) error
+	// ArchiveCaption is the signed caption of the archive posted for this file. Empty means the
+	// plain one.
+	ArchiveCaption(ctx context.Context, f media.File, archiveHash string, tracks []sign.Track) string
+	FillIMDb(ctx context.Context, f media.File, imdb string) error
+}
+
+// errWait means another installation is doing this file. It is not a failed try.
+var errWait = errors.New("claimed elsewhere")
 
 // RunOnce handles the next video that needs work and reports whether it did anything.
 func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
@@ -71,6 +90,9 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 		if err := w.process(ctx, f, match, userID); err != nil {
 			if ctx.Err() != nil {
 				return false, ctx.Err()
+			}
+			if errors.Is(err, errWait) {
+				continue
 			}
 			w.Log.Warn("subtitle archive failed, will retry", "message", f.MessageID, "err", err)
 			if terr := w.Catalog.AddExtractTry(ctx, f.MessageID); terr != nil {
@@ -116,32 +138,22 @@ func (w *Worker) Verify(ctx context.Context) error {
 }
 
 func (w *Worker) process(ctx context.Context, f media.File, m jellyfin.Located, userID string) error {
+	if w.Forum != nil && m.Item.IMDb() != "" {
+		if err := w.Forum.FillIMDb(ctx, f, m.Item.IMDb()); err != nil {
+			return err
+		}
+	}
 	info, err := w.Client.SubtitleStreams(ctx, m.SourceID, userID)
 	if err != nil {
 		return err
 	}
 	if len(info.Extractable) == 0 {
-		return w.Catalog.SetExtractState(ctx, f.MessageID, media.ExtractNone)
+		return w.finish(ctx, f, "", media.ExtractNone)
 	}
 
 	// The cheapest source comes first: an archive in the channel needs no video read at all.
-	if att, ok, err := w.findArchive(ctx, f); err != nil {
+	if done, err := w.restore(ctx, f, m, userID, info); err != nil || done {
 		return err
-	} else if ok {
-		data, err := w.Channel.Download(ctx, att.MessageID, att.DocID, att.Size)
-		if err != nil {
-			return fmt.Errorf("download archive: %w", err)
-		}
-		entries, err := Read(data)
-		if err != nil {
-			return err
-		}
-		w.replaceHollow(ctx, f, m, userID, info, entries)
-		if err := w.install(m.SourceID, info, entries); err != nil {
-			return err
-		}
-		w.Log.Info("subtitles restored from the channel", "message", f.MessageID, "tracks", len(entries))
-		return w.Catalog.SetExtractState(ctx, f.MessageID, media.ExtractDone)
 	}
 
 	entries, err := w.loadCached(m.SourceID, info)
@@ -149,6 +161,15 @@ func (w *Worker) process(ctx context.Context, f media.File, m jellyfin.Located, 
 		return err
 	}
 	if entries == nil {
+		if w.Forum != nil {
+			won, err := w.Forum.Claim(ctx, f)
+			if err != nil {
+				return err
+			}
+			if !won {
+				return errWait
+			}
+		}
 		// Only this path reads the whole video.
 		w.Log.Info("extracting subtitles", "message", f.MessageID, "tracks", len(info.Extractable), "mib", f.Size>>20)
 		if entries, err = w.extract(ctx, f, info); err != nil {
@@ -167,7 +188,8 @@ func (w *Worker) process(ctx context.Context, f media.File, m jellyfin.Located, 
 		return err
 	}
 	name := Name(f.MessageID, f.DocID)
-	caption := fmt.Sprintf("Subtitles of message %d, kept by jellyfin-telegram.", f.MessageID)
+	hash := sign.ArchiveHash(data)
+	caption := w.archiveCaption(ctx, f, hash, entries)
 	sent, err := w.Channel.SendDocument(ctx, name, caption, data, f.MessageID)
 	if err != nil {
 		return fmt.Errorf("send archive: %w", err)
@@ -179,7 +201,65 @@ func (w *Worker) process(ctx context.Context, f media.File, m jellyfin.Located, 
 		return err
 	}
 	w.Log.Info("subtitles archived", "message", f.MessageID, "tracks", len(entries), "archive", sent)
-	return w.Catalog.SetExtractState(ctx, f.MessageID, media.ExtractDone)
+	return w.finish(ctx, f, hash, media.ExtractDone)
+}
+
+// restore installs the archive that is already in the channel, if there is a good one. It reports
+// whether the file is done. An archive whose bytes are not the ones the signed post names is
+// ignored, so a wrong or tampered archive from another installation costs nothing but a warning.
+func (w *Worker) restore(ctx context.Context, f media.File, m jellyfin.Located, userID string, info jellyfin.SubtitleInfo) (bool, error) {
+	att, ok, err := w.findArchive(ctx, f)
+	if err != nil || !ok {
+		return false, err
+	}
+	data, err := w.Channel.Download(ctx, att.MessageID, att.DocID, att.Size)
+	if err != nil {
+		return false, fmt.Errorf("download archive: %w", err)
+	}
+	if meta, signed := sign.ParseCaption(f.Caption); signed && meta.ArchiveHash != "" && sign.ArchiveHash(data) != meta.ArchiveHash {
+		w.Log.Warn("the archive in the channel is not the one its post names, ignoring it", "message", f.MessageID, "archive", att.MessageID)
+		return false, nil
+	}
+	entries, err := Read(data)
+	if err != nil {
+		return false, err
+	}
+	w.replaceHollow(ctx, f, m, userID, info, entries)
+	if err := w.install(m.SourceID, info, entries); err != nil {
+		return false, err
+	}
+	w.Log.Info("subtitles restored from the channel", "message", f.MessageID, "tracks", len(entries))
+	return true, w.finish(ctx, f, sign.ArchiveHash(data), media.ExtractDone)
+}
+
+// archiveCaption is the caption of the archive: signed in the shared library, plain otherwise.
+func (w *Worker) archiveCaption(ctx context.Context, f media.File, hash string, entries []Entry) string {
+	plain := fmt.Sprintf("Subtitles of message %d, kept by jellyfin-telegram.", f.MessageID)
+	if w.Forum == nil {
+		return plain
+	}
+	tracks := make([]sign.Track, 0, len(entries))
+	for _, e := range entries {
+		lang := e.Language
+		if lang == "" {
+			lang = "und"
+		}
+		tracks = append(tracks, sign.Track{Lang: lang, Codec: e.Ext, Index: e.Position, HasIndex: true})
+	}
+	if c := w.Forum.ArchiveCaption(ctx, f, hash, tracks); c != "" {
+		return c
+	}
+	return plain
+}
+
+// finish marks the file as handled and, in the shared library, marks its post ready.
+func (w *Worker) finish(ctx context.Context, f media.File, archiveHash, state string) error {
+	if w.Forum != nil {
+		if err := w.Forum.Resign(ctx, f, archiveHash); err != nil {
+			return err
+		}
+	}
+	return w.Catalog.SetExtractState(ctx, f.MessageID, state)
 }
 
 func (w *Worker) findArchive(ctx context.Context, f media.File) (media.Attachment, bool, error) {
@@ -188,13 +268,24 @@ func (w *Worker) findArchive(ctx context.Context, f media.File) (media.Attachmen
 		return media.Attachment{}, false, err
 	}
 	want := Name(f.MessageID, f.DocID)
+	// The name ends with the document id of the video, which a forward or a copy keeps, so the
+	// archive is found even when the video has another message id in this channel.
+	ending := "-" + strconv.FormatInt(f.DocID, 10) + ".zip"
+	var other media.Attachment
+	found := false
 	for _, a := range all {
 		// DocID is empty on a row written right after sending, until the next sync fills it.
-		if a.FileName == want && a.DocID != 0 {
+		if a.DocID == 0 {
+			continue
+		}
+		if a.FileName == want {
 			return a, true, nil
 		}
+		if !found && IsArchiveName(a.FileName) && strings.HasSuffix(a.FileName, ending) {
+			other, found = a, true
+		}
 	}
-	return media.Attachment{}, false, nil
+	return other, found, nil
 }
 
 func (w *Worker) extract(ctx context.Context, f media.File, info jellyfin.SubtitleInfo) ([]Entry, error) {

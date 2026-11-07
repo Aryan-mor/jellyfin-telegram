@@ -3,6 +3,7 @@ package jellyfin
 import (
 	"context"
 	"log/slog"
+	"path"
 	"strconv"
 	"strings"
 	"time"
@@ -288,10 +289,26 @@ func (s sourceIndex) find(f media.File) (match, bool) {
 	urlSuffix := "/" + strconv.FormatInt(f.ChannelID, 10) + "/" + strconv.Itoa(f.MessageID)
 	for _, src := range s {
 		if strings.HasSuffix(src.Path, urlSuffix) {
-			return match{sourceID: src.ID, item: src.item}, true
+			// Another version of an episode or film is a source of the same item, and once probed it
+			// shows its URL instead of its path. It counts as a path match when the item is in the
+			// file's own folder. An old item that only shares the URL lies somewhere else.
+			return match{sourceID: src.ID, item: src.item, byPath: sameFolder(src.item.Path, f.RelPath)}, true
 		}
 	}
 	return match{}, false
+}
+
+// sameFolder reports that an item path from Jellyfin lies in the folder of a library-relative path.
+// Library roots differ between Jellyfin and this service, so only the part below the root is compared.
+func sameFolder(itemPath, rel string) bool {
+	if itemPath == "" || rel == "" {
+		return false
+	}
+	dir := path.Dir(rel)
+	if dir == "." {
+		return false
+	}
+	return strings.HasSuffix(path.Dir(strings.ReplaceAll(itemPath, `\`, "/")), "/"+dir)
 }
 
 // RefreshMetadata makes Jellyfin read these files again. It is for a title whose folder gained a

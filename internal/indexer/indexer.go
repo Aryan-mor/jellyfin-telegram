@@ -16,6 +16,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 // errSkip means the file is not a film or an episode and was not identified, so it stays out of
@@ -72,6 +73,25 @@ type Indexer struct {
 	// personal files every video and photo under Home/, with no title lookup. It is the
 	// Home Videos and Photos channel, which nothing fills except a person.
 	personal bool
+
+	// signed turns on the shared library: a post with a library line must verify, and it takes the
+	// place of the raw file it was made from. A file with no line is indexed as it always was.
+	signed Signed
+	fmu    sync.RWMutex
+}
+
+// Signed is the shared-library mode.
+// Allow reports that a post with a library line is signed by a key this installation accepts.
+// An error means it could not be decided, and the file is then left exactly as it is.
+type Signed struct {
+	Allow func(ctx context.Context, f media.File) (bool, error)
+}
+
+// SetSigned turns on the shared-library mode. Raw files are still indexed as before.
+func (x *Indexer) SetSigned(s Signed) {
+	x.fmu.Lock()
+	x.signed = s
+	x.fmu.Unlock()
 }
 
 // Downloader reads a whole small file, used for photos in the personal library.
@@ -170,6 +190,16 @@ func (x *Indexer) Reconcile(ctx context.Context) (int, error) {
 		for _, f := range batch {
 			m := byID[f.MessageID]
 			if m.File == nil {
+				gone = append(gone, f)
+				continue
+			}
+			ok, err := x.allowed(ctx, *m.File)
+			if err != nil {
+				// Not knowing is not a reason to remove a film and its watch state.
+				x.log.Warn("cannot check a post, leaving it as it is", "message", f.MessageID, "err", err)
+				continue
+			}
+			if !ok {
 				gone = append(gone, f)
 				continue
 			}
@@ -299,6 +329,13 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	if x.personal {
 		return x.addHome(ctx, f)
 	}
+	ok, err := x.allowed(ctx, f)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errSkip
+	}
 	if naming.Section(f.FileName, f.Caption, f.MIME) == naming.SectionMusic {
 		return x.addMusic(ctx, f)
 	}
@@ -339,6 +376,81 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 		}
 	}
 	x.log.Info("file added", "message", f.MessageID, "path", rel)
+	return nil
+}
+
+// allowed decides whether a message may be in the library. With the shared library off, every
+// file may, as it always was. With it on, a video needs a library line that verifies: a raw file
+// is the intake's to finish, and only its signed post is indexed. Music has no such line and is
+// kept for mirrors.
+func (x *Indexer) allowed(ctx context.Context, f media.File) (bool, error) {
+	x.fmu.RLock()
+	signed := x.signed
+	x.fmu.RUnlock()
+	if signed.Allow == nil {
+		return true, nil
+	}
+	if _, ok := sign.ParseCaption(f.Caption); !ok {
+		return naming.Section(f.FileName, f.Caption, f.MIME) == naming.SectionMusic, nil
+	}
+	return signed.Allow(ctx, f)
+}
+
+// signedOn reports that the shared-library mode is on.
+func (x *Indexer) signedOn() bool {
+	x.fmu.RLock()
+	defer x.fmu.RUnlock()
+	return x.signed.Allow != nil
+}
+
+// RefreshStatus reads again the posts that are not ready yet, so the catalog sees "ready" soon
+// after a bot writes it. A mirror copies a post only when the catalog says it is ready. A caption
+// that no longer verifies is ignored.
+func (x *Indexer) RefreshStatus(ctx context.Context) error {
+	if !x.signedOn() {
+		return nil
+	}
+	all, err := x.cat.All(ctx)
+	if err != nil {
+		return err
+	}
+	var pending []media.File
+	for _, f := range all {
+		if _, ok := sign.ParseCaption(f.Caption); ok && !sign.IsReady(f.Caption) {
+			pending = append(pending, f)
+		}
+	}
+	for start := 0; start < len(pending); start += batchSize {
+		batch := pending[start:min(start+batchSize, len(pending))]
+		ids := make([]int, len(batch))
+		for i, f := range batch {
+			ids[i] = f.MessageID
+		}
+		msgs, err := x.lookup(ctx, ids)
+		if err != nil {
+			return err
+		}
+		byID := make(map[int]media.Message, len(msgs))
+		for _, m := range msgs {
+			byID[m.ID] = m
+		}
+		for _, f := range batch {
+			m := byID[f.MessageID]
+			if m.File == nil || m.File.Caption == f.Caption {
+				continue
+			}
+			ok, err := x.allowed(ctx, *m.File)
+			if err != nil || !ok {
+				continue
+			}
+			if err := x.cat.SetCaption(ctx, f.MessageID, m.File.Caption); err != nil {
+				return err
+			}
+		}
+		if err := sleep(ctx, x.pace); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 

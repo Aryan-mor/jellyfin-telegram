@@ -14,6 +14,7 @@ import (
 	"github.com/gotd/td/tgerr"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
@@ -45,6 +46,8 @@ type Service struct {
 	// Sleep waits between groups. Tests replace it.
 	Sleep func(ctx context.Context, d time.Duration) error
 	Now   func() time.Time
+	// InReady reports that the library already has this lookup hashtag. Nil skips the check.
+	InReady func(ctx context.Context, tag string) (bool, error)
 
 	mu       sync.Mutex
 	loaded   bool
@@ -400,6 +403,18 @@ func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.
 				return err
 			}
 			continue
+		}
+		if tag := naming.LookupTag(naming.Parse(p.Name, p.Caption)); tag != "" && s.InReady != nil {
+			yes, err := s.InReady(ctx, tag)
+			if err != nil {
+				return err
+			}
+			if yes {
+				if err := s.Cat.MarkCopied(ctx, s.now(), p.DocID, src.ID, p.ID, p.Name, p.Size, catalog.CopyPresent, "already in Ready"); err != nil {
+					return err
+				}
+				continue
+			}
 		}
 		ids = append(ids, p.ID)
 		send = append(send, p)

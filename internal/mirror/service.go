@@ -13,7 +13,9 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 const (
@@ -29,6 +31,10 @@ type Service struct {
 	Cat  *catalog.Catalog
 	Copy func(ctx context.Context, botID int64, messageID int, channelID int64) (int, error)
 	Log  *slog.Logger
+	// ReadyOnly is asked at each pass. When it is true, only posts that are finished are copied:
+	// their status line says ready and so does their signed line. A post that is still being
+	// reviewed, or still waits for its subtitles, is left for a later pass. Nil copies everything.
+	ReadyOnly func() bool
 }
 
 // Run copies until ctx ends. A full library is spread over many passes.
@@ -75,28 +81,79 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 	}
 	copied := 0
 	var failed string
-	for _, it := range items {
-		if !m.Wants(naming.Section(it.FileName, it.Caption, it.MIME)) {
-			continue
-		}
+	// send copies one message and records it. It reports whether Telegram refused.
+	send := func(messageID int) (refused bool, err error) {
 		if copied > 0 {
 			if err := wait(ctx, copyGap); err != nil {
-				return err
+				return false, err
 			}
 		}
-		dest, err := s.Copy(ctx, m.BotID, it.MessageID, m.ChannelID)
+		dest, err := s.Copy(ctx, m.BotID, messageID, m.ChannelID)
 		if err != nil {
 			failed = err.Error()
-			s.log().Warn("mirror copy failed", "channel", m.Title, "message", it.MessageID, "err", err)
-			break
+			s.log().Warn("mirror copy failed", "channel", m.Title, "message", messageID, "err", err)
+			return true, nil
 		}
-		if err := s.Cat.MarkSent(ctx, m.ID, it.MessageID, dest); err != nil {
-			return err
+		if err := s.Cat.MarkSent(ctx, m.ID, messageID, dest); err != nil {
+			return false, err
 		}
-		s.log().Info("mirrored", "channel", m.Title, "message", it.MessageID, "dest", dest)
+		s.log().Info("mirrored", "channel", m.Title, "message", messageID, "dest", dest)
 		copied++
+		return false, nil
+	}
+	for _, it := range items {
 		if copied >= copyBatch {
 			break
+		}
+		kind := naming.Section(it.FileName, it.Caption, it.MIME)
+		if !m.Wants(kind) {
+			continue
+		}
+		if s.ReadyOnly != nil && s.ReadyOnly() && kind != naming.SectionMusic && !sign.IsReady(it.Caption) {
+			continue
+		}
+		// A post that names a subtitle archive goes with it, so a reader of the mirror gets both. If
+		// the archive has not been seen yet, the post waits for it.
+		var archive media.Attachment
+		hasArchive := false
+		if meta, ok := sign.ParseCaption(it.Caption); ok && meta.Subs == "yes" {
+			if archive, hasArchive, err = s.Cat.ArchiveOf(ctx, it.MessageID); err != nil {
+				return err
+			}
+			if !hasArchive {
+				continue
+			}
+		}
+		refused, err := send(it.MessageID)
+		if err != nil {
+			return err
+		}
+		if refused {
+			break
+		}
+		if hasArchive {
+			if refused, err = send(archive.MessageID); err != nil {
+				return err
+			} else if refused {
+				break
+			}
+		}
+	}
+	// An archive that turned up after its video went is sent now.
+	if failed == "" && copied < copyBatch {
+		late, err := s.Cat.UnmirroredArchives(ctx, m.ID)
+		if err != nil {
+			return err
+		}
+		for _, id := range late {
+			if copied >= copyBatch {
+				break
+			}
+			if refused, err := send(id); err != nil {
+				return err
+			} else if refused {
+				break
+			}
 		}
 	}
 	return s.Cat.SetMirrorError(ctx, m.ID, failed)

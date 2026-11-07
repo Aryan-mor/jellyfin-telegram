@@ -3,6 +3,8 @@ package naming
 import (
 	"strings"
 	"testing"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 func TestParseAndRelPath(t *testing.T) {
@@ -167,6 +169,56 @@ func TestParsePath(t *testing.T) {
 	}
 }
 
+func TestSignedLineWinsAndOldCaptionsStay(t *testing.T) {
+	old := Parse("Inception.2010.1080p.mkv", "")
+	if old.Title != "Inception" || old.Year != 2010 || old.TMDBID != 0 {
+		t.Fatalf("old caption changed: %+v", old)
+	}
+	key, err := sign.LoadOrCreate(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	line := key.Sign(sign.Meta{Kind: "m", TMDB: 603, IMDb: "tt0133093", Quality: "1080p",
+		Soft: []sign.Track{{Lang: "fa", Codec: "srt"}, {Lang: "en", Codec: "ass"}}, Hard: "none", DocID: 1, Size: 2})
+	caption := "The Matrix (1999)\n🎬 Movie · TMDB 603\n" + line
+	p := Parse("video.mkv", caption)
+	if p.Title != "The Matrix" || p.Year != 1999 || p.TMDBID != 603 || p.Label != "1080p" || p.Episode {
+		t.Fatalf("signed movie: %+v", p)
+	}
+	if LookupTag(p) != "#tm_m_603" {
+		t.Fatal(LookupTag(p))
+	}
+	ep := key.Sign(sign.Meta{Kind: "e", TMDB: 1396, IMDb: "tt0903747", Quality: "1080p", Season: 1, Episode: 2,
+		Soft: []sign.Track{{Lang: "en", Codec: "srt"}}, Hard: "none", DocID: 1, Size: 2})
+	got := Parse("clip.mkv", "Breaking Bad (2008)\n"+ep)
+	if !got.Episode || got.Season != 1 || got.Number != 2 || got.TMDBID != 1396 {
+		t.Fatalf("signed episode: %+v", got)
+	}
+	if LookupTag(got) != "#tm_tv_1396_1_2" {
+		t.Fatal(LookupTag(got))
+	}
+	head := Caption(Head{Title: "The Matrix", Year: 1999, TMDB: 603, IMDb: "tt0133093", Label: "1080p", Soft: []string{"fa (srt)", "en (ass)"}, Hard: "none"})
+	if !strings.Contains(head, "The Matrix (1999)") || strings.Contains(head, "#") || !strings.Contains(head, "fa (srt)") {
+		t.Fatal(head)
+	}
+	if len(head) > 900 {
+		t.Fatalf("head is %d characters", len(head))
+	}
+	shown := ShowTracks([]sign.Track{{Lang: "en", Codec: "srt"}, {Lang: "fa", Codec: "srt"}, {Lang: "de", Codec: "ass"}, {Lang: "fr", Codec: "srt"}, {Lang: "es", Codec: "srt"}, {Lang: "it", Codec: "srt"}, {Lang: "ja", Codec: "srt"}}, "fa")
+	if len(shown) != 7 || shown[0] != "fa (srt)" || shown[6] != "+1" {
+		t.Fatalf("tracks %v", shown)
+	}
+	if HardSub("Movie.fa.hardsub.mkv", "") != "fa" {
+		t.Fatal(HardSub("Movie.fa.hardsub.mkv", ""))
+	}
+	if HardSub("Movie.softsub.mkv", "") != "none" {
+		t.Fatal("softsub")
+	}
+	if HardSub("Movie.mkv", "") != "unknown" {
+		t.Fatal("unknown")
+	}
+}
+
 func TestSection(t *testing.T) {
 	cases := []struct{ file, caption, mime, want string }{
 		{"Inception.2010.mkv", "", "video/x-matroska", SectionMovie},
@@ -178,6 +230,23 @@ func TestSection(t *testing.T) {
 	for _, c := range cases {
 		if got := Section(c.file, c.caption, c.mime); got != c.want {
 			t.Errorf("Section(%q) = %s, want %s", c.file, got, c.want)
+		}
+	}
+}
+
+// A status and a claim that a bot wrote above a caption are not part of the title.
+func TestParseIgnoresTheHeaderAboveACaption(t *testing.T) {
+	plain := Parse("video 12.mkv", "The Matrix (1999)")
+	withStatus := Parse("video 12.mkv", sign.StatusLine(sign.StatusReview, "")+"\nThe Matrix (1999)")
+	if plain.Title != "The Matrix" || plain.Year != 1999 {
+		t.Fatalf("plain = %+v", plain)
+	}
+	if withStatus.Title != plain.Title || withStatus.Year != plain.Year {
+		t.Fatalf("a status line changed the title: %+v", withStatus)
+	}
+	for _, note := range []string{"hardsub", "softsub", "hardsub english"} {
+		if HardSub("a.mkv", sign.StatusLine(sign.StatusReady, "")+"\n"+note) != HardSub("a.mkv", note) {
+			t.Fatalf("a status line changed what %q says", note)
 		}
 	}
 }

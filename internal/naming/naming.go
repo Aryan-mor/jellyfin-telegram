@@ -9,6 +9,8 @@ import (
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 // Parsed is what could be learned from a file name and caption.
@@ -48,6 +50,8 @@ var (
 
 // Parse reads the file name first and falls back to the caption for missing fields.
 func Parse(fileName, caption string) Parsed {
+	// A status and a claim that a bot wrote above the caption are not part of what a person wrote.
+	caption = sign.StripHeader(caption)
 	var p Parsed
 	p.TMDBID = tmdbID(fileName + "\n" + caption)
 
@@ -77,18 +81,166 @@ func Parse(fileName, caption string) Parsed {
 	if m := reCaptionTitle.FindStringSubmatch(firstLine); m != nil {
 		p.Title = cleanTitle(m[1])
 		p.Year, _ = strconv.Atoi(m[2])
-		return p
-	}
-	// Captions hold free text, so a number in one counts as the release year only when
-	// the caption names the same title as the file.
-	if p.Year == 0 && name != firstLine {
+	} else if p.Year == 0 && name != firstLine {
+		// Captions hold free text, so a number in one counts as the release year only when
+		// the caption names the same title as the file.
 		var fromCaption Parsed
 		parseInto(&fromCaption, firstLine)
 		if strings.EqualFold(fromCaption.Title, p.Title) {
 			p.Year = fromCaption.Year
 		}
 	}
+	// A signed library line wins over the file name. Old captions have none, so they
+	// keep the result above.
+	if meta, ok := sign.ParseCaption(caption); ok {
+		applySigned(&p, meta)
+	}
 	return p
+}
+
+// Head is the readable part of a signed library caption.
+type Head struct {
+	Title   string
+	Year    int
+	Episode bool
+	Season  int
+	Number  int
+	TMDB    int
+	IMDb    string
+	Label   string
+	// Soft is already display text, such as "fa (srt)".
+	Soft []string
+	Hard string
+}
+
+// Caption builds the readable head. The signed line is added by the caller.
+func Caption(h Head) string {
+	title := h.Title
+	if title == "" {
+		title = "Untitled"
+	}
+	if h.Year > 0 {
+		title = fmt.Sprintf("%s (%d)", title, h.Year)
+	}
+	kind := "Movie"
+	if h.Episode {
+		kind = "Episode"
+	}
+	var bits []string
+	bits = append(bits, kind)
+	if h.TMDB > 0 {
+		bits = append(bits, fmt.Sprintf("TMDB %d", h.TMDB))
+	}
+	if h.IMDb != "" {
+		bits = append(bits, "IMDb "+h.IMDb)
+	}
+	if h.Label != "" {
+		bits = append(bits, h.Label)
+	}
+	soft := "none"
+	if len(h.Soft) > 0 {
+		soft = strings.Join(h.Soft, ", ")
+	}
+	hard := h.Hard
+	if hard == "" {
+		hard = "unknown"
+	}
+	return fmt.Sprintf("%s\n🎬 %s\n💬 Soft: %s · Hard: %s",
+		title, strings.Join(bits, " · "), soft, hard)
+}
+
+// Tag is the hashtag that ends a library caption: #tm_m_<tmdb> for a film and
+// #tm_tv_<tmdb>_<season>_<episode> for an episode. Telegram search finds every post of one title
+// from it. The id is the film's or the series' TMDB id. An empty string means there is no id yet.
+func (h Head) Tag() string { return Tag(h.Episode, h.TMDB, h.Season, h.Number) }
+
+// Tag builds the hashtag for one film or episode.
+func Tag(episode bool, tmdb, season, number int) string {
+	if tmdb <= 0 {
+		return ""
+	}
+	if episode {
+		return fmt.Sprintf("#tm_tv_%d_%d_%d", tmdb, season, number)
+	}
+	return fmt.Sprintf("#tm_m_%d", tmdb)
+}
+
+// ShowTracks formats soft tracks for the readable caption.
+// The preferred language comes first. At most that language and five others are shown,
+// and anything left becomes "+N".
+func ShowTracks(tracks []sign.Track, prefer string) []string {
+	if len(tracks) == 0 {
+		return nil
+	}
+	var first, rest []sign.Track
+	for _, t := range tracks {
+		if prefer != "" && strings.EqualFold(t.Lang, prefer) && len(first) == 0 {
+			first = append(first, t)
+			continue
+		}
+		rest = append(rest, t)
+	}
+	ordered := append(first, rest...)
+	const max = 6
+	show := len(ordered)
+	if show > max {
+		show = max
+	}
+	var out []string
+	for _, t := range ordered[:show] {
+		out = append(out, fmt.Sprintf("%s (%s)", t.Lang, t.Codec))
+	}
+	if len(ordered) > show {
+		out = append(out, fmt.Sprintf("+%d", len(ordered)-show))
+	}
+	return out
+}
+
+// LookupTag is the hashtag Telegram search uses for one title.
+// An empty string means the file has no TMDB id yet.
+func LookupTag(p Parsed) string {
+	return Tag(p.Episode, p.TMDBID, p.Season, p.Number)
+}
+
+var (
+	reHard     = regexp.MustCompile(`(?i)\bhard[\s._-]*subs?\b`)
+	reHardLang = regexp.MustCompile(`(?i)(?:^|[\s._\[-])([a-z]{2,3})[\s._-]*hard[\s._-]*subs?\b`)
+	reSoft     = regexp.MustCompile(`(?i)\bsoft[\s._-]*subs?\b`)
+)
+
+// HardSub reads a hardcoded-subtitle tag from the file name or caption.
+// "none" means the name says the subtitles are soft. "unknown" means the name
+// does not say, or says hardsub without a language. There is no picture scan.
+func HardSub(fileName, caption string) string {
+	text := fileName + "\n" + sign.StripHeader(caption)
+	if reHard.MatchString(text) {
+		if m := reHardLang.FindStringSubmatch(text); len(m) > 1 && m[1] != "" {
+			return strings.ToLower(m[1])
+		}
+		return "unknown"
+	}
+	if reSoft.MatchString(text) {
+		return "none"
+	}
+	return "unknown"
+}
+
+func applySigned(p *Parsed, m sign.Meta) {
+	if m.TMDB > 0 {
+		p.TMDBID = m.TMDB
+	}
+	if m.Quality != "" {
+		p.Label = strings.ToLower(m.Quality)
+	}
+	if m.Kind == "e" {
+		p.Episode = true
+		p.Season = m.Season
+		p.Number = m.Episode
+		return
+	}
+	p.Episode = false
+	p.Season = 0
+	p.Number = 0
 }
 
 // Parts of a library channel that a mirror can receive.

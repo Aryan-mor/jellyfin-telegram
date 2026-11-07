@@ -28,3 +28,33 @@ func TestPickTMDB(t *testing.T) {
 		}
 	}
 }
+
+// What Jellyfin really answered for "The Hardacres": the TMDB entry has a Persian name, and the
+// entry with the English name has only an IMDb id. They are one show from one year.
+func TestPickMetaJoinsEntriesOfTheSameYear(t *testing.T) {
+	results := []SearchResult{
+		{Name: "\u062e\u0627\u0646\u0648\u0627\u062f\u0647 \u0647\u0627\u0631\u062f\u06cc\u06a9\u0631\u0632", Year: 2024, ProviderIDs: map[string]string{"Tmdb": "231751"}},
+		{Name: "The Hardacres", Year: 2024, ProviderIDs: map[string]string{"Imdb": "tt28489780"}},
+	}
+	id, imdb, ok, err := pickMeta("The Hardacres", results)
+	if err != nil || !ok || id != 231751 || imdb != "tt28489780" {
+		t.Fatalf("got %d %q %v %v", id, imdb, ok, err)
+	}
+	// Two different shows in that year with TMDB ids are still ambiguous.
+	results = append(results, SearchResult{Name: "Another Show", Year: 2024, ProviderIDs: map[string]string{"Tmdb": "42"}})
+	if _, _, ok, _ := pickMeta("The Hardacres", results); ok {
+		t.Fatal("a second show of the same year was ignored")
+	}
+	// A show of another year is not joined to the title.
+	results = []SearchResult{
+		{Name: "The Hardacres", Year: 2024, ProviderIDs: map[string]string{"Imdb": "tt1"}},
+		{Name: "Something Else", Year: 1999, ProviderIDs: map[string]string{"Tmdb": "7"}},
+	}
+	if _, _, ok, _ := pickMeta("The Hardacres", results); ok {
+		t.Fatal("an entry of another year was taken")
+	}
+	// Without the title anywhere, nothing is guessed.
+	if _, _, ok, _ := pickMeta("The Hardacres", []SearchResult{{Name: "Other", Year: 2024, ProviderIDs: map[string]string{"Tmdb": "9"}}}); ok {
+		t.Fatal("a different title was taken")
+	}
+}

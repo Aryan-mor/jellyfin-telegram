@@ -37,6 +37,8 @@ type Values struct {
 	Fladder   bool `json:"fladder"`
 	Seerr     bool `json:"seerr"`
 	Downloads bool `json:"downloads"`
+	// Group turns on the shared library: new files are posted again with a signed caption.
+	Group bool `json:"group"`
 }
 
 // BotReport is the result of trying one bot.
@@ -204,16 +206,18 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		return
 	}
 	err = UpdateEnv(w.env, map[string]string{
-		"TELEGRAM_API_ID":     fmt.Sprint(apiID),
-		"TELEGRAM_API_HASH":   strings.TrimSpace(v.APIHash),
-		"TELEGRAM_CHANNEL_ID": fmt.Sprint(channel),
-		"TELEGRAM_BOT_TOKENS": strings.Join(tokens, ","),
-		"SUBTITLE_LANGUAGE":   language,
-		"JELLYFIN_URL":        strings.TrimRight(strings.TrimSpace(v.JellyfinURL), "/"),
-		"JELLYFIN_API_KEY":    strings.TrimSpace(v.JellyfinKey),
-		"SEERR_MANAGED":       fmt.Sprint(v.Seerr || v.Downloads),
-		"FLADDER_MANAGED":     fmt.Sprint(v.Fladder),
-		"DOWNLOADS_ENABLED":   fmt.Sprint(v.Downloads),
+		"TELEGRAM_API_ID":        fmt.Sprint(apiID),
+		"TELEGRAM_API_HASH":      strings.TrimSpace(v.APIHash),
+		"TELEGRAM_CHANNEL_ID":    fmt.Sprint(channel),
+		"TELEGRAM_BOT_TOKENS":    strings.Join(tokens, ","),
+		"SUBTITLE_LANGUAGE":      language,
+		"JELLYFIN_URL":           strings.TrimRight(strings.TrimSpace(v.JellyfinURL), "/"),
+		"JELLYFIN_API_KEY":       strings.TrimSpace(v.JellyfinKey),
+		"SEERR_MANAGED":          fmt.Sprint(v.Seerr || v.Downloads),
+		"FLADDER_MANAGED":        fmt.Sprint(v.Fladder),
+		"DOWNLOADS_ENABLED":      fmt.Sprint(v.Downloads),
+		"SIGNED_LIBRARY":         fmt.Sprint(v.Group),
+		"INBOX_DELETE_ORIGINALS": "false",
 	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, "cannot write the settings file: "+err.Error())

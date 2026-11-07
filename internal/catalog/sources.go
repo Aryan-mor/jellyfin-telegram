@@ -39,8 +39,9 @@ CREATE TABLE IF NOT EXISTS tgcopied (
 
 // Outcomes of looking at one document in a source channel.
 const (
-	CopyDone   = "copied"
-	CopyFailed = "failed"
+	CopyDone    = "copied"
+	CopyFailed  = "failed"
+	CopyPresent = "present"
 )
 
 // Source is one channel the signed-in account reads and copies videos from.
@@ -200,7 +201,7 @@ func (c *Catalog) RestartSourceWalk(ctx context.Context) error {
 // CopiedDoc reports whether this document was already copied, or already refused for good.
 func (c *Catalog) CopiedDoc(ctx context.Context, docID int64) (bool, error) {
 	var n int
-	err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tgcopied WHERE doc_id=? AND state=?`, docID, CopyDone).Scan(&n)
+	err := c.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM tgcopied WHERE doc_id=? AND state IN (?,?)`, docID, CopyDone, CopyPresent).Scan(&n)
 	if err != nil || n > 0 {
 		return n > 0, err
 	}

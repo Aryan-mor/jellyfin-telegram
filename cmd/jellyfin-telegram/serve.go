@@ -22,12 +22,14 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/downloads"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fladder"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fuckjoin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/home"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/intake"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
@@ -39,6 +41,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/stack"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
@@ -239,6 +242,16 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		Readahead:     cfg.ReadaheadBlocks,
 
 		BackgroundBytesPerSecond: cfg.ExtractBytesPerSecond,
+		Live: func(ctx context.Context, messageID int) (media.File, error) {
+			msgs, err := pool.Messages(ctx, []int{messageID})
+			if err != nil {
+				return media.File{}, err
+			}
+			if len(msgs) == 0 || msgs[0].File == nil {
+				return media.File{}, catalog.ErrNotFound
+			}
+			return *msgs[0].File, nil
+		},
 	}, log)
 	users := startUsers(ctx, cfg, log)
 	personal := startHome(cfg, envPath, cat, users, log)
@@ -246,12 +259,17 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	local := startLocal(cfg, envPath, cat, pool, users, log)
 	sources := startSources(cfg, cat, users)
 	news, fj := startNews(cfg, cat, users, sources, log)
+	// A failed group setup must not stop playback. The library then runs as a plain channel, and
+	// the panel shows what went wrong.
+	hub := newGroupHub(ctx, log, cfg.SignedLibrary, func(ctx context.Context) (*intake.Service, error) {
+		return openGroup(ctx, cfg, pool, cat, users, sources, news, lib, log)
+	})
 	radarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.RadarrPort))
 	sonarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.SonarrPort))
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, fj,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, fj, hub,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -278,7 +296,10 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	if news != nil {
 		go news.Run(ctx)
 	}
-	go (&mirror.Service{Cat: cat, Copy: pool.CopyMessage, Log: log}).Run(ctx)
+	go (&mirror.Service{Cat: cat, Copy: pool.CopyMessage, Log: log, ReadyOnly: func() bool { return hub.Get() != nil }}).Run(ctx)
+	if g := hub.Get(); g != nil {
+		go g.Run(ctx)
+	}
 	log.Info("serving", "addr", cfg.GatewayListen)
 
 	var prober *jellyfin.Prober
@@ -325,6 +346,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	fmt.Printf("\nSettings panel:\n    %s/panel\n\n", cfg.LoopbackURL())
 
 	idx := indexer.New(pool, cat, lib, store, log)
+	hub.SetIndexer(idx)
 	if cfg.JellyfinEnabled() {
 		idx.SetIdentifier(jellyfin.Identifier{Client: jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey)})
 	}
@@ -337,7 +359,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	go func() {
 		defer close(archiveDone)
 		if prober != nil {
-			archiveLoop(ctx, cfg, cat, prober, pool, lib, log)
+			archiveLoop(ctx, cfg, cat, prober, pool, lib, hub, log)
 		}
 	}()
 
@@ -458,7 +480,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, hub *groupHub, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -485,6 +507,8 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		SourceDo: sourcesDo(sources, news, fj),
 		Mirrors:  mirrorsView(cat),
 		MirrorDo: mirrorsDo(cat, pool, channel),
+		Forum:    forumView(cat, hub),
+		ForumDo:  forumDo(envPath, cat, hub, pool),
 		Verify:   verifyTelegram(dataDir, log),
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
@@ -1036,8 +1060,279 @@ func setupSubtitles(ctx context.Context, cfg config.Config, cat *catalog.Catalog
 	return nil
 }
 
+// openGroup prepares the shared library on the main channel. Nil means it is off, and the channel
+// is read as it always was.
+func openGroup(ctx context.Context, cfg config.Config, pool *tgpool.Pool, cat *catalog.Catalog, users *tguser.Manager, sources *tgsource.Service, news *newsfeed.Service, lib *library.Library, log *slog.Logger) (*intake.Service, error) {
+	if !cfg.SignedLibrary {
+		return nil, nil
+	}
+	key, err := sign.LoadOrCreate(cfg.DataDir)
+	if err != nil {
+		return nil, fmt.Errorf("library key: %w", err)
+	}
+	if err := pool.PublishAbout(ctx, sign.AboutLine(key.Public())); err != nil {
+		return nil, fmt.Errorf("publish library key: %w", err)
+	}
+	var bots []int64
+	for _, token := range cfg.BotTokens {
+		id, err := config.BotID(token)
+		if err != nil {
+			return nil, err
+		}
+		bots = append(bots, id)
+	}
+	trust := &sign.Trust{State: cat, Own: key.Public()}
+	svc := &intake.Service{
+		Cat: cat, TG: pool, Key: key, Trust: trust, Bots: bots,
+		DeleteOriginals: cfg.InboxDeleteOriginals, Lang: cfg.SubtitleLanguage, Log: log,
+		// A post starts as "subtitles" only when this installation will prepare them.
+		Subtitles: cfg.JellyfinEnabled() && cfg.ExtractBytesPerSecond > 0,
+	}
+	svc.Fingerprint = func(ctx context.Context, f media.File) (fileid.Sample, error) {
+		return fingerprint(ctx, pool, f)
+	}
+	tools, toolsErr := subtitles.FindTools(cfg.FFprobePath)
+	probe := func(ctx context.Context, messageID int) ([]sign.Track, int, error) {
+		if toolsErr != nil {
+			return nil, 0, toolsErr
+		}
+		info, err := tools.Inspect(ctx, lib.StreamURL(messageID))
+		if err != nil {
+			return nil, 0, err
+		}
+		return softTracks(info), info.Seconds, nil
+	}
+	if toolsErr == nil {
+		svc.Inspect = func(ctx context.Context, messageID int) (intake.Probe, error) {
+			tracks, seconds, err := probe(ctx, messageID)
+			return intake.Probe{Tracks: tracks, Seconds: seconds}, err
+		}
+	}
+	svc.Check = &sign.Checker{
+		Key: key, Trust: trust, Log: log,
+		Verify: func(ctx context.Context, f media.File, m sign.Meta) error {
+			return verifyPost(ctx, pool, f, m, func(ctx context.Context) ([]sign.Track, int, error) {
+				return probe(ctx, f.MessageID)
+			}, toolsErr == nil)
+		},
+	}
+	if cfg.JellyfinEnabled() {
+		ident := jellyfin.Identifier{Client: jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey)}
+		svc.Identify = func(ctx context.Context, title string, episode bool) (int, string, bool, error) {
+			if episode {
+				return ident.SeriesMeta(ctx, title)
+			}
+			return ident.MovieMeta(ctx, title)
+		}
+	}
+	if users != nil {
+		if sources != nil {
+			sources.InReady = users.InReady
+		}
+		if news != nil {
+			news.InReady = users.InReady
+		}
+	}
+	log.Info("shared library is on", "key", key.KeyID())
+	return svc, nil
+}
+
+// softTracks lists the subtitle tracks of an inspected file, with the stream number of each.
+func softTracks(info subtitles.Inspection) []sign.Track {
+	var soft []sign.Track
+	for _, track := range info.Tracks {
+		if track.Kind != "subtitle" {
+			continue
+		}
+		lang := track.Language
+		if lang == "" {
+			lang = "und"
+		}
+		soft = append(soft, sign.Track{Lang: lang, Codec: subtitleCodec(track.Codec), Index: track.Index, HasIndex: true})
+	}
+	return soft
+}
+
+// fingerprint reads the first and the last blocks of a file through the bots.
+func fingerprint(ctx context.Context, pool *tgpool.Pool, f media.File) (fileid.Sample, error) {
+	return fileid.Read(ctx, f.Size, func(ctx context.Context, block int64) ([]byte, error) {
+		return pool.FetchBlock(ctx, f.MessageID, f.DocID, block, f.Size)
+	})
+}
+
+// verifyPost is the quick check of a post made by a key this installation does not know well: it
+// reads two or three blocks and the head of the file, and compares them with what the caption
+// says. It returns an error wrapping sign.ErrMismatch when the file is not what it claims. Any
+// other error means the check could not be made.
+func verifyPost(ctx context.Context, pool *tgpool.Pool, f media.File, m sign.Meta, inspect func(context.Context) ([]sign.Track, int, error), canInspect bool) error {
+	if m.Hash != "" || m.OSDb != "" {
+		sample, err := fingerprint(ctx, pool, f)
+		if err != nil {
+			return err
+		}
+		if m.Hash != "" && sample.Hash() != m.Hash {
+			return fmt.Errorf("%w: the content hash differs", sign.ErrMismatch)
+		}
+		if m.OSDb != "" && sample.OSDb() != m.OSDb {
+			return fmt.Errorf("%w: the OpenSubtitles hash differs", sign.ErrMismatch)
+		}
+	}
+	if !canInspect || (m.Duration == 0 && len(m.Soft) == 0) {
+		return nil
+	}
+	tracks, seconds, err := inspect(ctx)
+	if err != nil {
+		return err
+	}
+	if m.Duration > 0 && seconds > 0 && absInt(seconds-m.Duration) > 2 {
+		return fmt.Errorf("%w: the file runs %d s, the caption says %d s", sign.ErrMismatch, seconds, m.Duration)
+	}
+	// A list that was cut to fit is only a prefix, so it is compared as far as it goes.
+	if !m.Cut && len(m.Soft) > 0 && len(m.Soft) != len(tracks) {
+		return fmt.Errorf("%w: the file has %d subtitle tracks, the caption says %d", sign.ErrMismatch, len(tracks), len(m.Soft))
+	}
+	for i, want := range m.Soft {
+		if i >= len(tracks) {
+			break
+		}
+		got := tracks[i]
+		if want.Lang != got.Lang || want.Codec != got.Codec || (want.HasIndex && want.Index != got.Index) {
+			return fmt.Errorf("%w: subtitle track %d differs", sign.ErrMismatch, i)
+		}
+	}
+	return nil
+}
+
+func absInt(n int) int {
+	if n < 0 {
+		return -n
+	}
+	return n
+}
+
+func subtitleCodec(name string) string {
+	switch strings.ToLower(name) {
+	case "subrip", "srt", "text", "mov_text":
+		return "srt"
+	case "ass", "ssa":
+		return "ass"
+	case "webvtt", "vtt":
+		return "vtt"
+	case "hdmv_pgs_subtitle":
+		return "pgs"
+	case "dvd_subtitle":
+		return "vob"
+	default:
+		if name == "" {
+			return "sub"
+		}
+		return strings.ToLower(name)
+	}
+}
+
+func forumView(cat *catalog.Catalog, hub *groupHub) func(context.Context) (any, error) {
+	return func(ctx context.Context) (any, error) {
+		group, groupErr := hub.Get(), hub.Err()
+		enabled := hub != nil && hub.enabled
+		groupOn, _ := cat.StateValue(ctx, "library.signed")
+		del, _ := cat.StateValue(ctx, "inbox.delete_originals")
+		view := map[string]any{
+			"group":            groupOn == "true" || (groupOn == "" && enabled),
+			"delete_originals": del == "true" || del == "1",
+		}
+		if groupErr != "" {
+			view["error"] = groupErr
+		}
+		if group == nil {
+			return view, nil
+		}
+		view["fingerprint"] = group.Key.KeyID()
+		rows, err := group.Trust.List(ctx)
+		if err != nil {
+			return nil, err
+		}
+		view["trusted"] = rows
+		if del == "" {
+			view["delete_originals"] = group.DeleteOriginals
+		}
+		return view, nil
+	}
+}
+
+func forumDo(envPath string, cat *catalog.Catalog, hub *groupHub, pool *tgpool.Pool) func(*http.Request, string, map[string]any) (any, error) {
+	return func(r *http.Request, action string, body map[string]any) (any, error) {
+		ctx := r.Context()
+		group := hub.Get()
+		switch action {
+		case "group":
+			on := truthy(body["on"])
+			if err := setup.UpdateEnv(envPath, map[string]string{"SIGNED_LIBRARY": strconv.FormatBool(on)}); err != nil {
+				return nil, err
+			}
+			if err := cat.SetStateValue(ctx, "library.signed", strconv.FormatBool(on)); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true, "restart": true}, nil
+		case "originals":
+			on := truthy(body["on"])
+			if err := setup.UpdateEnv(envPath, map[string]string{"INBOX_DELETE_ORIGINALS": strconv.FormatBool(on)}); err != nil {
+				return nil, err
+			}
+			value := "false"
+			if on {
+				value = "true"
+			}
+			if err := cat.SetStateValue(ctx, "inbox.delete_originals", value); err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true}, nil
+		case "recheck":
+			msg, err := hub.Retry(ctx)
+			if err != nil {
+				return nil, err
+			}
+			return map[string]any{"ok": true, "message": msg}, nil
+		case "trust_lookup", "trust_add", "trust_remove":
+			if group == nil {
+				return nil, errors.New("turn on the shared library and restart before editing the trust list")
+			}
+			if action == "trust_remove" {
+				fp, _ := body["fingerprint"].(string)
+				if err := group.Trust.Remove(ctx, fp); err != nil {
+					return nil, err
+				}
+				return map[string]any{"ok": true}, nil
+			}
+			name, _ := body["username"].(string)
+			pub, err := pool.PublicKey(ctx, name)
+			if err != nil {
+				return nil, err
+			}
+			if action == "trust_add" {
+				if err := group.Trust.Add(ctx, pub); err != nil {
+					return nil, err
+				}
+			}
+			return map[string]any{"ok": true, "fingerprint": sign.KeyID(pub)}, nil
+		default:
+			return nil, errors.New("unknown action")
+		}
+	}
+}
+
+func truthy(v any) bool {
+	switch t := v.(type) {
+	case bool:
+		return t
+	case string:
+		return strings.EqualFold(t, "true") || t == "1"
+	default:
+		return false
+	}
+}
+
 // archiveLoop keeps the embedded subtitles of every video in the channel, one video at a time.
-func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, prober *jellyfin.Prober, pool *tgpool.Pool, lib *library.Library, log *slog.Logger) {
+func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, prober *jellyfin.Prober, pool *tgpool.Pool, lib *library.Library, hub *groupHub, log *slog.Logger) {
 	if cfg.ExtractBytesPerSecond == 0 {
 		log.Info("subtitle extraction is off")
 		return
@@ -1063,6 +1358,9 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 	w := &subarchive.Worker{
 		Catalog: cat, Client: client, Prober: prober, Channel: pool, Extractor: tools,
 		Resolver: prober.Replacements(), SubtitlesRoot: root, StreamURL: lib.StreamURL, Log: log,
+	}
+	if cfg.SignedLibrary {
+		w.Forum = lazyForum{hub}
 	}
 	if err := cat.ResetExtractTries(ctx); err != nil {
 		log.Warn("cannot reset subtitle extraction tries", "err", err)
@@ -1189,6 +1487,9 @@ func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Inde
 			added, err := idx.Sync(ctx, indexer.IncrementalWindow)
 			if err != nil && ctx.Err() == nil {
 				log.Warn("sync failed", "err", err)
+			}
+			if err := idx.RefreshStatus(ctx); err != nil && ctx.Err() == nil {
+				log.Warn("cannot refresh post status", "err", err)
 			}
 			if added > 0 {
 				probe(true)

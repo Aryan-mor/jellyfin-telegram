@@ -307,6 +307,16 @@ func (c *Client) SearchMovie(ctx context.Context, name string) ([]SearchResult, 
 	return out, err
 }
 
+// SearchSeries asks Jellyfin's online providers for a series title.
+func (c *Client) SearchSeries(ctx context.Context, name string) ([]SearchResult, error) {
+	var out []SearchResult
+	err := c.post(ctx, "/Items/RemoteSearch/Series", map[string]any{
+		"SearchInfo": map[string]any{"Name": name},
+		"ItemId":     "00000000000000000000000000000000",
+	}, &out)
+	return out, err
+}
+
 // RefreshMetadata makes Jellyfin read an item again and replace what it holds. Jellyfin skips a
 // locked item, and an earlier local .nfo set that lock, so the lock is lifted first.
 func (c *Client) RefreshMetadata(ctx context.Context, itemID, userID string) error {
