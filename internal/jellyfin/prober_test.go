@@ -251,10 +251,30 @@ func TestProbedSourceStillMatchesThroughItsItemPath(t *testing.T) {
 	if !ok || m.sourceID != "main" || !m.byPath {
 		t.Errorf("got %+v, %v", m, ok)
 	}
-	// The other version shares the item, but the item's path belongs to the main source.
+	// The other version is a source of the same item, found by its URL. It lies in the folder of
+	// the item, so it counts as the item's own and gets its subtitles handled.
 	m, ok = s.find(media.File{MessageID: 2, ChannelID: 5, RelPath: "Movies/Heat (1995)/Heat (1995) - 720p.strm"})
-	if !ok || m.sourceID != "alt" || m.byPath {
+	if !ok || m.sourceID != "alt" || !m.byPath {
 		t.Errorf("got %+v, %v", m, ok)
+	}
+}
+
+// An old item that shares a URL but lies in another folder, or has no path, is not the file.
+func TestURLMatchInAnotherFolderIsNotAPathMatch(t *testing.T) {
+	for name, item := range map[string]Item{
+		"another folder": {ID: "old", Path: "/media/Movies/Other (1999)/Other (1999).strm", Sources: []Source{{ID: "old", Path: testURL}}},
+		"no path":        {ID: "old", Sources: []Source{{ID: "old", Path: testURL}}},
+	} {
+		m, ok := indexSources([]Item{item}).find(media.File{MessageID: 1, ChannelID: 5, RelPath: testRel})
+		if !ok || m.byPath {
+			t.Errorf("%s: got %+v, %v", name, m, ok)
+		}
+	}
+	// A Windows path to the same folder still matches.
+	item := Item{ID: "main", Path: `D:\lib\Movies\Heat (1995)\Heat (1995).strm`, Sources: []Source{{ID: "alt", Path: testURL}}}
+	m, ok := indexSources([]Item{item}).find(media.File{MessageID: 1, ChannelID: 5, RelPath: testRel})
+	if !ok || !m.byPath || m.sourceID != "alt" {
+		t.Errorf("windows path: got %+v, %v", m, ok)
 	}
 }
 

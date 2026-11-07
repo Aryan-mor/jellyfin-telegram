@@ -6,6 +6,7 @@ package tgpool
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -252,6 +253,122 @@ func (p *Pool) SendDocument(ctx context.Context, name, caption string, data []by
 // DeleteMessages removes messages from the channel.
 func (p *Pool) DeleteMessages(ctx context.Context, ids []int) error {
 	return p.call(ctx, 0, func(w worker) error { return w.deleteMessages(ctx, ids) })
+}
+
+// ReadyBot returns one connected bot. The caller signs with that bot's id, then sends as that bot.
+func (p *Pool) ReadyBot() (int64, error) {
+	for _, s := range p.slots {
+		if st := s.w.status(); st.Ready {
+			return st.ID, nil
+		}
+	}
+	return 0, errors.New("no bot is connected")
+}
+
+func (p *Pool) callOn(botID int64, fn func(*bot) error) error {
+	b, err := p.findBot(botID)
+	if err != nil {
+		return err
+	}
+	if !b.status().Ready {
+		return fmt.Errorf("bot %d is not connected", botID)
+	}
+	return fn(b)
+}
+
+// PublishAbout writes the platform key into every connected bot's About text.
+func (p *Pool) PublishAbout(ctx context.Context, line string) error {
+	var errs []error
+	ready := 0
+	for _, s := range p.slots {
+		b, ok := s.w.(*bot)
+		if !ok || !b.status().Ready {
+			continue
+		}
+		ready++
+		if err := b.setOwnAbout(ctx, line); err != nil {
+			errs = append(errs, fmt.Errorf("bot %d: %w", b.id, err))
+		}
+	}
+	if ready == 0 {
+		return errors.New("no bot is ready to publish the library key")
+	}
+	if len(errs) == ready {
+		return errors.Join(errs...)
+	}
+	for _, err := range errs {
+		if p.log != nil {
+			p.log.Warn("could not publish the library key", "err", err)
+		}
+	}
+	return nil
+}
+
+// About reads a bot's About text. hint is a message that bot sent in the library chat.
+func (p *Pool) About(ctx context.Context, userID, accessHash int64) (string, error) {
+	id, err := p.ReadyBot()
+	if err != nil {
+		return "", err
+	}
+	var about string
+	err = p.callOn(id, func(b *bot) error {
+		var err error
+		about, err = b.about(ctx, userID, accessHash)
+		return err
+	})
+	return about, err
+}
+
+// PublicKey reads the library key from a bot's About text. username may include @.
+func (p *Pool) PublicKey(ctx context.Context, username string) (ed25519.PublicKey, error) {
+	id, err := p.ReadyBot()
+	if err != nil {
+		return nil, err
+	}
+	var pub ed25519.PublicKey
+	err = p.callOn(id, func(b *bot) error {
+		var err error
+		pub, err = b.publicKeyOf(ctx, username)
+		return err
+	})
+	return pub, err
+}
+
+// SendText posts a text message, such as a claim card, as one bot.
+func (p *Pool) SendText(ctx context.Context, botID int64, text string) (int, error) {
+	var id int
+	err := p.callOn(botID, func(b *bot) error {
+		var err error
+		id, err = b.sendText(ctx, text)
+		return err
+	})
+	return id, err
+}
+
+// React sets the reaction people see on a file. It is not the source of truth.
+func (p *Pool) React(ctx context.Context, messageID int, emoji string) error {
+	id, err := p.ReadyBot()
+	if err != nil {
+		return err
+	}
+	return p.callOn(id, func(b *bot) error { return b.react(ctx, messageID, emoji) })
+}
+
+// Repost posts a document that is already in the channel again, with a new caption.
+// The document id stays the same.
+func (p *Pool) Repost(ctx context.Context, botID int64, sourceID int, caption string) (int, error) {
+	var id int
+	err := p.callOn(botID, func(b *bot) error {
+		var err error
+		id, err = b.repostDocument(ctx, sourceID, caption)
+		return err
+	})
+	return id, err
+}
+
+// EditCaption replaces the caption of a post this bot sent.
+func (p *Pool) EditCaption(ctx context.Context, botID int64, messageID int, caption string) error {
+	return p.callOn(botID, func(b *bot) error { return b.editCaption(ctx, messageID, caption) })
 }
 
 // AcceptMirror checks that botID can post in the named channel and is an admin of the main

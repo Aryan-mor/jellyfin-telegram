@@ -28,6 +28,14 @@ type File struct {
 	SubtitleOutcome string
 	// ExtractState is empty until the embedded subtitles have been handled.
 	ExtractState string
+	// FromID is the account that posted the message. In a channel it is often empty.
+	FromID int64
+	// AccessHash finds FromID with users.getFullUser. Zero when the message did not bring one.
+	AccessHash int64
+	// ReplyTo is the message this one replies to, or zero.
+	ReplyTo int
+	// Edited is when the caption was last edited, or zero for a message that never was.
+	Edited time.Time
 }
 
 // Values of File.ExtractState.
@@ -51,6 +59,18 @@ type Message struct {
 	ID int
 	// Exists is false when the id was never used or the message was deleted.
 	Exists bool
+	// Text is the caption, or the whole body when the message has no file.
+	Text string
+	// FromID is the account that posted the message.
+	FromID int64
+	// AccessHash finds FromID with users.getFullUser. Zero when the message did not bring one.
+	AccessHash int64
+	// Date is Telegram's date for the message.
+	Date time.Time
+	// Edited is when the message was last edited, or zero.
+	Edited time.Time
+	// ReplyTo is the message this one replies to, or zero.
+	ReplyTo int
 	// File is nil when the message exists but holds no video.
 	File *File
 	// Attachment is set when the message holds a subtitle file.

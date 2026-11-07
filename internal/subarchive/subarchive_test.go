@@ -215,3 +215,41 @@ func TestOneRealTrackIsEnoughAmongHollowOnes(t *testing.T) {
 		t.Error("looked for a replacement although a real track exists")
 	}
 }
+
+func TestArchiveIsFoundByTheDocumentIdOfItsVideo(t *testing.T) {
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cat.Close() })
+	ctx := context.Background()
+	for _, a := range []media.Attachment{
+		{MessageID: 5, DocID: 50, Size: 1, FileName: Name(900, 777)},  // made for another message id
+		{MessageID: 6, DocID: 0, Size: 1, FileName: Name(12, 888)},    // just sent, not synced yet
+		{MessageID: 7, DocID: 70, Size: 1, FileName: Name(12, 999)},   // another video
+		{MessageID: 8, DocID: 80, Size: 1, FileName: "notes-777.zip"}, // not an archive of ours
+	} {
+		if err := cat.PutAttachment(ctx, a); err != nil {
+			t.Fatal(err)
+		}
+	}
+	w := &Worker{Catalog: cat}
+	// The same video posted again, with another message id, still finds its archive.
+	got, ok, err := w.findArchive(ctx, media.File{MessageID: 41, DocID: 777})
+	if err != nil || !ok || got.MessageID != 5 {
+		t.Fatalf("by document id: %+v %v %v", got, ok, err)
+	}
+	// An exact name wins over a match by document id.
+	if err := cat.PutAttachment(ctx, media.Attachment{MessageID: 9, DocID: 90, Size: 1, FileName: Name(41, 777)}); err != nil {
+		t.Fatal(err)
+	}
+	if got, ok, _ := w.findArchive(ctx, media.File{MessageID: 41, DocID: 777}); !ok || got.MessageID != 9 {
+		t.Fatalf("exact name: %+v %v", got, ok)
+	}
+	if _, ok, _ := w.findArchive(ctx, media.File{MessageID: 12, DocID: 888}); ok {
+		t.Fatal("an archive that is not synced yet was found")
+	}
+	if _, ok, _ := w.findArchive(ctx, media.File{MessageID: 1, DocID: 4242}); ok {
+		t.Fatal("an archive of another video was found")
+	}
+}

@@ -2,6 +2,7 @@ package tgpool
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -23,6 +24,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 const (
@@ -279,6 +281,14 @@ func canPost(ch *tg.Channel) bool {
 	if ch.Creator {
 		return true
 	}
+	// In a supergroup every member may post unless sending is banned for all members. The right to
+	// post messages is a channel right and a supergroup admin does not carry it.
+	if ch.Megagroup {
+		if banned, ok := ch.GetDefaultBannedRights(); ok && banned.SendMessages {
+			return false
+		}
+		return !ch.Left
+	}
 	rights, ok := ch.GetAdminRights()
 	return ok && rights.PostMessages
 }
@@ -397,14 +407,11 @@ func (b *bot) messages(ctx context.Context, ids []int) ([]media.Message, error) 
 		return nil, fmt.Errorf("channels.getMessages: %w", err)
 	}
 	found := map[int]media.Message{}
+	hashes := userHashes(res)
 	for _, raw := range rawMessages(res) {
 		switch m := raw.(type) {
 		case *tg.Message:
-			found[m.ID] = media.Message{
-				ID: m.ID, Exists: true,
-				File:       fileFromMessage(m, b.channelID, false),
-				Attachment: attachmentFromMessage(m),
-			}
+			found[m.ID] = messageFromTG(m, b.channelID, false, hashes)
 		case *tg.MessageService:
 			found[m.ID] = media.Message{ID: m.ID, Exists: true}
 		}
@@ -499,6 +506,26 @@ func readFile(ctx context.Context, api *tg.Client, loc tg.InputFileLocationClass
 	return file.Bytes, nil
 }
 
+func userHashes(res tg.MessagesMessagesClass) map[int64]int64 {
+	var users []tg.UserClass
+	switch m := res.(type) {
+	case *tg.MessagesChannelMessages:
+		users = m.Users
+	case *tg.MessagesMessages:
+		users = m.Users
+	case *tg.MessagesMessagesSlice:
+		users = m.Users
+	}
+	out := map[int64]int64{}
+	for _, raw := range users {
+		user, ok := raw.(*tg.User)
+		if ok {
+			out[user.ID] = user.AccessHash
+		}
+	}
+	return out
+}
+
 func rawMessages(res tg.MessagesMessagesClass) []tg.MessageClass {
 	switch m := res.(type) {
 	case *tg.MessagesChannelMessages:
@@ -547,14 +574,11 @@ func (b *bot) messagesIn(ctx context.Context, channelID int64, ids []int) ([]med
 		return nil, fmt.Errorf("channels.getMessages: %w", err)
 	}
 	found := map[int]media.Message{}
+	hashes := userHashes(res)
 	for _, raw := range rawMessages(res) {
 		switch m := raw.(type) {
 		case *tg.Message:
-			found[m.ID] = media.Message{
-				ID: m.ID, Exists: true,
-				File:       fileFromMessage(m, channelID, true),
-				Attachment: attachmentFromMessage(m),
-			}
+			found[m.ID] = messageFromTG(m, channelID, true, hashes)
 		case *tg.MessageService:
 			found[m.ID] = media.Message{ID: m.ID, Exists: true}
 		}
@@ -684,6 +708,7 @@ func fileFromMessage(m *tg.Message, channelID int64, photos bool) *media.File {
 	if photos && !isVideo && !isImage {
 		return nil
 	}
+	from, reply := messageParts(m)
 	return &media.File{
 		MessageID: m.ID,
 		ChannelID: channelID,
@@ -694,7 +719,45 @@ func fileFromMessage(m *tg.Message, channelID int64, photos bool) *media.File {
 		Caption:   m.Message,
 		Date:      time.Unix(int64(m.Date), 0).UTC(),
 		HasThumb:  largestThumb(doc) != "",
+		FromID:    from,
+		ReplyTo:   reply,
+		Edited:    editedAt(m),
 	}
+}
+
+func messageFromTG(m *tg.Message, channelID int64, photos bool, hashes map[int64]int64) media.Message {
+	from, reply := messageParts(m)
+	msg := media.Message{
+		ID: m.ID, Exists: true, Text: m.Message,
+		FromID: from, ReplyTo: reply,
+		AccessHash: hashes[from],
+		Date:       time.Unix(int64(m.Date), 0).UTC(),
+		Edited:     editedAt(m),
+		File:       fileFromMessage(m, channelID, photos),
+		Attachment: attachmentFromMessage(m),
+	}
+	if msg.File != nil {
+		msg.File.AccessHash = msg.AccessHash
+	}
+	return msg
+}
+
+// editedAt is when a message was last edited, or the zero time.
+func editedAt(m *tg.Message) time.Time {
+	if d, ok := m.GetEditDate(); ok && d > 0 {
+		return time.Unix(int64(d), 0).UTC()
+	}
+	return time.Time{}
+}
+
+func messageParts(m *tg.Message) (from int64, reply int) {
+	if u, ok := m.FromID.(*tg.PeerUser); ok {
+		from = u.UserID
+	}
+	if h, ok := m.ReplyTo.(*tg.MessageReplyHeader); ok {
+		reply = h.ReplyToMsgID
+	}
+	return from, reply
 }
 
 func attachmentFromMessage(m *tg.Message) *media.Attachment {
@@ -716,6 +779,192 @@ func attachmentFromMessage(m *tg.Message) *media.Attachment {
 		att.ReplyTo = h.ReplyToMsgID
 	}
 	return att
+}
+
+func (b *bot) peer() (*tg.InputPeerChannel, *tg.InputChannel, *tg.Client, error) {
+	api, channel, err := b.conn()
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	return &tg.InputPeerChannel{ChannelID: channel.ChannelID, AccessHash: channel.AccessHash}, channel, api, nil
+}
+
+func randomID() (int64, error) {
+	var buf [8]byte
+	if _, err := rand.Read(buf[:]); err != nil {
+		return 0, err
+	}
+	return int64(binary.LittleEndian.Uint64(buf[:])), nil
+}
+
+// setOwnAbout publishes the platform key in this bot's About text and keeps the rest.
+func (b *bot) setOwnAbout(ctx context.Context, line string) error {
+	api, _, err := b.conn()
+	if err != nil {
+		return err
+	}
+	full, err := api.UsersGetFullUser(ctx, &tg.InputUserSelf{})
+	if err != nil {
+		return fmt.Errorf("read about: %w", err)
+	}
+	about, _ := full.FullUser.GetAbout()
+	req := &tg.BotsSetBotInfoRequest{}
+	req.SetAbout(sign.MergeAbout(about, line))
+	if _, err := api.BotsSetBotInfo(ctx, req); err != nil {
+		return fmt.Errorf("bots.setBotInfo: %w", err)
+	}
+	return nil
+}
+
+// about reads another account's About text from a message it sent in this chat.
+func (b *bot) about(ctx context.Context, userID, accessHash int64) (string, error) {
+	api, _, err := b.conn()
+	if err != nil {
+		return "", err
+	}
+	var input tg.InputUserClass
+	if userID == b.id || userID == 0 {
+		input = &tg.InputUserSelf{}
+	} else if accessHash != 0 {
+		input = &tg.InputUser{UserID: userID, AccessHash: accessHash}
+	} else {
+		return "", errors.New("no access hash for that account")
+	}
+	full, err := api.UsersGetFullUser(ctx, input)
+	if err != nil {
+		return "", fmt.Errorf("users.getFullUser: %w", err)
+	}
+	about, _ := full.FullUser.GetAbout()
+	return about, nil
+}
+
+// publicKeyOf reads the library key published in a bot's About text.
+func (b *bot) publicKeyOf(ctx context.Context, username string) (ed25519.PublicKey, error) {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	if username == "" {
+		return nil, errors.New("enter a bot username")
+	}
+	api, _, err := b.conn()
+	if err != nil {
+		return nil, err
+	}
+	res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
+	if err != nil {
+		return nil, fmt.Errorf("resolve %s: %w", username, err)
+	}
+	var user *tg.User
+	for _, raw := range res.Users {
+		u, ok := raw.(*tg.User)
+		if ok && strings.EqualFold(u.Username, username) {
+			user = u
+			break
+		}
+	}
+	if user == nil {
+		return nil, errors.New("telegram did not return that account")
+	}
+	if !user.Bot {
+		return nil, errors.New("that account is not a bot")
+	}
+	about, err := b.about(ctx, user.ID, user.AccessHash)
+	if err != nil {
+		return nil, err
+	}
+	pub, ok := sign.PublicFromAbout(about)
+	if !ok {
+		return nil, errors.New("that bot has no library key in its About text")
+	}
+	return pub, nil
+}
+
+func (b *bot) sendText(ctx context.Context, text string) (int, error) {
+	peer, _, api, err := b.peer()
+	if err != nil {
+		return 0, err
+	}
+	id, err := randomID()
+	if err != nil {
+		return 0, err
+	}
+	req := &tg.MessagesSendMessageRequest{Peer: peer, Message: text, RandomID: id}
+	res, err := api.MessagesSendMessage(ctx, req)
+	if err != nil {
+		return 0, fmt.Errorf("messages.sendMessage: %w", err)
+	}
+	if got := sentMessageID(res); got != 0 {
+		return got, nil
+	}
+	return 0, errors.New("telegram did not report the new message id")
+}
+
+func (b *bot) react(ctx context.Context, messageID int, emoji string) error {
+	peer, _, api, err := b.peer()
+	if err != nil {
+		return err
+	}
+	req := &tg.MessagesSendReactionRequest{Peer: peer, MsgID: messageID}
+	req.SetReaction([]tg.ReactionClass{&tg.ReactionEmoji{Emoticon: emoji}})
+	if _, err := api.MessagesSendReaction(ctx, req); err != nil {
+		return fmt.Errorf("messages.sendReaction: %w", err)
+	}
+	return nil
+}
+
+// repostDocument copies a document already in this channel as a new post, with a new caption.
+// Telegram keeps the same document id.
+func (b *bot) repostDocument(ctx context.Context, sourceID int, caption string) (int, error) {
+	peer, channel, api, err := b.peer()
+	if err != nil {
+		return 0, err
+	}
+	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
+		Channel: channel,
+		ID:      []tg.InputMessageClass{&tg.InputMessageID{ID: sourceID}},
+	})
+	if err != nil {
+		return 0, fmt.Errorf("channels.getMessages: %w", err)
+	}
+	var doc *tg.Document
+	for _, raw := range rawMessages(res) {
+		msg, ok := raw.(*tg.Message)
+		if ok && msg.ID == sourceID {
+			doc = documentOf(msg)
+		}
+	}
+	if doc == nil {
+		return 0, fmt.Errorf("%w: message %d", ErrMessageGone, sourceID)
+	}
+	id, err := randomID()
+	if err != nil {
+		return 0, err
+	}
+	req := &tg.MessagesSendMediaRequest{
+		Peer:     peer,
+		Media:    &tg.InputMediaDocument{ID: doc.AsInput()},
+		Message:  caption,
+		RandomID: id,
+	}
+	sent, err := api.MessagesSendMedia(ctx, req)
+	if err != nil {
+		return 0, fmt.Errorf("messages.sendMedia: %w", err)
+	}
+	if got := sentMessageID(sent); got != 0 {
+		return got, nil
+	}
+	return 0, errors.New("telegram did not report the new message id")
+}
+
+func (b *bot) editCaption(ctx context.Context, messageID int, caption string) error {
+	peer, _, api, err := b.peer()
+	if err != nil {
+		return err
+	}
+	req := &tg.MessagesEditMessageRequest{Peer: peer, ID: messageID}
+	req.SetMessage(caption)
+	if _, err := api.MessagesEditMessage(ctx, req); err != nil {
+		return fmt.Errorf("messages.editMessage: %w", err)
+	}
+	return nil
 }
 
 // largestThumb returns the type of the biggest downloadable thumbnail.

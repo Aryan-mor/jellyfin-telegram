@@ -22,6 +22,8 @@ const (
 	UploadFailed    = "failed"
 	// UploadMismatch means the bytes in the channel differ from the local file. Nothing is deleted for it.
 	UploadMismatch = "mismatch"
+	// UploadPresent means Ready already has this title, so the file was not uploaded and is not deleted.
+	UploadPresent = "present"
 )
 
 const uploadSchema = `

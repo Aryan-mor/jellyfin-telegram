@@ -346,13 +346,14 @@ func (m *Manager) Copy(ctx context.Context, ref SourceRef, ids []int) error {
 		if err != nil {
 			return nil, err
 		}
-		_, err = api.MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
+		req := &tg.MessagesForwardMessagesRequest{
 			FromPeer:   from,
 			ToPeer:     &tg.InputPeerChannel{ChannelID: m.channelID, AccessHash: lv.meta.AccessHash},
 			ID:         ids,
 			RandomID:   random,
 			DropAuthor: true,
-		})
+		}
+		_, err = api.MessagesForwardMessages(ctx, req)
 		return nil, err
 	})
 	return err

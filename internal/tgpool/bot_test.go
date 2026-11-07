@@ -102,3 +102,27 @@ func TestLargestThumb(t *testing.T) {
 		t.Errorf("no thumbs gave %q", got)
 	}
 }
+
+func TestCanPostInAChannelAndInASupergroup(t *testing.T) {
+	// A channel needs the right to post.
+	if canPost(&tg.Channel{}) {
+		t.Fatal("a channel member without rights can post")
+	}
+	admin := &tg.Channel{}
+	admin.SetAdminRights(tg.ChatAdminRights{PostMessages: true})
+	if !canPost(admin) {
+		t.Fatal("a channel admin with the right cannot post")
+	}
+	// A supergroup lets members post, unless that is banned for everyone.
+	if !canPost(&tg.Channel{Megagroup: true}) {
+		t.Fatal("a member of a supergroup cannot post")
+	}
+	muted := &tg.Channel{Megagroup: true}
+	muted.SetDefaultBannedRights(tg.ChatBannedRights{SendMessages: true})
+	if canPost(muted) {
+		t.Fatal("posting is banned for everyone and canPost says yes")
+	}
+	if canPost(&tg.Channel{Megagroup: true, Left: true}) {
+		t.Fatal("a bot that left the supergroup can post")
+	}
+}

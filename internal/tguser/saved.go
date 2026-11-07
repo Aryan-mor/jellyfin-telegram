@@ -99,13 +99,14 @@ func (m *Manager) ForwardSaved(ctx context.Context, ids []int) error {
 		random[i] = int64(binary.LittleEndian.Uint64(b[:]))
 	}
 	_, err = m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
-		_, err := api.MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
+		req := &tg.MessagesForwardMessagesRequest{
 			FromPeer:   &tg.InputPeerSelf{},
 			ToPeer:     &tg.InputPeerChannel{ChannelID: m.channelID, AccessHash: lv.meta.AccessHash},
 			ID:         ids,
 			RandomID:   random,
 			DropAuthor: true,
-		})
+		}
+		_, err := api.MessagesForwardMessages(ctx, req)
 		return nil, err
 	})
 	return err

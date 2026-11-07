@@ -86,6 +86,10 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply mirror schema: %w", err)
 	}
+	if _, err := db.Exec(forumSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply forum schema: %w", err)
+	}
 	return &Catalog{db: db}, nil
 }
 

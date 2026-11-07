@@ -306,6 +306,121 @@ Four more things only the live run showed:
   shared network. Its setup is retried five times.
 - Updating a server in Seerr must not send its id in the body. Seerr refuses it as read-only.
 
+## Shared library
+
+Off by default (`SIGNED_LIBRARY`). Several installations, each with its own Jellyfin and bots, can read one
+channel. Files that people post are posted again by a bot with a caption that every installation can read,
+so a title is identified once and its subtitles are extracted once. With it on, only such posts are indexed.
+
+The state of a file is the **first line of its caption**, so anyone who opens the channel sees it, and nothing
+else is posted:
+
+| On | Status | Meaning |
+|---|---|---|
+| raw file | 🔎 `review` | a bot is identifying the file. A signed claim line sits under it |
+| raw file | 📤 `indexed` | its signed post exists |
+| raw file | ⛔ `rejected: reason` | it could not be identified |
+| signed post | 💬 `subtitles` | its subtitles are being prepared. A claim line sits under it |
+| signed post | ✅ `ready` | finished. Only these are copied to mirrors |
+
+A signed post looks like this. What a person wrote on a raw file stays below its status line.
+
+```
+✅ Ready
+The Hardacres
+🎬 Episode · TMDB 231751 · IMDb tt28489780 · 480p
+💬 Soft: none · Hard: unknown
+jftg:2;k=e;t=231751;i=tt28489780;q=480p;se=1;ep=6;fu=<file_unique_id>;h=<content hash>;oh=<OpenSubtitles hash>;du=2760;ss=fa.srt@3;hs=unknown;sa=yes;st=ready;ah=<archive hash>;d=<doc>;z=<size>;pk=<public key>;s=<signature>
+#tm_tv_231751_1_6
+```
+
+The line says what a reader can check for itself, and where to look:
+
+- `fu` is Telegram's `file_unique_id`, so a bot that speaks only the Bot API can match the file. It must agree with `d`.
+- `h` and `oh` name the content, from the first and last blocks of the file (`internal/fileid`). They survive a new
+  upload, which `d` and `fu` do not. `oh` is the OpenSubtitles hash, so subtitle sites can be asked too.
+- `du` is the running time, and `ss` lists the soft subtitle tracks with their stream numbers (`fa.srt@3`), so a reader
+  need not probe the file to find them.
+- `ah` names the subtitle archive that answers the post, so it is checked after it is downloaded.
+- `pk` is the key that signed the line. It travels with the line, so a post that is only forwarded, with no sender and
+  no reply link, still verifies anywhere.
+
+The hashtag ends the caption: `#tm_m_<tmdb>` for a film, `#tm_tv_<tmdb>_<season>_<episode>` for an episode. The signature
+covers every field, including the document id, the size and the status, so a caption copied onto another file fails, and a post cannot be
+marked ready without the key. Forwards and copies keep the document id, so a mirror copy still verifies.
+
+**A claim is an edit of the caption.** A bot that takes a file edits the first line to the work's status and
+signs a claim line under it: `jftg-claim:1;op=review;m=<message>;ttl=7200;pk=<key>;s=<signature>`. The claim carries
+its own public key, so any installation can check it without a list of keys. It lapses `ttl` seconds after the
+edit date of the message. A claim written now does not win yet: the next pass reads the caption again, and the claim
+that is still there is the one that counts. Two installations that edit at the same moment therefore agree, because
+a caption holds one. Subtitle work claims the signed post in the same way. When it is done the post is signed again as
+`ready`. One pass takes up at most five files.
+
+`internal/mirror` copies a post only when its status line and its signed line both say ready. The indexer reads
+`subtitles` posts again on every sync tick (`RefreshStatus`), so the catalog sees `ready` soon after a bot writes it.
+
+### The subtitle archive has a caption too
+
+The archive is posted as a reply to the signed post, and its caption says what it is:
+
+```
+💬 Subtitles: The Hardacres
+jftg-subs:1;vd=<video document id>;vh=<video content hash>;ah=<archive hash>;ss=fa.srt@3;pk=<public key>;s=<signature>
+#tm_tv_231751_1_6
+```
+
+`vd` and `vh` tie it to its video, so it still finds the video after a forward, a copy or a new upload. `ah` names its
+own bytes: `ah` of the video post and of the archive agree, and a reader checks the downloaded bytes against it before it
+installs anything, so a wrong archive from another installation is ignored with a warning. It carries the same hashtag
+as the video, so one search finds both. An archive is also found by the document id at the end of its file name, not by
+the message id of the video.
+
+A mirror copies a ready video together with its archive, one right after the other. A post that says it has an archive
+(`sa=yes`) waits until the archive has been seen. An archive that shows up after its video went is sent later.
+
+### Nobody vouches for a key: the post is checked against its file
+
+A signature proves who signed, not that the line is true. So an installation does not keep a list of keys
+(`internal/sign`, `Checker`). It looks at the file instead:
+
+1. The signature must verify under the key in the line, and the line must name this document and size.
+2. This installation's own key is believed. A key added by hand is believed too, for those who want that.
+3. Any other key: the post is compared with its file. That reads the first and last block (two or three blocks) and the
+   head of the file: the content hash, the OpenSubtitles hash, the running time and the subtitle tracks must be what
+   the caption says. The result is kept, so the same post is checked once.
+4. A key earns a record. After 20 posts that were all right, only about one in twenty is checked. A key with three wrong
+   posts is ignored for a day. A check that could not be made, because Telegram did not answer, is not a verdict and
+   changes nothing.
+
+### What was measured on real Telegram (2026-11-06 and 2026-11-07)
+
+- **A bot cannot read another bot's message in a supergroup.** `channels.getMessages` returns it only to the bot that
+  posted it. Turning Group Privacy off for the reader did not help. Telegram's FAQ says bots do not see other bots'
+  messages in groups, and the newer Bot-to-Bot Communication Mode is documented for updates only. So a library in a
+  supergroup, or in its topics, cannot be shared by bots. A bot also cannot turn topics on (`toggleForum`) or list them
+  (`getForumTopics`).
+- **In a channel there is no such limit.** All four bots read every subtitle archive that a bot had posted in the real
+  library channel, and the sender of a channel post is anonymous.
+- On the real channel, with a scratch catalog: bots **edit the caption of a file a person posted**; the edit date comes
+  back and a claim written in one pass is recognised in the next; a file went `review` to `indexed` in two passes; and
+  `sendMedia` with the document **keeps the same document id**, so a repost is the same file. A full caption was 346
+  characters.
+- Telegram's `file_unique_id` is the document id with a type, so it equals the id the bots read over MTProto.
+  `internal/fileid` computes it, and the content hashes.
+- **A second installation with another key**, which had never seen the first, checked three posts against their files
+  ("checked against the file, right") and indexed them with no title lookup. A post with a valid signature and a wrong
+  content hash was refused by both installations and never counted. A mirror of that second installation copied
+  only the post that was `ready`.
+- Jellyfin answers a series search with two entries for one show: the TMDB entry has a name in the server's metadata
+  language, and the entry with the original name has only an IMDb id. `pickMeta` joins entries of the same year. Before
+  that a file named after its show was rejected as unidentified.
+- Three qualities of one episode were each extracted once (260, 445 and 828 MiB), archived with a signed caption, and
+  marked ready. A second installation then mirrored each video followed by its archive two seconds later. All three
+  archives have the same `ah`, because the subtitle text is the same.
+- Versions of one episode: after a probe the alternate version shows its URL, not its path. A match by URL now counts
+  when the item is in the file's own folder, so the subtitle worker no longer skips it.
+
 ## Not verified yet
 
 - Dragging the seek bar by hand. Seeking was tested with the remote seek command in one tab.

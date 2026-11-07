@@ -252,6 +252,7 @@ details.grp .cat-body { padding:0 12px 4px; }
       <div class="grid" id="stats">
         <div class="tile"><div class="label"><svg class="i"><use href="#i-bot"/></svg>Bots</div><div class="value" id="st-bots">–</div><div class="sub" id="st-bots-sub">&nbsp;</div></div>
         <div class="tile"><div class="label"><svg class="i"><use href="#i-chan"/></svg>Channel</div><div class="value mono" id="st-channel" style="font-size:18px">–</div><div class="sub" id="st-lang">&nbsp;</div></div>
+        <div class="tile" id="st-forum-tile" role="button" tabindex="0" style="cursor:pointer" title="Open the Channel tab"><div class="label"><svg class="i"><use href="#i-chan"/></svg>Shared library</div><div class="value" id="st-forum" style="font-size:18px">–</div><div class="sub" id="st-forum-sub">&nbsp;</div></div>
         <div class="tile" id="st-dl-tile" hidden><div class="label"><svg class="i"><use href="#i-down"/></svg>Downloads</div><div class="value" id="st-dl">–</div><div class="sub" id="st-dl-sub">&nbsp;</div></div>
       </div>
       <div class="card">
@@ -348,6 +349,22 @@ details.grp .cat-body { padding:0 12px 4px; }
           </div>
         </div>
         <div id="channel-msg" class="alert"></div>
+      </div>
+      <div class="card" id="forum-card" hidden>
+        <h2>Shared library</h2>
+        <p>New files posted to the channel are posted again with a caption that other installations can read: the title, its TMDB id, the subtitle tracks and a signature. Films you already have are left as they are. Turning it on needs a restart. Nothing has to be set up for other installations: a key is believed once its posts have been checked against their files, and ignored if they are wrong.</p>
+        <label class="opt"><input type="checkbox" id="forum-group"> Repost new files with a signed caption</label>
+        <label class="opt"><input type="checkbox" id="forum-delete"> Delete inbox files after they reach Ready</label>
+        <div id="forum-topics" class="meta"></div>
+        <div class="actions" style="margin:10px 0"><button id="forum-recheck" class="btn ghost sm" type="button">Check again</button></div>
+        <div id="forum-own" class="item" hidden></div>
+        <div id="forum-trust" class="list"></div>
+        <div class="field" style="margin-top:14px"><label for="forum-user">Bot username</label><input id="forum-user" autocomplete="off" spellcheck="false" placeholder="@librarybot"></div>
+        <div class="actions">
+          <button id="forum-lookup" class="btn" type="button">Look up</button>
+          <button id="forum-add" class="btn" type="button" disabled>Trust this key</button>
+        </div>
+        <div id="forum-msg" class="alert"></div>
       </div>
       <div class="card">
         <h2>Home videos</h2>
@@ -812,6 +829,71 @@ function draw(s) {
   document.querySelector('[data-tab="news"]').hidden = !s.sources || !signedIn;
   $('st-dl-tile').hidden = !s.downloads;
   drawDownloads(s.downloads);
+  drawForum(s.forum);
+}
+
+function drawForum(f) {
+  const tile = $('st-forum');
+  if (tile) {
+    let v = 'Off', sub = 'Plain channel';
+    if (f && f.error) { v = 'Problem'; sub = 'Open the Channel tab'; }
+    else if (f && f.fingerprint) { v = 'On'; sub = 'Key ' + f.fingerprint; }
+    else if (f && f.group) { v = 'Waiting'; sub = 'Restart to start it'; }
+    tile.textContent = v;
+    $('st-forum-sub').textContent = sub;
+  }
+  const card = $('forum-card');
+  if (!card) return;
+  card.hidden = !f;
+  if (!f) return;
+  $('forum-group').checked = !!f.group;
+  $('forum-delete').checked = !!f.delete_originals;
+  $('forum-topics').textContent = f.error ? 'The shared library is off: ' + f.error
+    : f.fingerprint ? 'Running.' : (f.group ? 'Restart to start it.' : '');
+  const own = $('forum-own');
+  own.hidden = !f.fingerprint;
+  own.replaceChildren();
+  if (f.fingerprint) {
+    const main = el('div', 'main');
+    main.append(el('div', 'title', 'This installation'));
+    const meta = el('div', 'meta', f.fingerprint);
+    meta.append(copyBtn(f.fingerprint, 'Copy fingerprint'));
+    main.append(meta);
+    own.append(main);
+  }
+  const list = $('forum-trust');
+  list.replaceChildren();
+  const rows = f.trusted || [];
+  if (!rows.filter(r => !r.own).length) list.append(el('div', 'empty', 'No other installation has posted yet. A key is believed once its posts have been checked against their files.'));
+  for (const row of rows) {
+    if (row.own) continue;
+    const item = el('div', 'item');
+    const main = el('div', 'main');
+    main.append(el('div', 'title', row.fingerprint));
+    const checked = (row.verified || 0) + ' posts checked and right' + (row.wrong ? ', ' + row.wrong + ' wrong' : '');
+    main.append(el('div', 'meta', row.manual ? 'trusted by hand · ' + checked : checked));
+    if (!row.manual) { item.append(main); list.append(item); continue; }
+    const btn = el('button', 'btn danger sm', 'Remove');
+    btn.type = 'button';
+    btn.onclick = () => forumDo('trust_remove', {fingerprint: row.fingerprint}, btn);
+    item.append(main, btn);
+    list.append(item);
+  }
+}
+
+async function forumDo(action, body, btn) {
+  if (btn) busy(btn, true);
+  say('forum-msg', '');
+  try {
+    const out = await api('/panel/forum/' + action, body || {});
+    if (out.message) say('forum-msg', out.message, 'ok');
+    else if (out.restart) say('forum-msg', 'Saved. Restart jellyfin-telegram to use the shared library.', 'ok');
+    else say('forum-msg', 'Saved.', 'ok');
+    draw(await api('/panel/state'));
+  } catch (e) {
+    say('forum-msg', e.message, 'bad');
+  }
+  if (btn) busy(btn, false);
 }
 let shareUrl = '';
 
@@ -918,6 +1000,29 @@ $('save-api').onclick = () => save({api_id:$('api_id').value, api_hash:$('api_ha
 $('save-channel').onclick = () => {
   if (!$('channel').value.trim()) { say('channel-msg', 'Paste the new channel link or id.', 'bad'); return; }
   save({channel:$('channel').value}, $('save-channel'), 'channel-msg');
+};
+$('forum-recheck').onclick = () => forumDo('recheck', {}, $('forum-recheck'));
+$('st-forum-tile').onclick = () => show('channel');
+$('forum-group').onchange = () => forumDo('group', {on: $('forum-group').checked});
+$('forum-delete').onchange = () => forumDo('originals', {on: $('forum-delete').checked});
+let trustUser = '';
+$('forum-lookup').onclick = async () => {
+  const name = $('forum-user').value.trim();
+  if (!name) { say('forum-msg', 'Enter a bot username.', 'bad'); return; }
+  $('forum-add').disabled = true;
+  try {
+    const out = await api('/panel/forum/trust_lookup', {username: name});
+    trustUser = name;
+    $('forum-add').disabled = false;
+    say('forum-msg', 'Fingerprint ' + out.fingerprint + '. Trust it if that matches the other installation.', 'ok');
+  } catch (e) {
+    trustUser = '';
+    say('forum-msg', e.message, 'bad');
+  }
+};
+$('forum-add').onclick = () => {
+  if (!trustUser) { say('forum-msg', 'Look the bot up first.', 'bad'); return; }
+  forumDo('trust_add', {username: trustUser}, $('forum-add'));
 };
 $('replace-channel').onclick = () => {
   $('main-edit').dataset.open = '1';

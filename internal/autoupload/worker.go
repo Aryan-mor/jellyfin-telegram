@@ -14,6 +14,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/diskspace"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
@@ -258,6 +259,19 @@ func (w *Worker) dispatch(ctx context.Context, rows []catalog.Upload) {
 		if f, ok, err := w.Cat.FindFile(ctx, row.FileName, row.Size); err == nil && ok {
 			_ = w.Cat.SetUpload(ctx, row.ID, catalog.UploadSent, f.MessageID, 0, "")
 			continue
+		}
+		if search, ok := w.Sessions.(interface {
+			InReady(context.Context, string) (bool, error)
+		}); ok {
+			if tag := naming.LookupTag(naming.Parse(row.FileName, row.Caption)); tag != "" {
+				yes, err := search.InReady(ctx, tag)
+				if err != nil {
+					w.warn("cannot search the library", err)
+				} else if yes {
+					_ = w.Cat.SetUpload(ctx, row.ID, catalog.UploadPresent, 0, 0, "already in Ready")
+					continue
+				}
+			}
 		}
 		var pick int64
 		var best time.Duration

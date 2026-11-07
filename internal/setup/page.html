@@ -63,6 +63,10 @@ code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); paddin
     <small>A code such as en, de, fr, fa or ja. Used to find subtitles. Leave empty to skip them.</small>
     <input id="language" maxlength="12" autocomplete="off">
 
+    <label>Shared library</label>
+    <small>Posts new files again with a signed caption, so several installations can share one library. Files already in the channel are left as they are. You can turn it on later in the panel.</small>
+    <div class="row"><label class="opt"><input type="checkbox" id="group"> Repost new files with a signed caption</label></div>
+
     <label>Extras</label>
     <small>Jellyfin is always installed. These are optional, need Docker, and can be added later by editing the settings file.</small>
     <div class="row"><label class="opt"><input type="checkbox" id="fladder"> Fladder, a nicer web client for Jellyfin</label></div>
@@ -115,7 +119,7 @@ const api = async (path, body) => {
   if (!res.ok) throw new Error(data.error || 'Something went wrong');
   return data;
 };
-const values = () => ({api_id:$('api_id').value, api_hash:$('api_hash').value, channel:$('channel').value, bots:$('bots').value, language:$('language').value, jellyfin_url:$('jellyfin_url').value, jellyfin_key:$('jellyfin_key').value, fladder:$('fladder').checked, seerr:$('seerr').checked, downloads:$('downloads').checked});
+const values = () => ({api_id:$('api_id').value, api_hash:$('api_hash').value, channel:$('channel').value, bots:$('bots').value, language:$('language').value, jellyfin_url:$('jellyfin_url').value, jellyfin_key:$('jellyfin_key').value, fladder:$('fladder').checked, seerr:$('seerr').checked, downloads:$('downloads').checked, group:$('group').checked});
 // The downloader is part of Seerr: it can only be ticked while Seerr is.
 $('seerr').onchange = () => { $('downloads').disabled = !$('seerr').checked; if (!$('seerr').checked) $('downloads').checked = false; };
 const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; return d; };

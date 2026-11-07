@@ -91,6 +91,11 @@ type Config struct {
 	UploadLongRestMinutes int
 	UploadDailyGB         int
 	UploadHours           string
+	// SignedLibrary turns on the shared library: new files are reposted with a signed caption that
+	// other installations can read. Off keeps the channel as it always was.
+	SignedLibrary bool
+	// InboxDeleteOriginals removes an inbox file after it has been copied to Ready.
+	InboxDeleteOriginals bool
 }
 
 // NeedsSetup reports that no Telegram details were given at all, as on a first run.
@@ -247,6 +252,8 @@ func Load(envPath string) (Config, error) {
 			break
 		}
 	}
+	c.SignedLibrary = strings.EqualFold(get("SIGNED_LIBRARY", ""), "true")
+	c.InboxDeleteOriginals = strings.EqualFold(get("INBOX_DELETE_ORIGINALS", ""), "true")
 	c.UploadHours = get("UPLOAD_HOURS", "")
 	if _, _, err := ParseHours(c.UploadHours); err != nil {
 		fail("UPLOAD_HOURS: %v", err)

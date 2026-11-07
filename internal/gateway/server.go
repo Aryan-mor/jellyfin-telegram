@@ -30,6 +30,8 @@ type Options struct {
 	Readahead int
 	// BackgroundBytesPerSecond limits requests marked with BackgroundHeader.
 	BackgroundBytesPerSecond int64
+	// Live resolves a message that is not in the catalog yet, so a probe can read an inbox file.
+	Live func(ctx context.Context, messageID int) (media.File, error)
 }
 
 // BackgroundHeader marks a request as background work. It matches the header the subtitle
@@ -80,6 +82,9 @@ func (s *server) stream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	file, err := files.Get(r.Context(), messageID)
+	if errors.Is(err, catalog.ErrNotFound) && channel == s.opts.ChannelID && s.opts.Live != nil {
+		file, err = s.opts.Live(r.Context(), messageID)
+	}
 	if errors.Is(err, catalog.ErrNotFound) {
 		http.NotFound(w, r)
 		return
