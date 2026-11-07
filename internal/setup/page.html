@@ -7,171 +7,550 @@
 <meta name="description" content="First-time setup for jellyfin-telegram.">
 <meta name="robots" content="noindex,nofollow">
 <meta name="referrer" content="no-referrer">
-<meta name="theme-color" content="#6a4fd6">
+<meta name="theme-color" content="#6d4ef0">
 <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%236a4fd6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232fa8e8%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23g%29%22%2F%3E%3Crect%20x%3D%2212%22%20y%3D%2216%22%20width%3D%2240%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%224%22%2F%3E%3Cpath%20d%3D%22M27%2026l12%206-12%206z%22%20fill%3D%22%23fff%22%2F%3E%3C%2Fsvg%3E">
 <link rel="apple-touch-icon" href="data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Cdefs%3E%3ClinearGradient%20id%3D%22g%22%20x1%3D%220%22%20y1%3D%220%22%20x2%3D%221%22%20y2%3D%221%22%3E%3Cstop%20offset%3D%220%22%20stop-color%3D%22%236a4fd6%22%2F%3E%3Cstop%20offset%3D%221%22%20stop-color%3D%22%232fa8e8%22%2F%3E%3C%2FlinearGradient%3E%3C%2Fdefs%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2215%22%20fill%3D%22url%28%23g%29%22%2F%3E%3Crect%20x%3D%2212%22%20y%3D%2216%22%20width%3D%2240%22%20height%3D%2232%22%20rx%3D%227%22%20fill%3D%22none%22%20stroke%3D%22%23fff%22%20stroke-width%3D%224%22%2F%3E%3Cpath%20d%3D%22M27%2026l12%206-12%206z%22%20fill%3D%22%23fff%22%2F%3E%3C%2Fsvg%3E">
 <style>
-:root { color-scheme: light dark; --bg:#f6f6f8; --card:#fff; --text:#1c1c22; --muted:#62626e; --line:#d8d8e0; --accent:#6a4fd6; --ok:#17803d; --bad:#c0262d; }
-@media (prefers-color-scheme: dark) { :root { --bg:#111116; --card:#1b1b22; --text:#ededf2; --muted:#a0a0ad; --line:#33333e; --accent:#a48cff; --ok:#4ac377; --bad:#ff7b80; } }
-* { box-sizing: border-box; }
-body { margin:0; background:var(--bg); color:var(--text); font:16px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif; padding:32px 16px; }
-main { max-width:560px; margin:0 auto; background:var(--card); border:1px solid var(--line); border-radius:12px; padding:28px; }
-h1 { font-size:22px; margin:0 0 4px; }
-p { margin:0 0 16px; color:var(--muted); }
-label { display:block; font-weight:600; margin:18px 0 4px; }
-small { display:block; color:var(--muted); font-weight:400; margin-bottom:6px; }
-input, textarea { width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px; background:transparent; color:inherit; font:inherit; }
-textarea { min-height:84px; font-family:ui-monospace,Consolas,monospace; font-size:14px; }
-a { color:var(--accent); }
-button { margin-top:22px; padding:10px 18px; border:0; border-radius:8px; background:var(--accent); color:#fff; font:inherit; font-weight:600; cursor:pointer; }
-button:disabled { opacity:.55; cursor:default; }
-details { margin-top:18px; color:var(--muted); }
-summary { cursor:pointer; }
-.result { margin-top:16px; font-size:15px; }
-.ok { color:var(--ok); } .bad { color:var(--bad); }
-.bar { height:8px; background:var(--line); border-radius:4px; overflow:hidden; margin:12px 0; }
-.bar i { display:block; height:100%; width:0; background:var(--accent); transition:width .3s; }
-code { font-family:ui-monospace,Consolas,monospace; background:var(--bg); padding:2px 6px; border-radius:5px; word-break:break-all; }
-.row { margin:8px 0; }
-.opt { display:flex; gap:8px; align-items:center; font-weight:400; margin:0; }
-.opt input { width:auto; }
-.sub { margin-left:26px; }
+:root {
+  --bg:#f4f4f8; --glow-1:rgba(124,92,255,.12); --glow-2:rgba(47,168,232,.10);
+  --surface:#fff; --surface-2:#f3f3f8; --surface-3:#ebebf3;
+  --text:#14141c; --muted:#646478; --faint:#9a9aae; --line:#e4e4ee; --line-strong:#d2d2e0;
+  --accent:#6d4ef0; --accent-2:#5b3be0; --accent-soft:#efebff; --ring:rgba(109,78,240,.22); --on-accent:#fff;
+  --grad:linear-gradient(135deg,#7c5cff 0%,#5b8cff 55%,#2fb5e8 100%);
+  --ok:#11804a; --ok-soft:#e1f6ea; --bad:#cf2d3a; --bad-soft:#fde8ea;
+  --shadow:0 1px 2px rgba(18,18,40,.04),0 2px 6px rgba(18,18,40,.04),0 24px 60px -24px rgba(18,18,40,.22);
+  --ease:cubic-bezier(.2,.8,.2,1);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg:#0b0b10; --glow-1:rgba(124,92,255,.18); --glow-2:rgba(47,168,232,.12);
+    --surface:#15151d; --surface-2:#1c1c26; --surface-3:#252531;
+    --text:#eeeef5; --muted:#a3a3b8; --faint:#6e6e84; --line:#262633; --line-strong:#353545;
+    --accent:#a18bff; --accent-2:#b7a6ff; --accent-soft:rgba(161,139,255,.14); --ring:rgba(161,139,255,.3); --on-accent:#120d24;
+    --ok:#4fd08a; --ok-soft:rgba(79,208,138,.13); --bad:#ff7d86; --bad-soft:rgba(255,125,134,.13);
+    --shadow:0 1px 2px rgba(0,0,0,.35),0 30px 80px -24px rgba(0,0,0,.7);
+  }
+}
+* { box-sizing:border-box; }
+body {
+  margin:0; min-height:100vh; color:var(--text); background:var(--bg); padding:40px 16px 64px;
+  font:15px/1.6 "Inter","Segoe UI Variable Text","Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  -webkit-font-smoothing:antialiased;
+}
+body::before {
+  content:""; position:fixed; inset:0; z-index:-1; pointer-events:none;
+  background:radial-gradient(800px 500px at 80% -10%,var(--glow-1),transparent 60%),radial-gradient(700px 480px at 0% 110%,var(--glow-2),transparent 60%);
+}
 [hidden] { display:none !important; }
+a { color:var(--accent); text-underline-offset:3px; }
+:focus-visible { outline:2px solid var(--accent); outline-offset:2px; border-radius:8px; }
+svg.i { width:20px; height:20px; flex:none; stroke:currentColor; fill:none; stroke-width:1.8; stroke-linecap:round; stroke-linejoin:round; }
+
+.wrap { max-width:600px; margin:0 auto; }
+.brand { display:flex; align-items:center; gap:12px; margin:0 0 26px; font-weight:750; letter-spacing:-.015em; }
+.brand small { display:block; font-weight:500; color:var(--muted); font-size:12.5px; letter-spacing:0; }
+.logo { width:40px; height:40px; border-radius:12px; background:var(--grad); display:grid; place-items:center; box-shadow:0 8px 20px -8px rgba(109,78,240,.75),inset 0 1px 0 rgba(255,255,255,.35); }
+.logo svg { stroke:#fff; }
+
+.stepper { display:flex; gap:6px; list-style:none; margin:0 0 18px; padding:5px; background:var(--surface); border:1px solid var(--line); border-radius:99px; }
+.stepper li { flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:7px 6px; border-radius:99px; font-size:13px; font-weight:650; color:var(--faint); transition:all .3s var(--ease); white-space:nowrap; }
+.stepper li b { width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:11px; background:var(--surface-3); color:var(--muted); }
+.stepper li.now { background:var(--grad); color:#fff; box-shadow:0 6px 16px -6px rgba(109,78,240,.6); }
+.stepper li.now b { background:rgba(255,255,255,.25); color:#fff; }
+.stepper li.past { color:var(--ok); } .stepper li.past b { background:var(--ok-soft); color:var(--ok); }
+
+.panel { background:var(--surface); border:1px solid var(--line); border-radius:20px; padding:30px; box-shadow:var(--shadow); }
+.panel > section, .sub-step { animation:in .35s var(--ease); }
+@keyframes in { from { opacity:0; transform:translateY(6px); } }
+h1 { font-size:25px; line-height:1.2; margin:0 0 6px; letter-spacing:-.025em; font-weight:780; }
+h2 { font-size:17px; margin:0 0 4px; letter-spacing:-.015em; }
+p { margin:0 0 18px; color:var(--muted); }
+.back { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13.5px; font-weight:600; margin:0 0 14px; }
+.back:hover { color:var(--text); }
+
+.choices { display:grid; gap:12px; }
+.choice {
+  all:unset; box-sizing:border-box; cursor:pointer; display:flex; gap:16px; align-items:flex-start; padding:18px; position:relative;
+  border:1.5px solid var(--line); border-radius:16px; background:var(--surface); transition:border-color .2s var(--ease),transform .2s var(--ease),box-shadow .2s var(--ease);
+}
+.choice:hover:not([aria-disabled="true"]) { border-color:var(--accent); transform:translateY(-2px); box-shadow:0 14px 30px -18px rgba(109,78,240,.6); }
+.choice[aria-disabled="true"] { opacity:.5; cursor:default; }
+.choice .ico { width:44px; height:44px; border-radius:12px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); flex:none; }
+.choice.main .ico { background:var(--grad); color:#fff; box-shadow:0 8px 18px -8px rgba(109,78,240,.75); }
+.choice strong { display:block; font-size:16px; letter-spacing:-.01em; }
+.choice span { display:block; color:var(--muted); font-size:14px; margin-top:2px; }
+.tag { position:absolute; top:14px; right:14px; font-size:11px; font-weight:700; padding:2px 9px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
+
+.field { margin:0 0 18px; }
+label.lbl { display:block; font-weight:620; font-size:14px; margin:0 0 6px; }
+.hint { display:block; color:var(--muted); font-size:13px; margin:-2px 0 8px; }
+input, textarea {
+  width:100%; padding:10px 13px; min-height:44px; border:1px solid var(--line-strong); border-radius:11px; background:var(--surface);
+  color:inherit; font:inherit; transition:border-color .15s var(--ease),box-shadow .15s var(--ease);
+}
+textarea { min-height:96px; resize:vertical; font-family:"JetBrains Mono","Cascadia Code",ui-monospace,Consolas,monospace; font-size:13.5px; }
+input::placeholder, textarea::placeholder { color:var(--faint); }
+input:hover, textarea:hover { border-color:var(--faint); }
+input:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 4px var(--ring); }
+input.code { font-size:22px; letter-spacing:.35em; text-align:center; font-weight:650; }
+.pair { display:grid; gap:10px; grid-template-columns:1fr 2fr; }
+
+.btn {
+  all:unset; box-sizing:border-box; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px;
+  padding:11px 20px; min-height:44px; border-radius:11px; font-weight:650; color:var(--on-accent); background:var(--accent);
+  background-image:linear-gradient(180deg,rgba(255,255,255,.14),rgba(255,255,255,0));
+  box-shadow:0 1px 2px rgba(18,18,40,.15),0 8px 18px -8px var(--accent),inset 0 1px 0 rgba(255,255,255,.2);
+  transition:background-color .15s var(--ease),transform .08s var(--ease);
+}
+.btn:hover { background-color:var(--accent-2); }
+.btn:active { transform:translateY(1px); }
+.btn.ghost { background:var(--surface); background-image:none; color:var(--text); border:1px solid var(--line-strong); box-shadow:none; }
+.btn.ghost:hover { background:var(--surface-2); }
+.btn.wide { width:100%; }
+.btn[disabled] { opacity:.55; pointer-events:none; }
+.btn.busy::after { content:""; width:15px; height:15px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:spin .7s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg); } }
+.actions { display:flex; gap:10px; flex-wrap:wrap; margin-top:22px; }
+.actions .btn { flex:1 1 180px; }
+
+details.more { margin:4px 0 18px; border:1px solid var(--line); border-radius:12px; background:var(--surface-2); }
+details.more summary { cursor:pointer; padding:11px 14px; font-weight:600; font-size:14px; list-style:none; display:flex; align-items:center; }
+details.more summary::-webkit-details-marker { display:none; }
+details.more summary::after { content:""; margin-left:auto; width:7px; height:7px; border-right:2px solid var(--muted); border-bottom:2px solid var(--muted); transform:rotate(45deg); transition:transform .2s; }
+details.more[open] summary::after { transform:rotate(-135deg); }
+details.more .body { padding:0 14px 14px; }
+
+.toggle { display:flex; align-items:flex-start; gap:14px; padding:14px 0; border-top:1px solid var(--line); cursor:pointer; }
+.toggle:first-of-type { border-top:0; }
+.toggle .txt { flex:1; }
+.toggle strong { display:block; font-size:14.5px; }
+.toggle span { display:block; font-size:13px; color:var(--muted); }
+.toggle input { appearance:none; -webkit-appearance:none; flex:none; width:44px; height:26px; min-height:0; padding:0; margin-top:2px; border:0; border-radius:99px; background:var(--line-strong); position:relative; cursor:pointer; transition:background .25s var(--ease); }
+.toggle input::after { content:""; position:absolute; top:3px; left:3px; width:20px; height:20px; border-radius:50%; background:#fff; box-shadow:0 1px 3px rgba(0,0,0,.3); transition:transform .25s var(--ease); }
+.toggle input:checked { background:var(--grad); }
+.toggle input:checked::after { transform:translateX(18px); }
+.toggle input:disabled { opacity:.45; cursor:default; }
+.toggle.indent { padding-left:22px; }
+.box { border:1px solid var(--line); border-radius:14px; padding:4px 16px; margin:0 0 18px; }
+
+.msg { margin-top:14px; padding:11px 14px; border-radius:11px; font-size:14px; background:var(--surface-2); color:var(--muted); }
+.msg:empty { display:none; }
+.msg.bad { background:var(--bad-soft); color:var(--bad); }
+.msg.ok { background:var(--ok-soft); color:var(--ok); }
+.checks { display:grid; gap:6px; margin-top:14px; }
+.checks:empty { display:none; }
+.check { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:10px; background:var(--surface-2); font-size:14px; overflow-wrap:anywhere; }
+.check::before { content:"\2713"; flex:none; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:11px; font-weight:800; background:var(--ok-soft); color:var(--ok); }
+.check.bad::before { content:"!"; background:var(--bad-soft); color:var(--bad); }
+.check.wait::before { content:""; border:2px solid var(--accent); border-right-color:transparent; background:none; width:14px; height:14px; animation:spin .8s linear infinite; }
+
+.bar { height:8px; background:var(--surface-3); border-radius:99px; overflow:hidden; margin:18px 0 8px; }
+.bar i { display:block; height:100%; width:0; background:var(--grad); border-radius:99px; transition:width .5s var(--ease); }
+.pct { font-size:13px; color:var(--muted); font-variant-numeric:tabular-nums; }
+.done-ico { width:56px; height:56px; border-radius:50%; display:grid; place-items:center; background:var(--ok-soft); color:var(--ok); margin:0 0 16px; }
+.done-ico svg { width:28px; height:28px; stroke-width:2.4; }
+.url { display:flex; align-items:center; gap:8px; padding:10px 12px; border:1px solid var(--line); border-radius:11px; margin:0 0 8px; font-family:"JetBrains Mono","Cascadia Code",ui-monospace,Consolas,monospace; font-size:13.5px; overflow-wrap:anywhere; }
+.cred { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; padding:14px 16px; border-radius:12px; background:var(--accent-soft); margin:16px 0 0; font-size:14px; }
+.cred code { font-family:"JetBrains Mono","Cascadia Code",ui-monospace,Consolas,monospace; font-weight:650; overflow-wrap:anywhere; }
+.links { display:grid; gap:8px; margin-top:18px; }
+.links a { display:flex; align-items:center; gap:8px; padding:11px 14px; border-radius:11px; background:var(--surface-2); text-decoration:none; font-weight:600; }
+.links a:hover { background:var(--surface-3); }
+.foot { text-align:center; color:var(--faint); font-size:12.5px; margin-top:20px; }
+
+@media (max-width:520px) {
+  body { padding:20px 12px 48px; }
+  .panel { padding:22px 18px; border-radius:18px; }
+  .stepper li span { display:none; }
+  .pair { grid-template-columns:1fr; }
+  h1 { font-size:22px; }
+}
+@media (prefers-reduced-motion: reduce) { * { animation:none !important; transition:none !important; } }
 </style>
 </head>
 <body>
-<main>
-  <section id="form">
-    <h1>Set up jellyfin-telegram</h1>
-    <p>Enter your Telegram details. Everything else is automatic.</p>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-play" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M10 9l5 3-5 3z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M13 2L4 14h7l-1 8 9-12h-7z"/></symbol>
+    <symbol id="i-sliders" viewBox="0 0 24 24"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0"/><circle cx="16" cy="6" r="2"/><circle cx="10" cy="12" r="2"/><circle cx="18" cy="18" r="2"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
+    <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></symbol>
+  </defs>
+</svg>
 
-    <label for="api_id">API ID and hash</label>
-    <small>From <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>, under API development tools.</small>
-    <input id="api_id" inputmode="numeric" placeholder="API ID" autocomplete="off">
-    <div style="height:8px"></div>
-    <input id="api_hash" placeholder="API hash" autocomplete="off">
+<div class="wrap">
+  <div class="brand"><span class="logo"><svg class="i"><use href="#i-play"/></svg></span><div>jellyfin-telegram<small>First-time setup</small></div></div>
 
-    <label for="channel">Your channel</label>
-    <small>In Telegram, open any message in the channel, choose Copy Link, and paste it here. Or paste the channel id: forward any message from the channel to <a href="https://t.me/id_bot" target="_blank" rel="noreferrer">@id_bot</a> or <a href="https://t.me/getidsbot" target="_blank" rel="noreferrer">@getidsbot</a>, and it replies with a number that starts with -100.</small>
-    <input id="channel" placeholder="https://t.me/c/1234567890/5" autocomplete="off">
+  <ol class="stepper" id="stepper">
+    <li data-step="1"><b>1</b><span>Telegram</span></li>
+    <li data-step="2"><b>2</b><span>Preferences</span></li>
+    <li data-step="3"><b>3</b><span>Install</span></li>
+  </ol>
 
-    <label for="bots">Bots</label>
-    <small>Create them with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> and make each one an admin of the channel. One token per line. More bots mean faster playback.</small>
-    <textarea id="bots" placeholder="123456789:AAE..." autocomplete="off" spellcheck="false"></textarea>
+  <div class="panel">
+    <!-- Step 1: choose a way -->
+    <section id="choose">
+      <h1>Connect Telegram</h1>
+      <p>Your videos live in a private Telegram channel, and bots read them for playback. Choose how to set that up.</p>
+      <div class="choices">
+        <button class="choice main" id="pick-auto" type="button">
+          <span class="ico"><svg class="i"><use href="#i-bolt"/></svg></span>
+          <div><strong>Automatic</strong><span>Sign in with your phone number. The channel and bots are found or created for you.</span></div>
+          <span class="tag">Recommended</span>
+        </button>
+        <button class="choice" id="pick-manual" type="button">
+          <span class="ico"><svg class="i"><use href="#i-sliders"/></svg></span>
+          <div><strong>Manual</strong><span>Enter your own api_id, channel and bot tokens.</span></div>
+        </button>
+      </div>
+      <div id="auto-off" class="msg" hidden>The automatic setup is not available in this run. Use the manual way.</div>
+    </section>
 
-    <label for="language">Your language</label>
-    <small>A code such as en, de, fr, fa or ja. Used to find subtitles. Leave empty to skip them.</small>
-    <input id="language" maxlength="12" autocomplete="off">
+    <!-- Step 1a: automatic -->
+    <section id="auto" hidden>
+      <button class="back" type="button" data-back="choose"><svg class="i"><use href="#i-back"/></svg>Back</button>
 
-    <label>Shared library</label>
-    <small>Posts new files again with a signed caption, so several installations can share one library. Files already in the channel are left as they are. You can turn it on later in the panel.</small>
-    <div class="row"><label class="opt"><input type="checkbox" id="group"> Repost new files with a signed caption</label></div>
+      <div class="sub-step" id="a-phone">
+        <h1>Sign in to Telegram</h1>
+        <p>Use the account that will own the library channel and its bots. It stays signed in for downloads and channel imports.</p>
+        <div class="field">
+          <label class="lbl" for="phone">Phone number</label>
+          <span class="hint">With the country code. Telegram sends a code to your Telegram app.</span>
+          <input id="phone" inputmode="tel" autocomplete="off" placeholder="+49 151 1234 5678">
+        </div>
+        <details class="more">
+          <summary>Advanced: use my own api_id</summary>
+          <div class="body">
+            <span class="hint">Leave empty to use the one built into this program. Get your own at <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>.</span>
+            <div class="pair"><input id="a_api_id" inputmode="numeric" placeholder="API ID" autocomplete="off"><input id="a_api_hash" placeholder="API hash" autocomplete="off"></div>
+          </div>
+        </details>
+        <button class="btn wide" id="send-phone" type="button">Send code</button>
+      </div>
 
-    <label>Extras</label>
-    <small>Jellyfin is always installed. These are optional, need Docker, and can be added later by editing the settings file.</small>
-    <div class="row"><label class="opt"><input type="checkbox" id="fladder"> Fladder, a nicer web client for Jellyfin</label></div>
-    <div class="row"><label class="opt"><input type="checkbox" id="seerr"> Seerr, to request movies and shows</label></div>
-    <div class="row sub"><label class="opt"><input type="checkbox" id="downloads" disabled> Downloader, so requests are fetched and added by themselves</label>
-      <small>Part of Seerr. After setup, sign in a Telegram account in the panel so it can post to the channel.</small></div>
+      <div class="sub-step" id="a-code" hidden>
+        <h1>Enter the code</h1>
+        <p>Telegram sent a login code to your Telegram app, in the chat named Telegram.</p>
+        <div class="field"><input id="tcode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" aria-label="Login code"></div>
+        <button class="btn wide" id="send-code" type="button">Continue</button>
+      </div>
 
-    <details>
-      <summary>I already run Jellyfin</summary>
-      <small style="margin-top:8px">Leave these empty to get a private Jellyfin set up for you.</small>
-      <label for="jellyfin_url">Jellyfin address</label>
-      <input id="jellyfin_url" placeholder="http://127.0.0.1:8096" autocomplete="off">
-      <label for="jellyfin_key">API key</label>
-      <input id="jellyfin_key" autocomplete="off">
-    </details>
+      <div class="sub-step" id="a-pass" hidden>
+        <h1>Two-step password</h1>
+        <p>This account has a cloud password. It is sent to Telegram once and never saved.</p>
+        <div class="field"><input id="tpass" type="password" autocomplete="off" aria-label="Two-step password"></div>
+        <button class="btn wide" id="send-pass" type="button">Continue</button>
+      </div>
 
-    <button id="go">Check and continue</button>
-    <div id="result" class="result"></div>
-  </section>
+      <div class="sub-step" id="a-ask" hidden>
+        <h1>You are signed in</h1>
+        <p>Have you set up a library channel with this account before?</p>
+        <div class="choices">
+          <button class="choice" id="ask-yes" type="button"><div><strong>Yes, use my channel</strong><span>Your bots that are admins there are found and reused.</span></div></button>
+          <button class="choice" id="ask-no" type="button"><div><strong>No, create everything</strong><span>A private channel and new bots are made and connected.</span></div></button>
+        </div>
+      </div>
 
-  <section id="progress" hidden>
-    <h1 id="stage">Starting</h1>
-    <p>You can leave this page open. The first start downloads Jellyfin, and any extra you ticked.</p>
-    <div class="bar"><i id="fill"></i></div>
-    <div id="perror" class="result bad"></div>
-  </section>
+      <div class="sub-step" id="a-yes" hidden>
+        <h1>Your channel</h1>
+        <p>Paste a link to any message in it, its @username, or its id. This account must be a member.</p>
+        <div class="field"><input id="a_channel" placeholder="https://t.me/c/1234567890/5" autocomplete="off"></div>
+        <div class="actions" style="margin-top:0">
+          <button class="btn" id="find" type="button">Find my bots</button>
+          <button class="btn ghost" id="make-here" type="button" hidden>Create bots in this channel</button>
+        </div>
+      </div>
 
-  <section id="done" hidden>
-    <h1>Ready</h1>
-    <p>Open Jellyfin at one of these addresses, in a browser or any Jellyfin app.</p>
-    <div id="urls"></div>
-    <div id="login" hidden>
-      <label>Sign in with</label>
-      <div class="row">User <code id="user"></code></div>
-      <div class="row">Password <code id="password"></code></div>
-      <small>Keep this password. You can change it in Jellyfin.</small>
-    </div>
-    <button id="open">Open Jellyfin</button>
-    <p id="seerr" hidden><a href="/seerr/">Request movies and shows</a>. Sign in with the same Jellyfin user.</p>
-    <p id="fladder" hidden><a href="/fladder/">Open Fladder</a>. Jellyfin and Seerr are already filled in.</p>
-    <p><a id="panel" href="">Add bots, or open Jellyfin away from home</a></p>
-  </section>
-</main>
+      <div class="sub-step" id="a-no" hidden>
+        <h1>Create your library</h1>
+        <p>A private channel is created, then the bots. Each bot takes a few seconds.</p>
+        <div class="field"><label class="lbl" for="a_title">Channel name</label><input id="a_title" value="Jellyfin library" maxlength="60" autocomplete="off"></div>
+        <div class="field"><label class="lbl" for="a_bots">Number of bots</label><span class="hint">More bots mean faster playback. 1 to 10.</span><input id="a_bots" type="number" min="1" max="10" value="3"></div>
+        <button class="btn wide" id="make" type="button">Create channel and bots</button>
+      </div>
+
+      <div class="sub-step" id="a-work" hidden>
+        <h1>Working on it</h1>
+        <p>Keep this page open.</p>
+      </div>
+
+      <div id="a-log" class="checks"></div>
+      <div id="a-err" class="msg bad"></div>
+      <button class="btn wide" id="a-next" type="button" hidden style="margin-top:18px">Continue</button>
+    </section>
+
+    <!-- Step 1b: manual -->
+    <section id="manual" hidden>
+      <button class="back" type="button" data-back="choose"><svg class="i"><use href="#i-back"/></svg>Back</button>
+      <h1>Telegram details</h1>
+      <p>Everything else is set up for you.</p>
+      <div class="field">
+        <label class="lbl" for="api_id">API ID and hash</label>
+        <span class="hint">From <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>, under API development tools.</span>
+        <div class="pair"><input id="api_id" inputmode="numeric" placeholder="API ID" autocomplete="off"><input id="api_hash" placeholder="API hash" autocomplete="off"></div>
+      </div>
+      <div class="field">
+        <label class="lbl" for="channel">Your channel</label>
+        <span class="hint">In Telegram, open any message in the channel, choose Copy Link and paste it. Or the id that starts with -100, from <a href="https://t.me/id_bot" target="_blank" rel="noreferrer">@id_bot</a>.</span>
+        <input id="channel" placeholder="https://t.me/c/1234567890/5" autocomplete="off">
+      </div>
+      <div class="field">
+        <label class="lbl" for="bots">Bot tokens</label>
+        <span class="hint">Create them with <a href="https://t.me/BotFather" target="_blank" rel="noreferrer">@BotFather</a> and make each one an admin of the channel. One per line.</span>
+        <textarea id="bots" placeholder="123456789:AAE..." autocomplete="off" spellcheck="false"></textarea>
+      </div>
+      <button class="btn wide" id="check" type="button">Check with Telegram</button>
+      <div id="m-log" class="checks"></div>
+      <div id="m-err" class="msg bad"></div>
+    </section>
+
+    <!-- Step 2: preferences -->
+    <section id="prefs" hidden>
+      <button class="back" type="button" data-back="telegram"><svg class="i"><use href="#i-back"/></svg>Back</button>
+      <h1>Preferences</h1>
+      <p>Jellyfin is always installed. The rest is optional and can be changed later in the panel.</p>
+      <div class="field">
+        <label class="lbl" for="language">Subtitle language</label>
+        <span class="hint">A code such as en, de, fr, fa or ja. Leave empty to skip subtitles.</span>
+        <input id="language" maxlength="12" autocomplete="off" placeholder="en">
+      </div>
+      <div class="box">
+        <label class="toggle"><span class="txt"><strong>Shared library</strong><span>Repost new files with a signed caption, so several installations can share one library.</span></span><input type="checkbox" id="group"></label>
+        <label class="toggle"><span class="txt"><strong>Fladder</strong><span>A nicer web client for Jellyfin. Needs Docker.</span></span><input type="checkbox" id="fladder"></label>
+        <label class="toggle"><span class="txt"><strong>Seerr</strong><span>Request movies and shows. Needs Docker.</span></span><input type="checkbox" id="seerr"></label>
+        <label class="toggle indent"><span class="txt"><strong>Downloader</strong><span>Requests are fetched and added by themselves. Part of Seerr.</span></span><input type="checkbox" id="downloads" disabled></label>
+      </div>
+      <details class="more">
+        <summary>I already run Jellyfin</summary>
+        <div class="body">
+          <span class="hint">Leave empty to get a private Jellyfin set up for you.</span>
+          <div class="field"><label class="lbl" for="jellyfin_url">Jellyfin address</label><input id="jellyfin_url" placeholder="http://127.0.0.1:8096" autocomplete="off"></div>
+          <div class="field" style="margin:0"><label class="lbl" for="jellyfin_key">API key</label><input id="jellyfin_key" autocomplete="off"></div>
+        </div>
+      </details>
+      <button class="btn wide" id="go" type="button">Install</button>
+      <div id="p-err" class="msg bad"></div>
+    </section>
+
+    <!-- Step 3: install -->
+    <section id="progress" hidden>
+      <h1 id="stage">Starting</h1>
+      <p>You can leave this page open. The first start downloads Jellyfin and any extra you chose.</p>
+      <div class="bar"><i id="fill"></i></div>
+      <div class="pct" id="pct">0%</div>
+      <div id="perror" class="msg bad"></div>
+    </section>
+
+    <section id="done" hidden>
+      <div class="done-ico"><svg class="i"><use href="#i-check"/></svg></div>
+      <h1>All set</h1>
+      <p>Open Jellyfin at one of these addresses, in a browser or any Jellyfin app.</p>
+      <div id="urls"></div>
+      <div id="login" class="cred" hidden>
+        <span>User</span><code id="user"></code>
+        <span>Password</span><code id="password"></code>
+      </div>
+      <button class="btn wide" id="open" type="button" style="margin-top:18px">Open Jellyfin</button>
+      <div class="links">
+        <a id="seerr-link" href="/seerr/" hidden><svg class="i"><use href="#i-ext"/></svg>Request movies and shows in Seerr</a>
+        <a id="fladder-link" href="/fladder/" hidden><svg class="i"><use href="#i-ext"/></svg>Open Fladder</a>
+        <a id="panel" href=""><svg class="i"><use href="#i-ext"/></svg>Open the panel to add bots or watch away from home</a>
+      </div>
+    </section>
+  </div>
+  <div class="foot">This page only works with the code printed on the console.</div>
+</div>
+
 <script>
 const code = new URLSearchParams(location.search).get('code') || '';
 const $ = id => document.getElementById(id);
-const api = async (path, body) => {
-  const res = await fetch(path + '?code=' + encodeURIComponent(code), body === undefined ? {} : {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
-  const data = await res.json();
+
+async function api(path, body) {
+  const init = body === undefined ? {} : {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)};
+  const res = await fetch(path + '?code=' + encodeURIComponent(code), init);
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || 'Something went wrong');
   return data;
-};
-const values = () => ({api_id:$('api_id').value, api_hash:$('api_hash').value, channel:$('channel').value, bots:$('bots').value, language:$('language').value, jellyfin_url:$('jellyfin_url').value, jellyfin_key:$('jellyfin_key').value, fladder:$('fladder').checked, seerr:$('seerr').checked, downloads:$('downloads').checked, group:$('group').checked});
-// The downloader is part of Seerr: it can only be ticked while Seerr is.
-$('seerr').onchange = () => { $('downloads').disabled = !$('seerr').checked; if (!$('seerr').checked) $('downloads').checked = false; };
-const line = (text, cls) => { const d = document.createElement('div'); d.textContent = text; if (cls) d.className = cls; return d; };
+}
 
-$('go').onclick = async () => {
-  const out = $('result'), btn = $('go');
-  out.replaceChildren(line('Checking with Telegram. This can take a minute.'));
-  btn.disabled = true;
-  try {
-    const r = await api('/setup/verify', values());
-    out.replaceChildren();
-    let usable = 0;
-    for (const b of r.bots) {
-      if (b.ok) usable++;
-      out.append(line((b.ok ? 'OK  ' : 'Problem  ') + b.name + (b.error ? ': ' + b.error : ''), b.ok ? 'ok' : 'bad'));
-    }
-    if (!usable) throw new Error('No bot can read the channel. Make each bot an admin of it.');
-    out.append(line('Channel "' + r.channel + '": ' + r.videos + ' videos found', 'ok'));
-    await api('/setup/save', values());
-    $('form').hidden = true;
-    $('progress').hidden = false;
-    poll();
-  } catch (e) {
-    out.append(line(e.message, 'bad'));
-    btn.disabled = false;
+const item = (text, cls) => { const d = document.createElement('div'); d.className = 'check' + (cls ? ' ' + cls : ''); d.textContent = text; return d; };
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+// Runs fn with btn showing it is busy. A failure is shown in errBox.
+async function busy(btn, errBox, fn) {
+  errBox.textContent = '';
+  btn.disabled = true; btn.classList.add('busy');
+  try { await fn(); } catch (e) { errBox.textContent = e.message; }
+  btn.disabled = false; btn.classList.remove('busy');
+}
+
+// ---- views and the stepper
+const views = {choose: 1, auto: 1, manual: 1, prefs: 2, progress: 3, done: 3};
+let mode = 'manual';
+function view(name) {
+  for (const v of Object.keys(views)) $(v).hidden = v !== name;
+  const now = views[name];
+  for (const li of $('stepper').children) {
+    const n = Number(li.dataset.step);
+    li.className = n === now ? (name === 'done' ? 'past' : 'now') : n < now ? 'past' : '';
   }
+  window.scrollTo({top: 0, behavior: 'smooth'});
+}
+for (const b of document.querySelectorAll('[data-back]')) {
+  b.onclick = () => view(b.dataset.back === 'telegram' ? mode : b.dataset.back);
+}
+
+// ---- shared: what is checked and saved
+const values = () => ({
+  auto: mode === 'auto',
+  api_id: $('api_id').value, api_hash: $('api_hash').value, channel: $('channel').value, bots: $('bots').value,
+  language: $('language').value, jellyfin_url: $('jellyfin_url').value, jellyfin_key: $('jellyfin_key').value,
+  fladder: $('fladder').checked, seerr: $('seerr').checked, downloads: $('downloads').checked, group: $('group').checked,
+});
+
+// verify asks Telegram whether the bots can read the channel, and lists the answer in log.
+async function verify(log) {
+  log.append(item('Checking every bot against the channel', 'wait'));
+  const r = await api('/setup/verify', values());
+  log.lastChild.remove();
+  let usable = 0;
+  for (const b of r.bots) {
+    if (b.ok) usable++;
+    log.append(item(b.name + (b.error ? ': ' + b.error : ''), b.ok ? '' : 'bad'));
+  }
+  if (!usable) throw new Error('No bot can read the channel. Make each bot an admin of it.');
+  log.append(item('Channel "' + r.channel + '": ' + r.videos + ' videos found'));
+}
+
+// ---- manual
+$('pick-manual').onclick = () => { mode = 'manual'; view('manual'); };
+$('check').onclick = () => busy($('check'), $('m-err'), async () => {
+  $('m-log').replaceChildren();
+  await verify($('m-log'));
+  await sleep(600);
+  view('prefs');
+});
+
+// ---- automatic
+const autoSteps = ['a-phone', 'a-code', 'a-pass', 'a-ask', 'a-yes', 'a-no', 'a-work'];
+function autoStep(name) {
+  for (const s of autoSteps) $(s).hidden = s !== name;
+  $('a-err').textContent = '';
+}
+function signedIn(r) {
+  if (r.step === 'code') { autoStep('a-code'); $('tcode').focus(); return; }
+  if (r.step === 'password') { autoStep('a-pass'); $('tpass').focus(); return; }
+  autoStep('a-ask');
+  if (r.warning) $('a-err').textContent = r.warning;
+}
+
+$('pick-auto').onclick = async () => {
+  if ($('pick-auto').getAttribute('aria-disabled') === 'true') return;
+  mode = 'auto';
+  view('auto');
+  $('a-log').replaceChildren(); $('a-next').hidden = true;
+  try {
+    const info = await api('/setup/auto/info');
+    if (info.found) return found(info.found);
+    autoStep(info.signed_in ? 'a-ask' : 'a-phone');
+  } catch (e) { $('a-err').textContent = e.message; }
 };
+
+$('send-phone').onclick = () => busy($('send-phone'), $('a-err'), async () =>
+  signedIn(await api('/setup/auto/login', {phone: $('phone').value, api_id: $('a_api_id').value, api_hash: $('a_api_hash').value})));
+$('send-code').onclick = () => busy($('send-code'), $('a-err'), async () => signedIn(await api('/setup/auto/login', {code: $('tcode').value})));
+$('send-pass').onclick = () => busy($('send-pass'), $('a-err'), async () => signedIn(await api('/setup/auto/login', {password: $('tpass').value})));
+$('ask-yes').onclick = () => { autoStep('a-yes'); $('a_channel').focus(); };
+$('ask-no').onclick = () => autoStep('a-no');
+
+// found shows the channel and bots, checks them, and offers the next step.
+async function found(f) {
+  autoStep('a-work');
+  const log = $('a-log');
+  log.replaceChildren(item('Channel "' + f.title + '"'), ...f.bots.map(b => item('Bot @' + b)));
+  try {
+    await verify(log);
+    $('a-work').hidden = true;
+    $('a-next').hidden = false;
+  } catch (e) { $('a-err').textContent = e.message; }
+}
+
+$('find').onclick = () => busy($('find'), $('a-err'), async () => {
+  $('make-here').hidden = true;
+  const f = await api('/setup/auto/existing', {channel: $('a_channel').value});
+  if (f.bots.length) return found(f);
+  const theirs = f.skipped && f.skipped.length ? ' Admin bots you do not own: ' + f.skipped.map(b => '@' + b).join(', ') + '.' : '';
+  $('make-here').hidden = false;
+  throw new Error('None of your bots is an admin of "' + f.title + '".' + theirs);
+});
+
+// create starts the background job and follows its progress.
+async function create(body) {
+  const bots = Math.min(10, Math.max(1, parseInt($('a_bots').value, 10) || 3));
+  await api('/setup/auto/create', {...body, bots});
+  autoStep('a-work');
+  const log = $('a-log');
+  for (;;) {
+    await sleep(1500);
+    let j;
+    try { j = await api('/setup/auto/job'); } catch (e) { continue; }
+    log.replaceChildren(...j.progress.map((p, i) => item(p, j.running && i === j.progress.length - 1 ? 'wait' : '')));
+    if (j.running) continue;
+    if (j.found) await found(j.found);
+    if (j.error) {
+      $('a-err').textContent = j.error + (j.found ? ' What was made so far is kept, and you can continue with it.' : '');
+      if (!j.found) autoStep('a-ask');
+    }
+    return;
+  }
+}
+$('make').onclick = () => busy($('make'), $('a-err'), () => create({title: $('a_title').value}));
+$('make-here').onclick = () => busy($('make-here'), $('a-err'), () => create({channel: $('a_channel').value}));
+$('a-next').onclick = () => view('prefs');
+
+// ---- preferences and install
+// The downloader is part of Seerr: it can only be on while Seerr is.
+$('seerr').onchange = () => { $('downloads').disabled = !$('seerr').checked; if (!$('seerr').checked) $('downloads').checked = false; };
+$('go').onclick = () => busy($('go'), $('p-err'), async () => {
+  await api('/setup/save', values());
+  view('progress');
+  poll();
+});
 
 async function poll() {
   try {
     const s = await api('/setup/status');
-    if (s.error) { $('perror').textContent = s.error; }
+    $('perror').textContent = s.error || '';
     if (s.ready) return finish(s);
     if (s.stage) $('stage').textContent = s.stage;
-    $('fill').style.width = (s.percent || 0) + '%';
-  } catch (e) { /* the server is busy; try again */ }
+    const pct = Math.max(0, Math.min(100, s.percent || 0));
+    $('fill').style.width = pct + '%';
+    $('pct').textContent = pct + '%';
+  } catch (e) { /* the server is busy starting; try again */ }
   setTimeout(poll, 1000);
 }
 
 function finish(s) {
-  $('form').hidden = true; $('progress').hidden = true; $('done').hidden = false;
-  const urls = $('urls');
-  urls.replaceChildren();
-  for (const u of s.urls || []) { const r = document.createElement('div'); r.className = 'row'; const c = document.createElement('code'); c.textContent = u; r.append(c); urls.append(r); }
+  view('done');
+  $('urls').replaceChildren(...(s.urls || []).map(u => { const d = document.createElement('div'); d.className = 'url'; d.textContent = u; return d; }));
   if (s.password) { $('login').hidden = false; $('user').textContent = s.user; $('password').textContent = s.password; }
-  if (s.seerr) $('seerr').hidden = false;
-  if (s.fladder) $('fladder').hidden = false;
+  $('seerr-link').hidden = !s.seerr;
+  $('fladder-link').hidden = !s.fladder;
   $('open').onclick = () => { location.href = '/'; };
   $('panel').href = '/panel?code=' + encodeURIComponent(code);
 }
 
-api('/setup/status').then(s => { if (s.stage || s.ready) { $('form').hidden = true; $('progress').hidden = false; poll(); } }).catch(() => {});
+// Enter moves on in every single-field step.
+for (const [input, btn] of [['phone', 'send-phone'], ['tcode', 'send-code'], ['tpass', 'send-pass'], ['a_channel', 'find']]) {
+  $(input).addEventListener('keydown', e => { if (e.key === 'Enter') $(btn).click(); });
+}
+
+api('/setup/auto/info').then(i => {
+  if (!i.available) { $('pick-auto').setAttribute('aria-disabled', 'true'); $('auto-off').hidden = false; }
+}).catch(() => {});
+api('/setup/status').then(s => { if (s.stage || s.ready) { view('progress'); poll(); } }).catch(() => {});
+view('choose');
 </script>
 </body>
 </html>

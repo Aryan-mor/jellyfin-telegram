@@ -227,14 +227,14 @@ func TestEnableNeedsASession(t *testing.T) {
 func TestATunnelOnThisMachineIsNotTrusted(t *testing.T) {
 	local := httptest.NewRequest(http.MethodPost, "/panel/downloads/login", nil)
 	local.RemoteAddr = "127.0.0.1:5000"
-	if !trustedClient(local) {
+	if !setup.TrustedClient(local) {
 		t.Fatal("this computer was refused")
 	}
 	for _, header := range []string{"X-Forwarded-For", "Forwarded", "X-Real-Ip"} {
 		tunnel := httptest.NewRequest(http.MethodPost, "/panel/downloads/login", nil)
 		tunnel.RemoteAddr = "127.0.0.1:5000"
 		tunnel.Header.Set(header, "203.0.113.9")
-		if trustedClient(tunnel) {
+		if setup.TrustedClient(tunnel) {
 			t.Errorf("a request relayed with %s passed the login check", header)
 		}
 	}

@@ -48,6 +48,8 @@ type Manager struct {
 	root     context.Context
 	sessions map[int64]*live
 	pending  *pendingLogin
+	// running counts the session loops, so Stop can wait until every connection is closed.
+	running sync.WaitGroup
 }
 
 type live struct {
@@ -141,7 +143,11 @@ func (m *Manager) start(parent context.Context, store *fileStore, meta Meta) {
 	}
 	m.sessions[meta.UserID] = lv
 	m.mu.Unlock()
-	go m.serve(ctx, lv)
+	m.running.Add(1)
+	go func() {
+		defer m.running.Done()
+		m.serve(ctx, lv)
+	}()
 }
 
 // errNotAdmin means the account cannot post in the channel right now. The session is kept and
@@ -239,6 +245,11 @@ func (m *Manager) prepare(ctx context.Context, api *tg.Client, lv *live) error {
 	lv.meta.Username = status.Username
 	lv.meta.Premium = status.Premium
 	lv.meta.Phone = firstNonEmpty(lv.meta.Phone, status.Phone)
+	if m.channelID == 0 {
+		// Setup has no channel yet. The session only needs to be signed in.
+		lv.meta.Error = ""
+		return lv.store.writeMeta(lv.meta)
+	}
 	if lv.meta.ChannelID != m.channelID || lv.meta.AccessHash == 0 {
 		hash, err := channelAccess(ctx, api, m.channelID)
 		if err != nil {

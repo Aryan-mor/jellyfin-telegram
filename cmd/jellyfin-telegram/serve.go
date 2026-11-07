@@ -37,6 +37,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/mirror"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/panel"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
@@ -80,6 +81,7 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 	if cfg.NeedsSetup() {
 		address := fmt.Sprintf("%s/setup?code=%s", cfg.LoopbackURL(), wizard.Code())
 		fmt.Printf("\nOpen this address to set up jellyfin-telegram:\n\n    %s\n\n", address)
+		wizard.SetAuto(newAutoSetup(ctx, filepath.Join(cfg.DataDir, "users"), log))
 		openBrowser(address)
 		select {
 		case <-wizard.Saved():
@@ -88,6 +90,9 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 		case <-ctx.Done():
 			return nil
 		}
+		// The account the page signed in stays saved. It is released first, so the service can
+		// connect the same session.
+		wizard.StopAuto()
 		if cfg, err = config.Reload(envPath); err != nil {
 			return err
 		}
@@ -1092,11 +1097,14 @@ func openGroup(ctx context.Context, cfg config.Config, pool *tgpool.Pool, cat *c
 		return fingerprint(ctx, pool, f)
 	}
 	tools, toolsErr := subtitles.FindTools(cfg.FFprobePath)
-	probe := func(ctx context.Context, messageID int) ([]sign.Track, int, error) {
+	inspect := func(ctx context.Context, messageID int) (subtitles.Inspection, error) {
 		if toolsErr != nil {
-			return nil, 0, toolsErr
+			return subtitles.Inspection{}, toolsErr
 		}
-		info, err := tools.Inspect(ctx, lib.StreamURL(messageID))
+		return tools.Inspect(ctx, lib.StreamURL(messageID))
+	}
+	probe := func(ctx context.Context, messageID int) ([]sign.Track, int, error) {
+		info, err := inspect(ctx, messageID)
 		if err != nil {
 			return nil, 0, err
 		}
@@ -1104,8 +1112,21 @@ func openGroup(ctx context.Context, cfg config.Config, pool *tgpool.Pool, cat *c
 	}
 	if toolsErr == nil {
 		svc.Inspect = func(ctx context.Context, messageID int) (intake.Probe, error) {
-			tracks, seconds, err := probe(ctx, messageID)
-			return intake.Probe{Tracks: tracks, Seconds: seconds}, err
+			info, err := inspect(ctx, messageID)
+			if err != nil {
+				return intake.Probe{}, err
+			}
+			return intake.Probe{Tracks: softTracks(info), Seconds: info.Seconds, Audio: audioStreams(info)}, nil
+		}
+	}
+	if cfg.SeerrManaged {
+		// Seerr keeps TMDB's data. With it, a track in another language than the film's own is a dub.
+		key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
+		if err != nil {
+			log.Warn("cannot tell dubbed audio from original", "err", err)
+		} else {
+			langs := &seerr.Languages{Base: (&seerr.Server{}).URL(), Key: key}
+			svc.OriginalLanguage = langs.Original
 		}
 	}
 	svc.Check = &sign.Checker{
@@ -1151,6 +1172,17 @@ func softTracks(info subtitles.Inspection) []sign.Track {
 		soft = append(soft, sign.Track{Lang: lang, Codec: subtitleCodec(track.Codec), Index: track.Index, HasIndex: true})
 	}
 	return soft
+}
+
+// audioStreams lists the audio streams of a file, with the language and title each one carries.
+func audioStreams(info subtitles.Inspection) []naming.AudioIn {
+	var out []naming.AudioIn
+	for _, track := range info.Tracks {
+		if track.Kind == "audio" {
+			out = append(out, naming.AudioIn{Lang: track.Language, Title: track.Title, Index: track.Index})
+		}
+	}
+	return out
 }
 
 // fingerprint reads the first and the last blocks of a file through the bots.

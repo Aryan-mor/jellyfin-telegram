@@ -1,0 +1,109 @@
+package tgsetup
+
+import (
+	"context"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+)
+
+// script answers each message with the next reply.
+type script struct {
+	replies []string
+	sent    []string
+	last    int
+}
+
+func (s *script) Send(_ context.Context, text string) (int, error) {
+	s.sent = append(s.sent, text)
+	s.last++
+	return s.last, nil
+}
+
+func (s *script) Reply(context.Context, int) (string, error) {
+	if len(s.replies) == 0 {
+		return "", ErrBotFatherSilent
+	}
+	r := s.replies[0]
+	s.replies = s.replies[1:]
+	return r, nil
+}
+
+const tok = "123456789:AAH1234567890abcdefghijklmnopqrstuv"
+
+func TestParseToken(t *testing.T) {
+	token, id, ok := ParseToken("Done! Use this token to access the HTTP API:\n" + tok + "\nKeep it safe")
+	if !ok || token != tok || id != 123456789 {
+		t.Fatalf("got %q %d %v", token, id, ok)
+	}
+	if _, _, ok := ParseToken("no token here 12:ab"); ok {
+		t.Fatal("found a token in plain text")
+	}
+}
+
+func TestClassify(t *testing.T) {
+	var rl *RateLimitError
+	err := classify("Sorry, too many attempts. Please try again in 8 seconds.")
+	if !errors.As(err, &rl) || rl.Wait != 8*time.Second {
+		t.Fatalf("rate limit: %v", err)
+	}
+	if !errors.Is(classify("Sorry, this username is already taken. Please try something different."), ErrUsernameTaken) {
+		t.Fatal("taken")
+	}
+	if !errors.Is(classify("Invalid bot selected."), ErrNotOwner) {
+		t.Fatal("not owner")
+	}
+	if classify("Alright, a new bot. How are we going to call it?") != nil {
+		t.Fatal("a normal prompt is not a refusal")
+	}
+}
+
+func TestNewBotRetriesTakenUsername(t *testing.T) {
+	s := &script{replies: []string{
+		"No active command to cancel.",
+		"Alright, a new bot. How are we going to call it?",
+		"Good. Now choose a username for your bot.",
+		"Sorry, this username is already taken.",
+		"Done! Congratulations on your new bot.\nUse this token to access the HTTP API:\n" + tok,
+	}}
+	names := []string{"first_bot", "second_bot"}
+	bot, err := NewBot(context.Background(), s, "Library 1", func(i int) string { return names[i] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bot.Username != "second_bot" || bot.Token != tok || bot.ID != 123456789 {
+		t.Fatalf("got %+v", bot)
+	}
+	if strings.Join(s.sent, "|") != "/cancel|/newbot|Library 1|first_bot|second_bot" {
+		t.Fatalf("sent %v", s.sent)
+	}
+}
+
+func TestNewBotRefusesBadUsername(t *testing.T) {
+	s := &script{replies: []string{"ok", "ok", "ok"}}
+	if _, err := NewBot(context.Background(), s, "x", func(int) string { return "plainname" }); err == nil {
+		t.Fatal("a username that does not end in bot was sent")
+	}
+}
+
+func TestNewBotStopsOnRateLimit(t *testing.T) {
+	s := &script{replies: []string{"ok", "Sorry, too many attempts. Please try again in 30 seconds."}}
+	_, err := NewBot(context.Background(), s, "x", func(int) string { return "a_bot" })
+	var rl *RateLimitError
+	if !errors.As(err, &rl) {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTokenOf(t *testing.T) {
+	s := &script{replies: []string{"ok", "Choose a bot to generate a new token.", "Here is the token for the bot:\n" + tok}}
+	bot, err := TokenOf(context.Background(), s, "@mine_bot")
+	if err != nil || bot.Token != tok || bot.Username != "mine_bot" {
+		t.Fatalf("got %+v %v", bot, err)
+	}
+	s = &script{replies: []string{"ok", "Choose a bot", "Invalid bot selected."}}
+	if _, err := TokenOf(context.Background(), s, "theirs_bot"); !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("got %v", err)
+	}
+}

@@ -59,6 +59,8 @@ type Telegram interface {
 type Probe struct {
 	Tracks  []sign.Track
 	Seconds int
+	// Audio is every audio stream of the file.
+	Audio []naming.AudioIn
 }
 
 // Service runs the inbox pipeline until ctx ends.
@@ -75,6 +77,9 @@ type Service struct {
 	Identify func(ctx context.Context, title string, episode bool) (tmdb int, imdb string, ok bool, err error)
 	// Lang is the preferred subtitle language, shown first in the readable caption.
 	Lang string
+	// OriginalLanguage returns the language a film or series was made in, such as "en". It tells
+	// the original audio track from a dub. Nil, or an empty answer, leaves that to tags in the names.
+	OriginalLanguage func(ctx context.Context, tmdb int, episode bool) (string, error)
 	// Inspect reads the running time and the soft subtitle tracks from the head of the file. Nil
 	// records none.
 	Inspect func(ctx context.Context, messageID int) (Probe, error)
@@ -408,15 +413,17 @@ func (s *Service) describe(ctx context.Context, file *media.File) (sign.Meta, bo
 		return sign.Meta{}, false, nil
 	}
 	var soft []sign.Track
+	var audioIn []naming.AudioIn
 	seconds := 0
 	if s.Inspect != nil {
 		probe, err := s.Inspect(ctx, file.MessageID)
 		if err != nil {
 			s.log().Warn("cannot read subtitle tracks", "message", file.MessageID, "err", err)
 		} else {
-			soft, seconds = probe.Tracks, probe.Seconds
+			soft, seconds, audioIn = probe.Tracks, probe.Seconds, probe.Audio
 		}
 	}
+	audio := s.audioOf(ctx, audioIn, p, file)
 	hash, osdb := "", ""
 	if s.Fingerprint != nil {
 		sample, err := s.Fingerprint(ctx, *file)
@@ -431,10 +438,27 @@ func (s *Service) describe(ctx context.Context, file *media.File) (sign.Meta, bo
 	}
 	return sign.Meta{
 		Kind: kind, TMDB: p.TMDBID, IMDb: imdb, Quality: p.Label,
-		Season: p.Season, Episode: p.Number, Soft: soft, Duration: seconds,
+		Season: p.Season, Episode: p.Number, Soft: soft, Audio: audio, Duration: seconds,
 		Hash: hash, OSDb: osdb,
 		Hard: naming.HardSub(file.FileName, file.Caption),
 	}, true, nil
+}
+
+// audioOf names the audio tracks and says which are dubs. Not knowing the original language is not
+// an error: the roles then come from tags in the names, or stay empty.
+func (s *Service) audioOf(ctx context.Context, in []naming.AudioIn, p naming.Parsed, file *media.File) []sign.AudioTrack {
+	if len(in) == 0 {
+		return nil
+	}
+	original := ""
+	if s.OriginalLanguage != nil {
+		got, err := s.OriginalLanguage(ctx, p.TMDBID, p.Episode)
+		if err != nil {
+			s.log().Debug("cannot read the original language", "tmdb", p.TMDBID, "err", err)
+		}
+		original = got
+	}
+	return naming.AudioTracks(in, original, file.FileName+" "+sign.StripHeader(file.Caption))
 }
 
 // caption is the whole post: the status line, the readable head, the signed machine line, and the
@@ -464,7 +488,7 @@ func (s *Service) headOf(file *media.File, m sign.Meta) naming.Head {
 	return naming.Head{
 		Title: p.Title, Year: p.Year, Episode: m.Kind == "e",
 		Season: m.Season, Number: m.Episode, TMDB: m.TMDB, IMDb: m.IMDb,
-		Label: m.Quality, Soft: naming.ShowTracks(m.Soft, s.Lang), Hard: m.Hard,
+		Label: m.Quality, Soft: naming.ShowTracks(m.Soft, s.Lang), Audio: naming.ShowAudio(m.Audio), Hard: m.Hard,
 	}
 }
 

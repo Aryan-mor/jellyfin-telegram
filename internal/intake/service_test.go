@@ -13,6 +13,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
@@ -675,5 +676,62 @@ func TestArchiveCaptionNamesTheVideoAndTheArchive(t *testing.T) {
 	}
 	if len(caption) > sign.CaptionLimit {
 		t.Fatalf("the caption is %d characters", len(caption))
+	}
+}
+
+// A dubbed film says so in the post: the audio languages, and which of them is a dub.
+func TestPostNamesTheAudioAndTheDub(t *testing.T) {
+	w := newWorld()
+	w.put(film(10, 1000, "The Matrix (1999).mkv", ""))
+	svc := newInstall(t, w, 11, newKey(t))
+	svc.Inspect = func(context.Context, int) (Probe, error) {
+		return Probe{
+			Tracks:  []sign.Track{{Lang: "en", Codec: "srt", Index: 4, HasIndex: true}, {Lang: "fa", Codec: "srt", Index: 5, HasIndex: true}},
+			Seconds: 8160,
+			Audio:   []naming.AudioIn{{Lang: "fa", Index: 1}, {Lang: "en", Index: 2}},
+		}, nil
+	}
+	asked := 0
+	svc.OriginalLanguage = func(_ context.Context, tmdb int, episode bool) (string, error) {
+		asked++
+		if tmdb != 603 || episode {
+			t.Errorf("asked about %d episode=%v", tmdb, episode)
+		}
+		return "en", nil
+	}
+	passes(t, 4, svc)
+	got := posts(w)
+	if len(got) != 1 {
+		t.Fatalf("posts = %d", len(got))
+	}
+	text := got[0].File.Caption
+	if !strings.Contains(text, "🔊 Audio: fa (dubbed) · en (original)") {
+		t.Fatalf("the readable caption lacks the audio line:\n%s", text)
+	}
+	meta, ok := sign.ParseCaption(text)
+	if !ok || !meta.Authentic() || len(meta.Audio) != 2 || meta.Audio[0].Role != sign.RoleDub || meta.Audio[1].Role != sign.RoleOriginal {
+		t.Fatalf("the signed line lacks the audio: ok=%v %+v", ok, meta.Audio)
+	}
+	if len(meta.Soft) != 2 {
+		t.Fatalf("the subtitle tracks were lost: %+v", meta.Soft)
+	}
+	if asked == 0 {
+		t.Fatal("the original language was never asked")
+	}
+}
+
+// Without a source for the original language the languages are still listed, with no role.
+func TestAudioWithoutAnOriginalLanguageHasNoRole(t *testing.T) {
+	w := newWorld()
+	w.put(film(10, 1000, "The Matrix (1999).mkv", ""))
+	svc := newInstall(t, w, 11, newKey(t))
+	svc.Inspect = func(context.Context, int) (Probe, error) {
+		return Probe{Seconds: 8160, Audio: []naming.AudioIn{{Lang: "fa", Index: 1}, {Lang: "en", Index: 2}}}, nil
+	}
+	svc.OriginalLanguage = func(context.Context, int, bool) (string, error) { return "", errMissing }
+	passes(t, 4, svc)
+	got := posts(w)
+	if len(got) != 1 || !strings.Contains(got[0].File.Caption, "🔊 Audio: fa · en\n") {
+		t.Fatalf("caption:\n%v", got)
 	}
 }

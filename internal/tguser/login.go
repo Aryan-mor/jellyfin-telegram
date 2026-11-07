@@ -228,22 +228,12 @@ func (m *Manager) runLogin(ctx context.Context, store *fileStore, p *pendingLogi
 			UserID: self.ID, Phone: firstNonEmpty(p.phone, self.Phone), Username: self.Username,
 			Premium: self.Premium, ChannelID: m.channelID,
 		}
-		hash, err := channelAccess(ctx, api, m.channelID)
-		if err != nil {
-			p.warning = err.Error()
-			meta.Error = err.Error()
-		} else {
-			meta.AccessHash = hash
-			ok, err := canPost(ctx, api, m.channelID, hash)
-			switch {
-			case err != nil:
-				p.warning = err.Error()
-				meta.Error = err.Error()
-			case !ok:
-				p.warning = errNotAdmin.Error()
-				meta.Error = errNotAdmin.Error()
-			default:
-				meta.Admin = true
+		// Setup signs in before any channel exists (channelID 0). The channel is then checked when
+		// the service starts and reads this session again.
+		if m.channelID != 0 {
+			if reason := m.channelCheck(ctx, api, &meta); reason != "" {
+				p.warning = reason
+				meta.Error = reason
 			}
 		}
 		if err := store.writeMeta(meta); err != nil {
@@ -266,6 +256,25 @@ func (m *Manager) runLogin(ctx context.Context, store *fileStore, p *pendingLogi
 	}
 	m.start(m.rootCtx(), store, rec.Meta)
 	p.done <- nil
+}
+
+// channelCheck fills in the account's access to the channel. It returns why the account cannot
+// post there, or "" when it can.
+func (m *Manager) channelCheck(ctx context.Context, api *tg.Client, meta *Meta) string {
+	hash, err := channelAccess(ctx, api, m.channelID)
+	if err != nil {
+		return err.Error()
+	}
+	meta.AccessHash = hash
+	ok, err := canPost(ctx, api, m.channelID, hash)
+	switch {
+	case err != nil:
+		return err.Error()
+	case !ok:
+		return errNotAdmin.Error()
+	}
+	meta.Admin = true
+	return ""
 }
 
 func (m *Manager) hasUser(id int64) bool {

@@ -98,6 +98,25 @@ type Config struct {
 	InboxDeleteOriginals bool
 }
 
+// DefaultAPIID and DefaultAPIHash are the Telegram app this build ships with, set at build time with
+// -ldflags "-X .../internal/config.DefaultAPIID=... -X .../internal/config.DefaultAPIHash=...".
+// The automatic setup signs in with them unless the person brings their own. They stay empty in the
+// source tree, so a build without them asks for the person's own api_id.
+var (
+	DefaultAPIID   string
+	DefaultAPIHash string
+)
+
+// DefaultAPI returns the built-in Telegram app, and false when this build has none.
+func DefaultAPI() (id int, hash string, ok bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(DefaultAPIID))
+	hash = strings.TrimSpace(DefaultAPIHash)
+	if err != nil || n <= 0 || hash == "" {
+		return 0, "", false
+	}
+	return n, hash, true
+}
+
 // NeedsSetup reports that no Telegram details were given at all, as on a first run.
 func (c Config) NeedsSetup() bool {
 	return c.GatewayListen != "" && c.APIID == 0 && c.APIHash == "" && c.ChannelID == 0 && len(c.BotTokens) == 0
