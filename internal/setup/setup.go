@@ -11,6 +11,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -39,6 +40,9 @@ type Values struct {
 	Downloads bool `json:"downloads"`
 	// Group turns on the shared library: new files are posted again with a signed caption.
 	Group bool `json:"group"`
+	// Auto means the Telegram details come from the automatic setup held on the server: the
+	// api_id, the channel and the bot tokens never pass through the browser.
+	Auto bool `json:"auto"`
 }
 
 // BotReport is the result of trying one bot.
@@ -84,6 +88,9 @@ type Wizard struct {
 	status Status
 	saved  chan struct{}
 	once   sync.Once
+
+	auto Auto
+	st   autoState
 }
 
 // New returns a Wizard that writes to the settings file at envPath.
@@ -116,6 +123,7 @@ func (w *Wizard) Handler() http.Handler {
 		rw.Header().Set("Cache-Control", "no-store")
 		_, _ = rw.Write([]byte(page))
 	}))
+	w.autoRoutes(mux)
 	mux.HandleFunc("POST /setup/verify", w.guard(w.handleVerify))
 	mux.HandleFunc("POST /setup/save", w.guard(w.handleSave))
 	mux.HandleFunc("GET /setup/status", w.guard(func(rw http.ResponseWriter, _ *http.Request) {
@@ -161,18 +169,54 @@ func parse(v Values) (apiID int, channel int64, tokens []string, language string
 	if channel, err = config.ParseChannelID(v.Channel); err != nil {
 		return 0, 0, nil, "", errors.New("the channel must be a link to one of its messages, or its id")
 	}
-	if tokens, err = config.ParseTokens(strings.NewReplacer("\r", "", "\n", ",").Replace(v.Bots)); err != nil {
+	if tokens, err = config.ParseTokens(splitTokens(v.Bots)); err != nil {
 		return 0, 0, nil, "", errors.New("bots must hold at least one token from @BotFather")
 	}
+	if language, err = parseExtras(v); err != nil {
+		return 0, 0, nil, "", err
+	}
+	return apiID, channel, tokens, language, nil
+}
+
+// parseExtras checks the part both ways share: the language and an existing Jellyfin.
+func parseExtras(v Values) (language string, err error) {
 	if raw := strings.TrimSpace(v.Language); raw != "" {
 		if language = lang.Normalize(raw); language == "" {
-			return 0, 0, nil, "", errors.New("the language must be a code such as en, de, fa or ja")
+			return "", errors.New("the language must be a code such as en, de, fa or ja")
 		}
 	}
 	if (strings.TrimSpace(v.JellyfinURL) == "") != (strings.TrimSpace(v.JellyfinKey) == "") {
-		return 0, 0, nil, "", errors.New("an existing Jellyfin needs both its address and an API key")
+		return "", errors.New("an existing Jellyfin needs both its address and an API key")
 	}
-	return apiID, channel, tokens, language, nil
+	return language, nil
+}
+
+// details is what a request settles: the Telegram app, channel and bots, and the language.
+type details struct {
+	apiID    int
+	apiHash  string
+	channel  int64
+	tokens   []string
+	language string
+}
+
+// resolve returns the details of a request: typed in the form, or held by the automatic setup.
+func (w *Wizard) resolve(v Values) (details, error) {
+	if !v.Auto {
+		apiID, channel, tokens, language, err := parse(v)
+		return details{apiID, strings.TrimSpace(v.APIHash), channel, tokens, language}, err
+	}
+	w.mu.Lock()
+	st := w.st
+	w.mu.Unlock()
+	if st.apiID == 0 || st.found == nil || len(st.found.Tokens) == 0 {
+		return details{}, errors.New("the automatic setup has not finished yet")
+	}
+	language, err := parseExtras(v)
+	if err != nil {
+		return details{}, err
+	}
+	return details{st.apiID, st.apiHash, st.found.ChannelID, append([]string(nil), st.found.Tokens...), language}, nil
 }
 
 func (w *Wizard) handleVerify(rw http.ResponseWriter, r *http.Request) {
@@ -181,12 +225,12 @@ func (w *Wizard) handleVerify(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusBadRequest, "bad request")
 		return
 	}
-	apiID, channel, tokens, _, err := parse(v)
+	d, err := w.resolve(v)
 	if err != nil {
 		writeError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
-	report, err := w.verify(r.Context(), apiID, strings.TrimSpace(v.APIHash), channel, tokens)
+	report, err := w.verify(r.Context(), d.apiID, d.apiHash, d.channel, d.tokens)
 	if err != nil {
 		writeError(rw, http.StatusBadRequest, err.Error())
 		return
@@ -200,17 +244,17 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusBadRequest, "bad request")
 		return
 	}
-	apiID, channel, tokens, language, err := parse(v)
+	d, err := w.resolve(v)
 	if err != nil {
 		writeError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
 	err = UpdateEnv(w.env, map[string]string{
-		"TELEGRAM_API_ID":        fmt.Sprint(apiID),
-		"TELEGRAM_API_HASH":      strings.TrimSpace(v.APIHash),
-		"TELEGRAM_CHANNEL_ID":    fmt.Sprint(channel),
-		"TELEGRAM_BOT_TOKENS":    strings.Join(tokens, ","),
-		"SUBTITLE_LANGUAGE":      language,
+		"TELEGRAM_API_ID":        fmt.Sprint(d.apiID),
+		"TELEGRAM_API_HASH":      d.apiHash,
+		"TELEGRAM_CHANNEL_ID":    fmt.Sprint(d.channel),
+		"TELEGRAM_BOT_TOKENS":    strings.Join(d.tokens, ","),
+		"SUBTITLE_LANGUAGE":      d.language,
 		"JELLYFIN_URL":           strings.TrimRight(strings.TrimSpace(v.JellyfinURL), "/"),
 		"JELLYFIN_API_KEY":       strings.TrimSpace(v.JellyfinKey),
 		"SEERR_MANAGED":          fmt.Sprint(v.Seerr || v.Downloads),
@@ -225,6 +269,31 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 	}
 	w.once.Do(func() { close(w.saved) })
 	writeJSON(rw, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// TrustedClient reports that a request comes from this machine or a Tailscale address. Signing in a
+// Telegram account is only allowed from there.
+func TrustedClient(r *http.Request) bool {
+	// A tunnel running on this machine connects from loopback but speaks for someone else, and says
+	// so in these headers. A person at this computer sends none of them.
+	for _, h := range []string{"X-Forwarded-For", "Forwarded", "X-Real-Ip"} {
+		if r.Header.Get(h) != "" {
+			return false
+		}
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	if ip.IsLoopback() {
+		return true
+	}
+	v4 := ip.To4()
+	return v4 != nil && v4[0] == 100 && v4[1]&0xC0 == 64
 }
 
 // UpdateEnv sets keys in a settings file. Other lines and their order stay as they are.

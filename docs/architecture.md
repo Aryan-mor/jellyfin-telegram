@@ -329,8 +329,9 @@ A signed post looks like this. What a person wrote on a raw file stays below its
 ✅ Ready
 The Hardacres
 🎬 Episode · TMDB 231751 · IMDb tt28489780 · 480p
-💬 Soft: none · Hard: unknown
-jftg:2;k=e;t=231751;i=tt28489780;q=480p;se=1;ep=6;fu=<file_unique_id>;h=<content hash>;oh=<OpenSubtitles hash>;du=2760;ss=fa.srt@3;hs=unknown;sa=yes;st=ready;ah=<archive hash>;d=<doc>;z=<size>;pk=<public key>;s=<signature>
+🔊 Audio: fa (dubbed) · en (original)
+💬 Soft: fa (srt) · Hard: unknown
+jftg:2;k=e;t=231751;i=tt28489780;q=480p;se=1;ep=6;fu=<file_unique_id>;h=<content hash>;oh=<OpenSubtitles hash>;du=2760;ss=fa.srt@3;au=fa.dub@1,en.orig@2;hs=unknown;sa=yes;st=ready;ah=<archive hash>;d=<doc>;z=<size>;pk=<public key>;s=<signature>
 #tm_tv_231751_1_6
 ```
 
@@ -341,6 +342,11 @@ The line says what a reader can check for itself, and where to look:
   upload, which `d` and `fu` do not. `oh` is the OpenSubtitles hash, so subtitle sites can be asked too.
 - `du` is the running time, and `ss` lists the soft subtitle tracks with their stream numbers (`fa.srt@3`), so a reader
   need not probe the file to find them.
+- `au` lists the audio tracks as `lang.role@stream`. The role is `dub` for a track in another language than the film or
+  series was made in, `orig` for the original, and left out when nobody can tell. The original language comes from
+  Seerr (TMDB) when it runs; a tag in a track title ("Dubbed", "Original", "دوبله") wins over it. Without either,
+  only the languages are listed. A post with several audio tracks or several subtitle tracks says so in these two
+  fields, and a line without `au` is read as before.
 - `ah` names the subtitle archive that answers the post, so it is checked after it is downloaded.
 - `pk` is the key that signed the line. It travels with the line, so a post that is only forwarded, with no sender and
   no reply link, still verifies anywhere.

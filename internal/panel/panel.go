@@ -253,7 +253,7 @@ func (p *panel) handleAutomation(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *panel) handleDownloadLogin(w http.ResponseWriter, r *http.Request) {
-	if !trustedClient(r) {
+	if !setup.TrustedClient(r) {
 		writeError(w, http.StatusForbidden, "Sign in to a Telegram account from this computer or over Tailscale. The panel is plain HTTP, and this step gives full access to the account.")
 		return
 	}
@@ -261,7 +261,7 @@ func (p *panel) handleDownloadLogin(w http.ResponseWriter, r *http.Request) {
 }
 
 func (p *panel) handleDownloadLogout(w http.ResponseWriter, r *http.Request) {
-	if !trustedClient(r) {
+	if !setup.TrustedClient(r) {
 		writeError(w, http.StatusForbidden, "Sign out of a Telegram account from this computer or over Tailscale.")
 		return
 	}
@@ -391,7 +391,7 @@ func (p *panel) handleLocalAction(w http.ResponseWriter, r *http.Request) {
 	}
 	// Choosing which folders of this computer the panel may read is limited to this computer or
 	// Tailscale, like signing in to an account: the panel is plain HTTP.
-	if action == "folder" && !trustedClient(r) {
+	if action == "folder" && !setup.TrustedClient(r) {
 		writeError(w, http.StatusForbidden, "Choose folders from this computer or over Tailscale. The panel is plain HTTP.")
 		return
 	}
@@ -473,29 +473,6 @@ func (p *panel) handleMirrorAction(w http.ResponseWriter, r *http.Request) {
 		out = map[string]any{"ok": true}
 	}
 	writeJSON(w, http.StatusOK, out)
-}
-
-func trustedClient(r *http.Request) bool {
-	// A tunnel running on this machine connects from loopback but speaks for someone else, and says
-	// so in these headers. A person at this computer sends none of them.
-	for _, h := range []string{"X-Forwarded-For", "Forwarded", "X-Real-Ip"} {
-		if r.Header.Get(h) != "" {
-			return false
-		}
-	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
-	if ip == nil {
-		return false
-	}
-	if ip.IsLoopback() {
-		return true
-	}
-	v4 := ip.To4()
-	return v4 != nil && v4[0] == 100 && v4[1]&0xC0 == 64
 }
 
 // Pointer fields stay unchanged when the tab that owns them does not send them.

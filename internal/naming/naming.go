@@ -110,7 +110,9 @@ type Head struct {
 	Label   string
 	// Soft is already display text, such as "fa (srt)".
 	Soft []string
-	Hard string
+	// Audio is already display text, such as "fa (dubbed)". Empty leaves the audio line out.
+	Audio []string
+	Hard  string
 }
 
 // Caption builds the readable head. The signed line is added by the caller.
@@ -145,8 +147,11 @@ func Caption(h Head) string {
 	if hard == "" {
 		hard = "unknown"
 	}
-	return fmt.Sprintf("%s\n🎬 %s\n💬 Soft: %s · Hard: %s",
-		title, strings.Join(bits, " · "), soft, hard)
+	head := title + "\n🎬 " + strings.Join(bits, " · ")
+	if line := audioLine(h.Audio); line != "" {
+		head += "\n" + line
+	}
+	return fmt.Sprintf("%s\n💬 Soft: %s · Hard: %s", head, soft, hard)
 }
 
 // Tag is the hashtag that ends a library caption: #tm_m_<tmdb> for a film and

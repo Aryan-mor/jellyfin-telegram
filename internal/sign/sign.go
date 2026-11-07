@@ -45,6 +45,24 @@ type Track struct {
 	HasIndex bool
 }
 
+// Audio roles. A track is a dub when it is not in the language the film or series was made in.
+const (
+	RoleDub      = "dub"
+	RoleOriginal = "orig"
+)
+
+// AudioTrack is one audio stream, written as lang, lang.role or lang.role@stream. Role is empty
+// when nobody can tell. The stream number tells a reader where in the file the track is.
+type AudioTrack struct {
+	Lang     string
+	Role     string
+	Index    int
+	HasIndex bool
+}
+
+// maxAudio is how many audio tracks a line carries. Releases with more are not worth the space.
+const maxAudio = 8
+
 // Meta is the signed description of one document.
 type Meta struct {
 	Kind    string // m film, e episode
@@ -54,6 +72,9 @@ type Meta struct {
 	Season  int
 	Episode int
 	Soft    []Track
+	// Audio lists the audio tracks with their language and whether each is a dub. Empty when the
+	// file was not inspected. It is optional, so a line without it is read as before.
+	Audio []AudioTrack
 	// Hard is a language code, "none", or "unknown".
 	Hard string
 	// Subs is "yes" once a subtitle archive exists, otherwise "no".
@@ -194,6 +215,9 @@ func (m Meta) Canonical() string {
 		soft = append(soft, "+")
 	}
 	field("ss", strings.Join(soft, ","))
+	if audio := audioField(m.Audio); audio != "" {
+		field("au", audio)
+	}
 	hard := m.Hard
 	if hard == "" {
 		hard = "unknown"
@@ -216,6 +240,57 @@ func (m Meta) Canonical() string {
 	field("z", strconv.FormatInt(m.Size, 10))
 	field("pk", base64.RawURLEncoding.EncodeToString(m.PubKey))
 	return b.String()
+}
+
+// audioField writes the audio tracks as lang.role@stream, separated by commas.
+func audioField(tracks []AudioTrack) string {
+	if len(tracks) > maxAudio {
+		tracks = tracks[:maxAudio]
+	}
+	items := make([]string, 0, len(tracks))
+	for _, t := range tracks {
+		lang := t.Lang
+		if lang == "" {
+			lang = "und"
+		}
+		item := lang
+		if t.Role != "" {
+			item += "." + t.Role
+		}
+		if t.HasIndex {
+			item += "@" + strconv.Itoa(t.Index)
+		}
+		items = append(items, item)
+	}
+	return strings.Join(items, ",")
+}
+
+// parseAudio reads what audioField wrote.
+func parseAudio(s string) ([]AudioTrack, error) {
+	var out []AudioTrack
+	for _, item := range strings.Split(s, ",") {
+		if item == "" {
+			continue
+		}
+		name, stream, hasStream := strings.Cut(item, "@")
+		lang, role, _ := strings.Cut(name, ".")
+		if role != "" && role != RoleDub && role != RoleOriginal {
+			return nil, errors.New("audio role")
+		}
+		t := AudioTrack{Lang: lang, Role: role}
+		if hasStream {
+			n, err := strconv.Atoi(stream)
+			if err != nil || n < 0 {
+				return nil, errors.New("audio stream number")
+			}
+			t.Index, t.HasIndex = n, true
+		}
+		out = append(out, t)
+	}
+	if len(out) > maxAudio {
+		return nil, errors.New("too many audio tracks")
+	}
+	return out, nil
 }
 
 // Sign returns the full machine line, including the signature.
@@ -311,6 +386,11 @@ func ParseLine(line string) (Meta, error) {
 	}
 	m.PubKey = ed25519.PublicKey(pub)
 	m.KeyID = KeyID(m.PubKey)
+	if au := got["au"]; au != "" {
+		if m.Audio, err = parseAudio(au); err != nil {
+			return Meta{}, err
+		}
+	}
 	if ss := got["ss"]; ss != "" {
 		for _, item := range strings.Split(ss, ",") {
 			if item == "+" {

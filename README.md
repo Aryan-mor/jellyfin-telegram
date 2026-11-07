@@ -203,8 +203,18 @@ playback alone.
 
 2. Open the address it prints. It looks like `http://127.0.0.1:8097/setup?code=...`, where the code
    is one-time and different on every start. A browser tab usually opens by itself.
-3. Enter `api_id`, `api_hash`, the channel link and your bot tokens. The page checks every bot
-   against the channel and writes `.env` for you.
+3. Choose **Automatic** or **Manual**.
+   - **Manual**: enter `api_id`, `api_hash`, the channel link and your bot tokens.
+   - **Automatic**: sign in with your phone number (a code arrives in your Telegram app). If you
+     set up a channel before, give a link to one message in it: the bots of yours that are admins
+     there are found through @BotFather and reused. If not, a private channel and the number of
+     bots you pick (3 by default) are created and made admins for you. The account stays signed in
+     for downloads, Channels and the shared library. Sign-in is allowed only from this computer
+     or over Tailscale. It uses the `api_id` built into your build; under *Advanced* you can
+     enter your own. Build with `-ldflags "-X github.com/Aryan-mor/jellyfin-telegram/internal/config.DefaultAPIID=... -X github.com/Aryan-mor/jellyfin-telegram/internal/config.DefaultAPIHash=..."`
+     to ship one.
+
+   The page then checks every bot against the channel and writes `.env` for you.
 4. Wait while it downloads Jellyfin 12.4, starts it, creates the libraries and signs in. The
    Jellyfin password is saved in `DATA_DIR/jellyfin/credentials.json`.
 5. After setup, `http://127.0.0.1:8097` is Jellyfin and `http://127.0.0.1:8097/panel` is the panel.

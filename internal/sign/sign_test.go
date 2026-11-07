@@ -525,3 +525,36 @@ func TestSubsLineRoundTripAndIsSigned(t *testing.T) {
 		t.Fatal("a video line was read as a subtitle line")
 	}
 }
+
+func TestAudioTracksAreSignedAndRoundTrip(t *testing.T) {
+	key, err := LoadOrCreate(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := Meta{Kind: "m", TMDB: 27205, Hard: "none", Subs: "no", DocID: 7, Size: 9, Status: StatusReady,
+		Audio: []AudioTrack{{Lang: "fa", Role: RoleDub, Index: 1, HasIndex: true}, {Lang: "en", Role: RoleOriginal, Index: 2, HasIndex: true}, {Lang: "ja"}}}
+	line := key.Sign(m)
+	if !strings.Contains(line, ";au=fa.dub@1,en.orig@2,ja;") {
+		t.Fatalf("line: %s", line)
+	}
+	got, err := ParseLine(line)
+	if err != nil || !got.Authentic() {
+		t.Fatalf("parse: %v authentic=%v", err, got.Authentic())
+	}
+	if len(got.Audio) != 3 || got.Audio[0].Role != RoleDub || got.Audio[1].Lang != "en" || got.Audio[2].Role != "" {
+		t.Fatalf("audio: %+v", got.Audio)
+	}
+	// Changing the audio after signing breaks the signature.
+	forged := strings.Replace(line, "fa.dub", "fa.orig", 1)
+	if g, err := ParseLine(forged); err != nil || g.Authentic() {
+		t.Fatalf("a changed audio field still verified (err=%v)", err)
+	}
+	// A line without audio has no au field, so existing lines stay as they were.
+	m.Audio = nil
+	if strings.Contains(key.Sign(m), ";au=") {
+		t.Fatal("an empty audio list was written")
+	}
+	if _, err := ParseLine(strings.Replace(line, "fa.dub", "fa.loud", 1)); err == nil {
+		t.Fatal("an unknown role was accepted")
+	}
+}
