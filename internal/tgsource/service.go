@@ -15,13 +15,13 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/pace"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
 const (
 	settingsKey = "tgsource_settings"
 	pageSize    = 100
-	batchSize   = 10
 	// maxFloodWait is the longest Telegram wait that is slept out inside a pass.
 	maxFloodWait = 10 * time.Minute
 )
@@ -368,7 +368,9 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 	sort.Slice(want, func(i, j int) bool { return want[i].ID < want[j].ID })
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
 	for len(want) > 0 {
-		n := min(batchSize, len(want))
+		// A random burst of 20 to 50 videos goes out, then a random rest of 10 seconds up to the
+		// pause setting, so the beat is never the same twice.
+		n := min(pace.Burst(), len(want))
 		batch := want[:n]
 		want = want[n:]
 		if set.MaxPerDay > 0 {
@@ -378,15 +380,20 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 			if err != nil {
 				return err
 			}
-			if have+len(batch) > set.MaxPerDay {
+			if have >= set.MaxPerDay {
 				return errDailyCap
+			}
+			// A burst never goes past the cap: send what is left of today's allowance.
+			if room := set.MaxPerDay - have; len(batch) > room {
+				want = append(batch[room:len(batch):len(batch)], want...)
+				batch = batch[:room]
 			}
 		}
 		if err := s.copyBatch(ctx, src, ref, batch); err != nil {
 			return err
 		}
 		if len(want) > 0 && set.PauseSeconds > 0 {
-			if err := s.sleep(ctx, time.Duration(set.PauseSeconds)*time.Second); err != nil {
+			if err := s.sleep(ctx, pace.Pause(time.Duration(set.PauseSeconds)*time.Second)); err != nil {
 				return err
 			}
 		}

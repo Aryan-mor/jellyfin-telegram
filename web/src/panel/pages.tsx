@@ -802,7 +802,7 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
           <Num label="Smallest file, MB" k="min_mb" draft={draft} />
           <Num label="Largest file, GB" k="max_gb" draft={draft} />
           <Num label="Most videos per day" k="max_per_day" draft={draft} />
-          <Num label="Pause between files, seconds" k="pause_seconds" draft={draft} />
+          <Num label="Longest rest between bursts of 20-50 files, seconds" k="pause_seconds" draft={draft} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5"><FieldLabel>Skip words</FieldLabel><Input value={draft.value.skip_words || ""} placeholder="trailer, sample" onChange={(e) => draft.set({ ...draft.value!, skip_words: e.target.value })} /></div>

@@ -15,15 +15,13 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/pace"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
 const (
-	// copyBatch is how many messages one pass posts into one mirror.
-	copyBatch = 25
-	// copyGap is the pause between two posts, so a mirror does not trip Telegram's flood limit
-	// on its own.
-	copyGap = 2 * time.Second
+	// copyGap is the short pause between two posts of one burst.
+	copyGap = time.Second
 )
 
 // Service walks the mirrors until ctx ends.
@@ -42,16 +40,13 @@ func (s *Service) Run(ctx context.Context) {
 	if s.Log == nil {
 		s.Log = slog.Default()
 	}
-	tick := time.NewTicker(time.Minute)
-	defer tick.Stop()
 	for {
 		if err := s.Pass(ctx); err != nil && ctx.Err() == nil {
 			s.Log.Warn("mirror", "err", err)
 		}
-		select {
-		case <-ctx.Done():
+		// Each pass sends a burst of 20 to 50 posts, then rests a random 10 to 60 seconds.
+		if wait(ctx, pace.Pause(pace.MaxPause)) != nil {
 			return
-		case <-tick.C:
 		}
 	}
 }
@@ -80,6 +75,7 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		return err
 	}
 	copied := 0
+	copyBatch := pace.Burst()
 	var failed string
 	// send copies one message and records it. It reports whether Telegram refused.
 	send := func(messageID int) (refused bool, err error) {
