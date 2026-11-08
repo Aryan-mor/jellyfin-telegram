@@ -39,22 +39,29 @@ You do not need Go, Git, Node or a terminal full of steps. One command installs 
 every login and opens the setup page. There you type your **phone number** and the code Telegram
 sends you. The channel, the bots and Jellyfin are created and configured for you.
 
-**Windows**: download [`install-windows.cmd`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install-windows.cmd)
-and double-click it. Or paste this in PowerShell:
+**Windows.** Download [`install-windows.cmd`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install-windows.cmd)
+and double-click it. That is the file to get. Or paste this in PowerShell:
 
 ```powershell
 irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 | iex
 ```
 
-**Linux**:
+To install it yourself, download [`jellyfin-telegram-windows-amd64.zip`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/jellyfin-telegram-windows-amd64.zip)
+from the [latest release](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest). Unpack
+it into an empty folder and run `jellyfin-telegram.exe`. The setup page opens by itself.
+
+**Linux.** Paste this in a terminal. That is the file to get:
 
 ```shell
 curl -fsSL https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.sh | sh
 ```
 
-Prefer to do it by hand? Download the zip or tar.gz for your system from the
+To install it yourself, download the archive for the machine from the
 [latest release](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest), unpack it into an
-empty folder and run the one file inside. The setup page opens by itself.
+empty folder and run `./jellyfin-telegram`. The setup page opens by itself.
+
+- A normal PC: [`jellyfin-telegram-linux-amd64.tar.gz`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/jellyfin-telegram-linux-amd64.tar.gz)
+- A Raspberry Pi or other ARM64 machine: [`jellyfin-telegram-linux-arm64.tar.gz`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/jellyfin-telegram-linux-arm64.tar.gz)
 
 The installer also puts a **jellyfin-telegram panel** shortcut on your Desktop (and in the Start
 menu or applications menu). Click it any time to open the panel.
