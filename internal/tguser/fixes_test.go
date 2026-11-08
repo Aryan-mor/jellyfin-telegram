@@ -9,6 +9,66 @@ import (
 	"time"
 )
 
+func TestBeginLoginSkipsWhenTheAccountIsConnected(t *testing.T) {
+	m := &Manager{sessions: map[int64]*live{}}
+	lv := &live{}
+	lv.connected.Store(true)
+	m.sessions[1] = lv
+	got, err := m.BeginLogin(context.Background(), "+1")
+	if err != nil || got.Step != StepDone {
+		t.Fatalf("%+v %v", got, err)
+	}
+}
+
+func TestAlreadyInRecognisesTheWrappedMessage(t *testing.T) {
+	if !alreadyIn(errors.New("callback: this account is already signed in")) {
+		t.Fatal("the wrapped text was not recognised")
+	}
+	if alreadyIn(errors.New("a phone number is required")) {
+		t.Fatal("an unrelated error counted as already signed in")
+	}
+}
+
+func TestLogoutAllDeletesTheSavedSession(t *testing.T) {
+	dir := t.TempDir()
+	m, err := New(dir, 1, "h", 0, Pace{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "42.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.LogoutAll(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if m.HasSaved() {
+		t.Fatal("the session file was still there")
+	}
+}
+
+func TestHasSavedIgnoresAPendingLogin(t *testing.T) {
+	dir := t.TempDir()
+	m, err := New(dir, 1, "h", 0, Pace{}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if m.HasSaved() {
+		t.Fatal("an empty folder looked signed in")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "pending-1.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if m.HasSaved() {
+		t.Fatal("a pending login counted as a saved account")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "42.json"), []byte("{}"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if !m.HasSaved() {
+		t.Fatal("a saved session was missed")
+	}
+}
+
 func TestPaceRefusesNegativeNumbers(t *testing.T) {
 	good := Pace{MBPerSec: 8, RestMinutes: 5, LongEveryGB: 20, LongRestMinutes: 60, DailyGB: 50, Hours: "01-08"}
 	if err := good.Validate(); err != nil {

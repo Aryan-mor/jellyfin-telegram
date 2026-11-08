@@ -65,8 +65,13 @@ svg.i { width:20px; height:20px; flex:none; stroke:currentColor; fill:none; stro
 h1 { font-size:25px; line-height:1.2; margin:0 0 6px; letter-spacing:-.025em; font-weight:780; }
 h2 { font-size:17px; margin:0 0 4px; letter-spacing:-.015em; }
 p { margin:0 0 18px; color:var(--muted); }
-.back { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13.5px; font-weight:600; margin:0 0 14px; }
+.bar-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 14px; }
+.back { all:unset; cursor:pointer; display:inline-flex; align-items:center; gap:6px; color:var(--muted); font-size:13.5px; font-weight:600; }
+section > .back { margin:0 0 14px; }
 .back:hover { color:var(--text); }
+.textbtn { all:unset; cursor:pointer; color:var(--muted); font-size:13.5px; font-weight:650; }
+.textbtn:hover { color:var(--bad); }
+.panel > section[hidden] { animation:none !important; }
 
 .choices { display:grid; gap:12px; }
 .choice {
@@ -82,6 +87,10 @@ p { margin:0 0 18px; color:var(--muted); }
 .tag { position:absolute; top:14px; right:14px; font-size:11px; font-weight:700; padding:2px 9px; border-radius:99px; background:var(--accent-soft); color:var(--accent); }
 
 .field { margin:0 0 18px; }
+.phone-line { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 12px; border:1px solid var(--line); border-radius:11px; background:var(--surface-2); margin:0 0 16px; color:var(--text); }
+.phone-line b { overflow-wrap:anywhere; }
+.phone-line button { all:unset; cursor:pointer; color:var(--accent); font-weight:650; font-size:13.5px; white-space:nowrap; }
+.phone-line button:hover { text-decoration:underline; }
 label.lbl { display:block; font-weight:620; font-size:14px; margin:0 0 6px; }
 .hint { display:block; color:var(--muted); font-size:13px; margin:-2px 0 8px; }
 input, textarea {
@@ -93,7 +102,11 @@ input::placeholder, textarea::placeholder { color:var(--faint); }
 input:hover, textarea:hover { border-color:var(--faint); }
 input:focus, textarea:focus { outline:none; border-color:var(--accent); box-shadow:0 0 0 4px var(--ring); }
 input.code { font-size:22px; letter-spacing:.35em; text-align:center; font-weight:650; }
+input.code::placeholder { letter-spacing:0; font-size:16px; font-weight:500; }
 .pair { display:grid; gap:10px; grid-template-columns:1fr 2fr; }
+.input-wrap { position:relative; } .input-wrap input { padding-right:46px; }
+.input-wrap .btn.icon { position:absolute; right:5px; top:50%; transform:translateY(-50%); }
+.input-wrap .btn.icon:active { transform:translateY(-50%); }
 
 .btn {
   all:unset; box-sizing:border-box; cursor:pointer; display:inline-flex; align-items:center; justify-content:center; gap:8px;
@@ -107,6 +120,8 @@ input.code { font-size:22px; letter-spacing:.35em; text-align:center; font-weigh
 .btn.ghost { background:var(--surface); background-image:none; color:var(--text); border:1px solid var(--line-strong); box-shadow:none; }
 .btn.ghost:hover { background:var(--surface-2); }
 .btn.wide { width:100%; }
+.btn.icon { padding:7px; min-height:0; border-radius:9px; background:transparent; background-image:none; color:var(--muted); box-shadow:none; }
+.btn.icon:hover { background:var(--surface-2); color:var(--text); }
 .btn[disabled] { opacity:.55; pointer-events:none; }
 .btn.busy::after { content:""; width:15px; height:15px; border-radius:50%; border:2px solid currentColor; border-right-color:transparent; animation:spin .7s linear infinite; }
 @keyframes spin { to { transform:rotate(360deg); } }
@@ -132,6 +147,7 @@ details.more .body { padding:0 14px 14px; }
 .toggle input:disabled { opacity:.45; cursor:default; }
 .toggle.indent { padding-left:22px; }
 .box { border:1px solid var(--line); border-radius:14px; padding:4px 16px; margin:0 0 18px; }
+.warn { margin:0 0 12px 22px; padding:10px 12px; border-radius:10px; background:var(--bad-soft); color:var(--bad); font-size:13px; line-height:1.45; }
 
 .msg { margin-top:14px; padding:11px 14px; border-radius:11px; font-size:14px; background:var(--surface-2); color:var(--muted); }
 .msg:empty { display:none; }
@@ -139,10 +155,20 @@ details.more .body { padding:0 14px 14px; }
 .msg.ok { background:var(--ok-soft); color:var(--ok); }
 .checks { display:grid; gap:6px; margin-top:14px; }
 .checks:empty { display:none; }
+details.term { margin-top:14px; border:1px solid #1c2430; border-radius:12px; background:#0c1016; color:#c8f5d4; }
+details.term summary { cursor:pointer; padding:10px 12px; color:#8ea0b5; font-weight:650; font-size:13.5px; list-style:none; display:flex; align-items:center; }
+details.term summary::-webkit-details-marker { display:none; }
+details.term summary::before { content:""; width:7px; height:7px; margin-right:8px; border-right:2px solid currentColor; border-bottom:2px solid currentColor; transform:rotate(-45deg); }
+details.term[open] summary::before { transform:rotate(45deg); }
+details.term pre { margin:0; padding:0 12px 12px; max-height:220px; overflow:auto; font:12.5px/1.55 "JetBrains Mono","Cascadia Code",ui-monospace,Consolas,monospace; white-space:pre-wrap; overflow-wrap:anywhere; }
 .check { display:flex; align-items:center; gap:10px; padding:9px 12px; border-radius:10px; background:var(--surface-2); font-size:14px; overflow-wrap:anywhere; }
 .check::before { content:"\2713"; flex:none; width:20px; height:20px; border-radius:50%; display:grid; place-items:center; font-size:11px; font-weight:800; background:var(--ok-soft); color:var(--ok); }
 .check.bad::before { content:"!"; background:var(--bad-soft); color:var(--bad); }
 .check.wait::before { content:""; border:2px solid var(--accent); border-right-color:transparent; background:none; width:14px; height:14px; animation:spin .8s linear infinite; }
+.pick { display:flex; align-items:center; gap:10px; padding:10px 12px; border:1px solid var(--line); border-radius:12px; margin:0 0 8px; cursor:pointer; }
+.pick:hover { border-color:var(--accent); }
+.pick input { width:18px; height:18px; min-height:0; flex:none; margin:0; padding:0; border:0; border-radius:4px; box-shadow:none; accent-color:#6d4ef0; }
+.langs { max-height:220px; overflow:auto; border:1px solid var(--line); border-radius:12px; padding:8px; }
 
 .bar { height:8px; background:var(--surface-3); border-radius:99px; overflow:hidden; margin:18px 0 8px; }
 .bar i { display:block; height:100%; width:0; background:var(--grad); border-radius:99px; transition:width .5s var(--ease); }
@@ -155,7 +181,6 @@ details.more .body { padding:0 14px 14px; }
 .links { display:grid; gap:8px; margin-top:18px; }
 .links a { display:flex; align-items:center; gap:8px; padding:11px 14px; border-radius:11px; background:var(--surface-2); text-decoration:none; font-weight:600; }
 .links a:hover { background:var(--surface-3); }
-.foot { text-align:center; color:var(--faint); font-size:12.5px; margin-top:20px; }
 
 @media (max-width:520px) {
   body { padding:20px 12px 48px; }
@@ -176,6 +201,8 @@ details.more .body { padding:0 14px 14px; }
     <symbol id="i-back" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></symbol>
     <symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></symbol>
     <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 01-1 1H5a1 1 0 01-1-1V7a1 1 0 011-1h5"/></symbol>
+    <symbol id="i-eye" viewBox="0 0 24 24"><path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="i-eye-off" viewBox="0 0 24 24"><path d="M3 3l18 18"/><path d="M10.6 10.6a3 3 0 004.2 4.2"/><path d="M9.9 5.2A10.8 10.8 0 0112 5c6 0 10 7 10 7a18.4 18.4 0 01-3.1 3.7"/><path d="M6.1 6.1C3.8 7.8 2 12 2 12s4 7 10 7a10.8 10.8 0 004.1-.8"/></symbol>
   </defs>
 </svg>
 
@@ -209,9 +236,14 @@ details.more .body { padding:0 14px 14px; }
 
     <!-- Step 1a: automatic -->
     <section id="auto" hidden>
-      <button class="back" type="button" data-back="choose"><svg class="i"><use href="#i-back"/></svg>Back</button>
+      <div class="bar-top">
+        <button class="back" type="button" id="auto-back"><svg class="i"><use href="#i-back"/></svg>Back</button>
+        <button class="textbtn" type="button" id="auto-out" hidden>Sign out</button>
+      </div>
 
-      <div class="sub-step" id="a-phone">
+      <p id="a-wait" class="hint" hidden>Checking whether this account is already signed in.</p>
+
+      <div class="sub-step" id="a-phone" hidden>
         <h1>Sign in to Telegram</h1>
         <p>Use the account that will own the library channel and its bots. It stays signed in for downloads and channel imports.</p>
         <div class="field">
@@ -219,11 +251,11 @@ details.more .body { padding:0 14px 14px; }
           <span class="hint">With the country code. Telegram sends a code to your Telegram app.</span>
           <input id="phone" inputmode="tel" autocomplete="off" placeholder="+49 151 1234 5678">
         </div>
-        <details class="more">
+        <details class="more" id="own-api">
           <summary>Advanced: use my own api_id</summary>
           <div class="body">
-            <span class="hint">Leave empty to use the one built into this program. Get your own at <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>.</span>
-            <div class="pair"><input id="a_api_id" inputmode="numeric" placeholder="API ID" autocomplete="off"><input id="a_api_hash" placeholder="API hash" autocomplete="off"></div>
+            <span class="hint">Leave this closed. The program already has an API ID. Open it only to replace that with your own from <a href="https://my.telegram.org" target="_blank" rel="noreferrer">my.telegram.org</a>.</span>
+            <div class="pair"><input id="a_api_id" inputmode="numeric" placeholder="API ID" autocomplete="off" data-lpignore="true" data-1p-ignore="true"><input id="a_api_hash" placeholder="API hash" autocomplete="off" data-lpignore="true" data-1p-ignore="true" spellcheck="false"></div>
           </div>
         </details>
         <button class="btn wide" id="send-phone" type="button">Send code</button>
@@ -231,15 +263,18 @@ details.more .body { padding:0 14px 14px; }
 
       <div class="sub-step" id="a-code" hidden>
         <h1>Enter the code</h1>
-        <p>Telegram sent a login code to your Telegram app, in the chat named Telegram.</p>
-        <div class="field"><input id="tcode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" aria-label="Login code"></div>
+        <p id="code-help">Open the Telegram app. The code is in the chat named Telegram. It does not appear on this computer.</p>
+        <div class="phone-line"><span>Number <b id="code-phone"></b></span><button type="button" id="code-change">Change number</button></div>
+        <div class="field"><input id="tcode" class="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="12345" aria-label="Login code"></div>
         <button class="btn wide" id="send-code" type="button">Continue</button>
+        <button class="btn ghost wide" id="code-resend" type="button" style="margin-top:10px">Send by text message</button>
       </div>
 
       <div class="sub-step" id="a-pass" hidden>
         <h1>Two-step password</h1>
         <p>This account has a cloud password. It is sent to Telegram once and never saved.</p>
-        <div class="field"><input id="tpass" type="password" autocomplete="off" aria-label="Two-step password"></div>
+        <div class="phone-line"><span>Number <b id="pass-phone"></b></span><button type="button" id="pass-change">Change number</button></div>
+        <div class="field"><div class="input-wrap"><input id="tpass" type="password" autocomplete="off" placeholder="Cloud password" aria-label="Two-step password"><button class="btn icon" type="button" data-reveal="tpass" aria-label="Show or hide the password" aria-pressed="false"><svg class="i eye-on"><use href="#i-eye"/></svg><svg class="i eye-off" hidden><use href="#i-eye-off"/></svg></button></div></div>
         <button class="btn wide" id="send-pass" type="button">Continue</button>
       </div>
 
@@ -270,12 +305,21 @@ details.more .body { padding:0 14px 14px; }
         <button class="btn wide" id="make" type="button">Create channel and bots</button>
       </div>
 
+      <div class="sub-step" id="a-pick" hidden>
+        <h1>Pick bots you already have</h1>
+        <p>Telegram allows 20 bots on one account, and this one is full. Pick the ones to use. Each bot you pick gets a new token, and the old token stops working, so anything else using that bot loses access.</p>
+        <p id="pick-kept" hidden></p>
+        <div id="pick-list"></div>
+        <button class="btn wide" id="pick-go" type="button">Use the selected bots</button>
+      </div>
+
       <div class="sub-step" id="a-work" hidden>
         <h1>Working on it</h1>
         <p>Keep this page open.</p>
       </div>
 
       <div id="a-log" class="checks"></div>
+      <details class="term" id="a-term"><summary>Log</summary><pre id="a-term-body"></pre></details>
       <div id="a-err" class="msg bad"></div>
       <button class="btn wide" id="a-next" type="button" hidden style="margin-top:18px">Continue</button>
     </section>
@@ -307,19 +351,24 @@ details.more .body { padding:0 14px 14px; }
 
     <!-- Step 2: preferences -->
     <section id="prefs" hidden>
-      <button class="back" type="button" data-back="telegram"><svg class="i"><use href="#i-back"/></svg>Back</button>
+      <div class="bar-top">
+        <button class="back" type="button" data-back="telegram"><svg class="i"><use href="#i-back"/></svg>Back</button>
+        <button class="textbtn" type="button" id="prefs-out">Sign out</button>
+      </div>
       <h1>Preferences</h1>
       <p>Jellyfin is always installed. The rest is optional and can be changed later in the panel.</p>
       <div class="field">
-        <label class="lbl" for="language">Subtitle language</label>
-        <span class="hint">A code such as en, de, fr, fa or ja. Leave empty to skip subtitles.</span>
-        <input id="language" maxlength="12" autocomplete="off" placeholder="en">
+        <label class="lbl">Subtitle language</label>
+        <span class="hint">Tick every language you want kept. The first one you tick is preferred. Leave them all off to skip subtitles.</span>
+        <div class="langs" id="langs"></div>
       </div>
       <div class="box">
-        <label class="toggle"><span class="txt"><strong>Shared library</strong><span>Repost new files with a signed caption, so several installations can share one library.</span></span><input type="checkbox" id="group"></label>
+        <label class="toggle"><span class="txt"><strong>Shared library</strong><span>Several separate installations can use this one channel. A new file is posted again with a signed line, so the film is identified once and its subtitles are made once.</span></span><input type="checkbox" id="group" checked></label>
+        <label class="toggle"><span class="txt"><strong>Telegram search</strong><span>This account searches Telegram for a requested film, for example #tm_m_603. A file that is found is copied into the library.</span></span><input type="checkbox" id="tgsearch" checked></label>
         <label class="toggle"><span class="txt"><strong>Fladder</strong><span>A nicer web client for Jellyfin. Needs Docker.</span></span><input type="checkbox" id="fladder"></label>
-        <label class="toggle"><span class="txt"><strong>Seerr</strong><span>Request movies and shows. Needs Docker.</span></span><input type="checkbox" id="seerr"></label>
-        <label class="toggle indent"><span class="txt"><strong>Downloader</strong><span>Requests are fetched and added by themselves. Part of Seerr.</span></span><input type="checkbox" id="downloads" disabled></label>
+        <label class="toggle"><span class="txt"><strong>Seerr</strong><span>Request movies and shows. Needs Docker.</span></span><input type="checkbox" id="seerr" checked></label>
+        <label class="toggle indent"><span class="txt"><strong>Torrent</strong><span>Requests are fetched as torrents and added by themselves. Part of Seerr.</span></span><input type="checkbox" id="downloads"></label>
+        <div class="warn" id="dl-warn" hidden>Torrents connect this computer to strangers and can be illegal where you live. Your address is visible to other people in the swarm. Leave this off unless you accept that.</div>
       </div>
       <details class="more">
         <summary>I already run Jellyfin</summary>
@@ -345,21 +394,10 @@ details.more .body { padding:0 14px 14px; }
     <section id="done" hidden>
       <div class="done-ico"><svg class="i"><use href="#i-check"/></svg></div>
       <h1>All set</h1>
-      <p>Open Jellyfin at one of these addresses, in a browser or any Jellyfin app.</p>
-      <div id="urls"></div>
-      <div id="login" class="cred" hidden>
-        <span>User</span><code id="user"></code>
-        <span>Password</span><code id="password"></code>
-      </div>
-      <button class="btn wide" id="open" type="button" style="margin-top:18px">Open Jellyfin</button>
-      <div class="links">
-        <a id="seerr-link" href="/seerr/" hidden><svg class="i"><use href="#i-ext"/></svg>Request movies and shows in Seerr</a>
-        <a id="fladder-link" href="/fladder/" hidden><svg class="i"><use href="#i-ext"/></svg>Open Fladder</a>
-        <a id="panel" href=""><svg class="i"><use href="#i-ext"/></svg>Open the panel to add bots or watch away from home</a>
-      </div>
+      <p>Passwords, Jellyfin and Seerr are in the panel.</p>
+      <a class="btn wide" id="panel" href="" style="margin-top:18px">Go to panel</a>
     </section>
   </div>
-  <div class="foot">This page only works with the code printed on the console.</div>
 </div>
 
 <script>
@@ -401,12 +439,41 @@ for (const b of document.querySelectorAll('[data-back]')) {
   b.onclick = () => view(b.dataset.back === 'telegram' ? mode : b.dataset.back);
 }
 
+// The first ticked language is the preferred one. The rest are kept in that order.
+const languages = [['en','English'],['fa','Persian'],['ar','Arabic'],['de','German'],['fr','French'],['es','Spanish'],['it','Italian'],['pt','Portuguese'],['nl','Dutch'],['pl','Polish'],['sv','Swedish'],['da','Danish'],['no','Norwegian'],['fi','Finnish'],['cs','Czech'],['hu','Hungarian'],['ro','Romanian'],['el','Greek'],['tr','Turkish'],['ru','Russian'],['uk','Ukrainian'],['he','Hebrew'],['hi','Hindi'],['ja','Japanese'],['ko','Korean'],['zh','Chinese'],['th','Thai'],['vi','Vietnamese'],['id','Indonesian']];
+const langPick = [];
+function renderLangs() {
+  const box = $('langs');
+  box.replaceChildren();
+  for (const [code, name] of languages) {
+    const label = document.createElement('label');
+    label.className = 'pick';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = code;
+    input.checked = langPick.includes(code);
+    input.onchange = () => {
+      const at = langPick.indexOf(code);
+      if (input.checked && at < 0) langPick.push(code);
+      if (!input.checked && at >= 0) langPick.splice(at, 1);
+      renderLangs();
+    };
+    const text = document.createElement('span');
+    const rank = langPick.indexOf(code);
+    text.textContent = name + (rank === 0 ? ' · preferred' : '');
+    label.append(input, text);
+    box.append(label);
+  }
+}
+renderLangs();
+
 // ---- shared: what is checked and saved
 const values = () => ({
   auto: mode === 'auto',
   api_id: $('api_id').value, api_hash: $('api_hash').value, channel: $('channel').value, bots: $('bots').value,
-  language: $('language').value, jellyfin_url: $('jellyfin_url').value, jellyfin_key: $('jellyfin_key').value,
+  language: langPick.join(','), jellyfin_url: $('jellyfin_url').value, jellyfin_key: $('jellyfin_key').value,
   fladder: $('fladder').checked, seerr: $('seerr').checked, downloads: $('downloads').checked, group: $('group').checked,
+  telegram_search: $('tgsearch').checked,
 });
 
 // verify asks Telegram whether the bots can read the channel, and lists the answer in log.
@@ -433,16 +500,41 @@ $('check').onclick = () => busy($('check'), $('m-err'), async () => {
 });
 
 // ---- automatic
-const autoSteps = ['a-phone', 'a-code', 'a-pass', 'a-ask', 'a-yes', 'a-no', 'a-work'];
+const autoSteps = ['a-phone', 'a-code', 'a-pass', 'a-ask', 'a-yes', 'a-no', 'a-pick', 'a-work'];
 function autoStep(name) {
   for (const s of autoSteps) $(s).hidden = s !== name;
   $('a-err').textContent = '';
+  $('auto-out').hidden = name === 'a-phone' || name === 'a-code' || name === 'a-pass';
+  $('auto-back').onclick = () => name === 'a-pick' ? autoStep('a-ask') : view('choose');
+}
+$('auto-back').onclick = () => view('choose');
+let enteredPhone = '';
+function showPhone() {
+  $('code-phone').textContent = enteredPhone;
+  $('pass-phone').textContent = enteredPhone;
 }
 function signedIn(r) {
-  if (r.step === 'code') { autoStep('a-code'); $('tcode').focus(); return; }
-  if (r.step === 'password') { autoStep('a-pass'); $('tpass').focus(); return; }
+  if (r.step === 'code') {
+    showPhone();
+    if (r.note) $('code-help').textContent = r.note;
+    $('tcode').value = '';
+    autoStep('a-code');
+    $('tcode').focus();
+    return;
+  }
+  if (r.step === 'password') { showPhone(); $('tpass').value = ''; autoStep('a-pass'); $('tpass').focus(); return; }
   autoStep('a-ask');
   if (r.warning) $('a-err').textContent = r.warning;
+}
+async function changeNumber(btn) {
+  await busy(btn, $('a-err'), async () => {
+    await api('/setup/auto/login', {cancel: true});
+    $('tcode').value = '';
+    $('tpass').value = '';
+    autoStep('a-phone');
+    $('phone').focus();
+    $('phone').select();
+  });
 }
 
 $('pick-auto').onclick = async () => {
@@ -450,17 +542,49 @@ $('pick-auto').onclick = async () => {
   mode = 'auto';
   view('auto');
   $('a-log').replaceChildren(); $('a-next').hidden = true;
+  for (const s of autoSteps) $(s).hidden = true;
+  $('auto-out').hidden = true;
+  $('a-wait').hidden = false;
   try {
-    const info = await api('/setup/auto/info');
+    const info = await api('/setup/auto/resume', {});
+    $('a-wait').hidden = true;
     if (info.found) return found(info.found);
     autoStep(info.signed_in ? 'a-ask' : 'a-phone');
-  } catch (e) { $('a-err').textContent = e.message; }
+  } catch (e) {
+    $('a-wait').hidden = true;
+    $('a-err').textContent = e.message;
+  }
 };
 
-$('send-phone').onclick = () => busy($('send-phone'), $('a-err'), async () =>
-  signedIn(await api('/setup/auto/login', {phone: $('phone').value, api_id: $('a_api_id').value, api_hash: $('a_api_hash').value})));
+// A phone number is enough. The optional API fields are sent only when the person opened them and
+// filled both, so an autofilled or half-typed value cannot replace the built-in API.
+function ownAPI() {
+  if (!$('own-api').open) return {};
+  const id = $('a_api_id').value.trim();
+  const hash = $('a_api_hash').value.trim();
+  if (!/^[0-9]+$/.test(id) || !hash) return {};
+  return {api_id: id, api_hash: hash};
+}
+$('send-phone').onclick = () => busy($('send-phone'), $('a-err'), async () => {
+  enteredPhone = $('phone').value.trim();
+  signedIn(await api('/setup/auto/login', Object.assign({phone: enteredPhone}, ownAPI())));
+});
 $('send-code').onclick = () => busy($('send-code'), $('a-err'), async () => signedIn(await api('/setup/auto/login', {code: $('tcode').value})));
+$('code-resend').onclick = () => busy($('code-resend'), $('a-err'), async () => signedIn(await api('/setup/auto/login', {resend: true})));
 $('send-pass').onclick = () => busy($('send-pass'), $('a-err'), async () => signedIn(await api('/setup/auto/login', {password: $('tpass').value})));
+document.querySelectorAll('[data-reveal]').forEach(b => {
+  b.onclick = () => {
+    const input = $(b.dataset.reveal);
+    const show = input.type === 'password';
+    input.type = show ? 'text' : 'password';
+    b.setAttribute('aria-pressed', show ? 'true' : 'false');
+    b.setAttribute('aria-label', show ? 'Hide the password' : 'Show the password');
+    b.querySelector('.eye-on').hidden = show;
+    b.querySelector('.eye-off').hidden = !show;
+  };
+});
+$('code-change').onclick = () => changeNumber($('code-change'));
+$('pass-change').onclick = () => changeNumber($('pass-change'));
 $('ask-yes').onclick = () => { autoStep('a-yes'); $('a_channel').focus(); };
 $('ask-no').onclick = () => autoStep('a-no');
 
@@ -489,14 +613,37 @@ $('find').onclick = () => busy($('find'), $('a-err'), async () => {
 async function create(body) {
   const bots = Math.min(10, Math.max(1, parseInt($('a_bots').value, 10) || 3));
   await api('/setup/auto/create', {...body, bots});
+  await followJob();
+}
+
+async function pullLog() {
+  try {
+    const r = await api('/setup/auto/log');
+    const box = $('a-term-body');
+    box.textContent = (r.lines || []).join('\n');
+    box.scrollTop = box.scrollHeight;
+  } catch (e) { /* the log is optional */ }
+}
+$('a-term').addEventListener('toggle', () => { if ($('a-term').open) pullLog(); });
+
+// renderJob draws each line from its own result. A check is only the "ok" state.
+function renderJob(j) {
+  const log = $('a-log');
+  log.replaceChildren(...(j.progress || []).map(p => item(p.text, p.state === 'ok' ? '' : p.state === 'bad' ? 'bad' : 'wait')));
+}
+
+// followJob polls until the work stops, then shows the bots or the list to pick from.
+async function followJob() {
   autoStep('a-work');
   const log = $('a-log');
   for (;;) {
     await sleep(1500);
     let j;
     try { j = await api('/setup/auto/job'); } catch (e) { continue; }
-    log.replaceChildren(...j.progress.map((p, i) => item(p, j.running && i === j.progress.length - 1 ? 'wait' : '')));
+    renderJob(j);
+    pullLog();
     if (j.running) continue;
+    if (j.owned && j.owned.length) { showPick(j); return; }
     if (j.found) await found(j.found);
     if (j.error) {
       $('a-err').textContent = j.error + (j.found ? ' What was made so far is kept, and you can continue with it.' : '');
@@ -505,13 +652,72 @@ async function create(body) {
     return;
   }
 }
+
+// showPick lists the account's bots. Choosing one revokes its token and uses the new one.
+function showPick(j) {
+  autoStep('a-pick');
+  $('a-log').replaceChildren();
+  $('a-next').hidden = true;
+  const kept = $('pick-kept');
+  if (j.kept && j.kept.length) {
+    kept.hidden = false;
+    kept.textContent = 'Already added: ' + j.kept.map(b => '@' + b).join(', ') + '.';
+  } else {
+    kept.hidden = true;
+    kept.textContent = '';
+  }
+  const box = $('pick-list');
+  box.replaceChildren();
+  for (const b of j.owned) {
+    const label = document.createElement('label');
+    label.className = 'pick';
+    const input = document.createElement('input');
+    input.type = 'checkbox';
+    input.value = b.username;
+    const text = document.createElement('span');
+    text.textContent = '@' + b.username + (b.name ? ' — ' + b.name : '');
+    label.append(input, text);
+    box.append(label);
+  }
+}
+async function signOut(btn, errBox) {
+  errBox.textContent = '';
+  btn.disabled = true;
+  try {
+    await api('/setup/auto/logout', {});
+    enteredPhone = '';
+    $('phone').value = '';
+    $('a-log').replaceChildren();
+    $('a-next').hidden = true;
+    mode = 'auto';
+    view('auto');
+    autoStep('a-phone');
+    $('phone').focus();
+  } catch (e) { errBox.textContent = e.message; }
+  btn.disabled = false;
+}
+$('auto-out').onclick = () => signOut($('auto-out'), $('a-err'));
+$('prefs-out').onclick = () => signOut($('prefs-out'), $('p-err'));
+$('pick-go').onclick = () => busy($('pick-go'), $('a-err'), async () => {
+  const usernames = [...$('pick-list').querySelectorAll('input:checked')].map(i => i.value);
+  if (!usernames.length) throw new Error('Pick at least one bot.');
+  await api('/setup/auto/reuse', {usernames});
+  await followJob();
+});
 $('make').onclick = () => busy($('make'), $('a-err'), () => create({title: $('a_title').value}));
 $('make-here').onclick = () => busy($('make-here'), $('a-err'), () => create({channel: $('a_channel').value}));
 $('a-next').onclick = () => view('prefs');
 
 // ---- preferences and install
-// The downloader is part of Seerr: it can only be on while Seerr is.
-$('seerr').onchange = () => { $('downloads').disabled = !$('seerr').checked; if (!$('seerr').checked) $('downloads').checked = false; };
+// Torrent is part of Seerr, and the warning shows only while it is on.
+function torrentLock() {
+  $('downloads').disabled = !$('seerr').checked;
+  if (!$('seerr').checked) $('downloads').checked = false;
+  $('dl-warn').hidden = !$('downloads').checked;
+}
+$('seerr').onchange = torrentLock;
+$('downloads').onchange = torrentLock;
+torrentLock();
 $('go').onclick = () => busy($('go'), $('p-err'), async () => {
   await api('/setup/save', values());
   view('progress');
@@ -531,14 +737,9 @@ async function poll() {
   setTimeout(poll, 1000);
 }
 
-function finish(s) {
+function finish() {
   view('done');
-  $('urls').replaceChildren(...(s.urls || []).map(u => { const d = document.createElement('div'); d.className = 'url'; d.textContent = u; return d; }));
-  if (s.password) { $('login').hidden = false; $('user').textContent = s.user; $('password').textContent = s.password; }
-  $('seerr-link').hidden = !s.seerr;
-  $('fladder-link').hidden = !s.fladder;
-  $('open').onclick = () => { location.href = '/'; };
-  $('panel').href = '/panel?code=' + encodeURIComponent(code);
+  $('panel').href = '/panel?code=' + encodeURIComponent(code) + '#accounts';
 }
 
 // Enter moves on in every single-field step.

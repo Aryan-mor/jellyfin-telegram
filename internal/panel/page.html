@@ -405,9 +405,9 @@ details.grp .cat-body { padding:0 12px 4px; }
     <section id="tab-overview">
       <div class="page-head"><h1>Overview</h1><p>Everything this server runs, and where to open it.</p></div>
       <div class="grid" id="apps">
-        <a class="tile app-tile" href="/"><span class="app-ico"><svg class="i"><use href="#i-play"/></svg></span><div><strong>Jellyfin</strong><span>Watch your library</span></div></a>
-        <a class="tile app-tile" id="link-seerr" href="/seerr/" hidden><span class="app-ico"><svg class="i"><use href="#i-req"/></svg></span><div><strong>Seerr</strong><span>Request films and series</span></div></a>
-        <a class="tile app-tile" id="link-fladder" href="/fladder/" hidden><span class="app-ico"><svg class="i"><use href="#i-phone"/></svg></span><div><strong>Fladder</strong><span>A nicer web client</span></div></a>
+        <a class="tile app-tile" href="/" target="_blank" rel="noreferrer"><span class="app-ico"><svg class="i"><use href="#i-play"/></svg></span><div><strong>Jellyfin</strong><span>Watch your library</span></div></a>
+        <a class="tile app-tile" id="link-seerr" href="/seerr/" target="_blank" rel="noreferrer" hidden><span class="app-ico"><svg class="i"><use href="#i-req"/></svg></span><div><strong>Seerr</strong><span>Request films and series</span></div></a>
+        <a class="tile app-tile" id="link-fladder" href="/fladder/" target="_blank" rel="noreferrer" hidden><span class="app-ico"><svg class="i"><use href="#i-phone"/></svg></span><div><strong>Fladder</strong><span>A nicer web client</span></div></a>
       </div>
       <div class="grid" id="stats">
         <div class="tile"><div class="label"><svg class="i"><use href="#i-bot"/></svg>Bots</div><div class="value" id="st-bots">–</div><div class="sub" id="st-bots-sub">&nbsp;</div></div>
@@ -471,7 +471,7 @@ details.grp .cat-body { padding:0 12px 4px; }
           </ol>
         </details>
         <div class="cols">
-          <div class="field"><label for="api_id">API ID</label><input id="api_id" inputmode="numeric" autocomplete="off"></div>
+          <div class="field"><label for="api_id">API ID</label><input id="api_id" inputmode="numeric" autocomplete="off" placeholder="Unchanged if empty"></div>
           <div class="field"><label for="api_hash">API hash</label><div class="input-wrap"><input id="api_hash" type="password" autocomplete="off" placeholder="Unchanged if empty"><button class="btn icon" type="button" data-reveal="api_hash" aria-label="Show or hide the hash"><svg class="i"><use href="#i-eye"/></svg></button></div></div>
         </div>
         <div class="actions"><button id="save-api" class="btn" type="button">Save API</button></div>
@@ -509,6 +509,12 @@ details.grp .cat-body { padding:0 12px 4px; }
           </div>
         </div>
         <div id="channel-msg" class="alert"></div>
+      </div>
+      <div class="card">
+        <h2>Telegram search</h2>
+        <p>This account searches Telegram for a requested film, for example #tm_m_603. A file that is found is copied into the library. The next search uses the new setting.</p>
+        <label class="opt"><input type="checkbox" id="tg-search"> Search Telegram for requested titles</label>
+        <div id="tg-search-msg" class="alert"></div>
       </div>
       <div class="card" id="forum-card" hidden>
         <h2>Shared library</h2>
@@ -564,10 +570,9 @@ details.grp .cat-body { padding:0 12px 4px; }
       </div>
       <div class="card">
         <h2>Subtitle language</h2>
-        <p>The language to keep when a video has subtitles. Off skips subtitles.</p>
+        <p>Pick every language to keep. The highest one in the list is preferred. Leave them all off to skip subtitles.</p>
         <div class="field" style="max-width:280px"><label for="language">Subtitle language</label>
-          <select id="language">
-            <option value="">Off</option>
+          <select id="language" multiple size="8">
             <option value="en">English</option>
             <option value="fa">Persian</option>
             <option value="ar">Arabic</option>
@@ -664,6 +669,7 @@ details.grp .cat-body { padding:0 12px 4px; }
           <div class="main"><div class="title" id="dl-switch-label">Off</div><div class="meta" id="dl-dir"></div></div>
           <button id="dl-toggle" class="switch" type="button" role="switch" aria-checked="false" aria-label="Torrent downloads"></button>
         </div>
+        <div class="alert bad" id="dl-warn" hidden>Torrents connect this computer to strangers and can be illegal where you live. Your address is visible to other people in the swarm. Leave this off unless you accept that.</div>
         <div id="dl-msg" class="alert"></div>
       </div>
       <div class="card">
@@ -904,7 +910,7 @@ function drawAccounts(s) {
     const title = el('div', 'title');
     title.append(el('span', 'avatar', a.app.slice(0, 1).toUpperCase()));
     const text = el('div');
-    const link = el('a', '', a.app); link.href = a.path; link.style.fontWeight = '650';
+    const link = el('a', '', a.app); link.href = a.path; link.target = '_blank'; link.rel = 'noreferrer'; link.style.fontWeight = '650';
     text.append(link, el('div', 'meta', a.note || ''));
     title.append(text);
     main.append(title);
@@ -990,6 +996,11 @@ function draw(s) {
   $('st-dl-tile').hidden = !s.downloads;
   drawDownloads(s.downloads);
   drawForum(s.forum);
+  if ($('tg-search')) {
+    searchLock = true;
+    $('tg-search').checked = s.telegram_search !== false;
+    searchLock = false;
+  }
 }
 
 function drawForum(f) {
@@ -1163,6 +1174,17 @@ $('save-channel').onclick = () => {
 };
 $('forum-recheck').onclick = () => forumDo('recheck', {}, $('forum-recheck'));
 $('st-forum-tile').onclick = () => show('channel');
+let searchLock = false;
+$('tg-search').onchange = async () => {
+  if (searchLock) return;
+  try { await api('/panel/search', {on: $('tg-search').checked}); say('tg-search-msg', '', ''); }
+  catch (e) {
+    searchLock = true;
+    $('tg-search').checked = !$('tg-search').checked;
+    searchLock = false;
+    say('tg-search-msg', e.message, 'bad');
+  }
+};
 $('forum-group').onchange = () => forumDo('group', {on: $('forum-group').checked});
 $('forum-delete').onchange = () => forumDo('originals', {on: $('forum-delete').checked});
 let trustUser = '';
@@ -1209,17 +1231,19 @@ function drawMain(s) {
   $('cancel-channel').hidden = !id || !editing;
   $('save-channel').textContent = id ? 'Replace channel' : 'Save channel';
 }
-$('save-language').onclick = () => save({language:$('language').value}, $('save-language'), 'language-msg');
+$('save-language').onclick = () => save({language:[...$('language').selectedOptions].map(o => o.value).filter(Boolean).join(',')}, $('save-language'), 'language-msg');
 $('mirror-add').onclick = addMirror;
 
 function setLanguage(code) {
   const sel = $('language');
-  if (code && ![...sel.options].some(o => o.value === code)) {
-    const o = el('option', '', code);
-    o.value = code;
+  const want = new Set(String(code || '').split(/[,;\s]+/).filter(Boolean));
+  for (const value of want) {
+    if ([...sel.options].some(o => o.value === value)) continue;
+    const o = el('option', '', value);
+    o.value = value;
     sel.append(o);
   }
-  sel.value = code || '';
+  for (const o of sel.options) o.selected = want.has(o.value);
 }
 
 const partLabels = {movie:'Films', series:'Series', music:'Music', video:'General video'};
@@ -1334,6 +1358,7 @@ function drawDownloads(d) {
   if (!d) return;
   $('dl-switch-label').textContent = d.enabled ? 'Torrent downloads are on' : 'Torrent downloads are off';
   $('dl-toggle').setAttribute('aria-checked', d.enabled ? 'true' : 'false');
+  $('dl-warn').hidden = !d.enabled;
   const free = d.free_bytes ? (d.free_bytes/1024/1024/1024).toFixed(1) + ' GiB free' : '';
   $('dl-dir').textContent = [d.dir, free].filter(Boolean).join(' · ');
   $('st-dl').textContent = d.enabled ? 'On' : 'Off';
@@ -1517,7 +1542,7 @@ const plural = (n, word) => n + ' ' + word + (n === 1 ? '' : 's');
 const localApi = (action, body) => api('/panel/local/' + action, body || {});
 
 let confirmClose = null;
-function confirmBox(title, text, button) {
+function confirmBox(title, text, button, primary) {
   return new Promise(resolve => {
     $('confirm-title').textContent = title;
     $('confirm-text').textContent = text;
@@ -1527,7 +1552,7 @@ function confirmBox(title, text, button) {
     $('confirm-cancel').onclick = () => done(false);
     confirmClose = () => done(false);
     $('confirm-modal').hidden = false;
-    $('confirm-cancel').focus();
+    (primary ? $('confirm-ok') : $('confirm-cancel')).focus();
   });
 }
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && confirmClose) confirmClose(); });
@@ -1879,6 +1904,7 @@ $('src-toggle').onclick = async () => {
 $('src-add').onclick = async () => {
   const value = $('src-input').value.trim();
   if (!value) { say('src-add-msg', 'Enter a channel id or username.', 'bad'); return; }
+  const off = $('src-toggle').getAttribute('aria-checked') !== 'true';
   busy($('src-add'), true);
   say('src-add-msg', 'Asking Telegram…');
   try {
@@ -1886,8 +1912,14 @@ $('src-add').onclick = async () => {
     $('src-input').value = '';
     say('src-add-msg', res.source && res.source.no_forwards ? 'Added, but its owner forbids copying files out of it.' : 'Added.', res.source && res.source.no_forwards ? 'bad' : 'ok');
     loadSources(true);
-  } catch (e) { say('src-add-msg', e.message, 'bad'); }
-  busy($('src-add'), false);
+    busy($('src-add'), false);
+    if (!off) return;
+    const yes = await confirmBox('Turn direct file channels on?', 'The channel is saved. Nothing is copied until this is on.', 'Turn on', true);
+    if (!yes) return;
+    await srcApi('settings', {enabled:true});
+    say('src-msg', 'On. The first check starts now.', 'ok');
+    loadSources(true);
+  } catch (e) { say('src-add-msg', e.message, 'bad'); busy($('src-add'), false); }
 };
 $('src-input').addEventListener('keydown', e => { if (e.key === 'Enter') $('src-add').click(); });
 $('src-check').onclick = async () => { try { await srcApi('check'); toast('Checking'); setTimeout(() => loadSources(true), 1200); } catch (e) { say('src-msg', e.message, 'bad'); } };
@@ -2033,10 +2065,17 @@ $('news-add-account').onclick = () => openLogin();
 $('news-add').onclick = async () => {
   const value = $('news-input').value.trim();
   if (!value) { say('news-msg', 'Enter a channel id or username.', 'bad'); return; }
+  const off = $('news-toggle').getAttribute('aria-checked') !== 'true';
   try {
     await srcApi('news_add', {channel:value});
     $('news-input').value = '';
     say('news-msg', 'Added.', 'ok');
+    loadSources(true);
+    if (!off) return;
+    const yes = await confirmBox('Turn news channels on?', 'The channel is saved. Bot links are not opened until this is on.', 'Turn on', true);
+    if (!yes) return;
+    await srcApi('news', {enabled:true});
+    say('news-msg', 'On. Bot links are opened on the next check.', 'ok');
     loadSources(true);
   } catch (e) { say('news-msg', e.message, 'bad'); }
 };
@@ -2059,7 +2098,7 @@ $('news-update').onclick = async () => {
 };
 setInterval(() => { if (!document.hidden && (!$('tab-sources').hidden || !$('tab-news').hidden) && $('login-modal').hidden) loadSources(false); }, 5000);
 
-show(location.hash.slice(1) || 'overview');
+show(location.hash.slice(1) || 'accounts');
 api('/panel/state').then(draw).catch(e => { toast(e.message, true); say('bot-msg', e.message, 'bad'); });
 // Keep queue and upload progress fresh. Only the downloads view redraws, so nothing being typed is lost.
 setInterval(() => { if (!document.hidden && $('login-modal').hidden) api('/panel/state').then(s => { drawDownloads(s.downloads); drawSessions(s.telegram && s.telegram.sessions); }).catch(() => {}); }, 8000);

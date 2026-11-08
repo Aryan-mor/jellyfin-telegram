@@ -22,6 +22,8 @@ var ErrNoFreeSession = errors.New("no signed-in account is free right now")
 type SourceRef struct {
 	ChannelID int64
 	Username  string
+	// AccessHash is set when a search already learned it. Zero means it still has to be looked up.
+	AccessHash int64
 }
 
 // Channel describes a channel found for a link, username or id.
@@ -147,6 +149,10 @@ func (m *Manager) HasFreeSession() bool {
 func (lv *live) peer(ctx context.Context, api *tg.Client, ref SourceRef) (*tg.InputPeerChannel, error) {
 	if lv.hashes == nil {
 		lv.hashes = map[int64]int64{}
+	}
+	if ref.AccessHash != 0 {
+		lv.hashes[ref.ChannelID] = ref.AccessHash
+		return &tg.InputPeerChannel{ChannelID: ref.ChannelID, AccessHash: ref.AccessHash}, nil
 	}
 	if h, ok := lv.hashes[ref.ChannelID]; ok {
 		return &tg.InputPeerChannel{ChannelID: ref.ChannelID, AccessHash: h}, nil

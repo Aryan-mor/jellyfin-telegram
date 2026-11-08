@@ -43,40 +43,152 @@ func (c *botFatherChat) Send(ctx context.Context, text string) (int, error) {
 		Peer: c.peer, Message: text, RandomID: int64(binary.LittleEndian.Uint64(b[:])),
 	})
 	if err != nil {
+		Record(">> " + text + " (" + err.Error() + ")")
 		return 0, err
 	}
+	Record(">> " + text)
 	return sentID(res), nil
 }
 
 func (c *botFatherChat) Reply(ctx context.Context, after int) (string, error) {
+	m, err := c.readAfter(ctx, after)
+	if err != nil {
+		Record("<< " + err.Error())
+		return "", err
+	}
+	Record("<< " + firstLine(reToken.ReplaceAllString(m.Message, "[token]")))
+	return m.Message, nil
+}
+
+func (c *botFatherChat) Marked(ctx context.Context, after int) (string, int, []Button, error) {
+	m, err := c.readAfter(ctx, after)
+	if err != nil {
+		return "", 0, nil, err
+	}
+	return m.Message, m.ID, buttonsOf(m), nil
+}
+
+// Press pushes an inline button. BotFather either edits that message or sends a new one.
+func (c *botFatherChat) Press(ctx context.Context, msgID int, data []byte) (string, int, []Button, error) {
+	prev, prevKeys := "", ""
+	if msgs, err := c.history(ctx, msgID-1); err == nil {
+		for _, raw := range msgs {
+			if m, ok := raw.(*tg.Message); ok && m.ID == msgID {
+				prev = m.Message
+				prevKeys = buttonKey(buttonsOf(m))
+			}
+		}
+	}
+	req := &tg.MessagesGetBotCallbackAnswerRequest{Peer: c.peer, MsgID: msgID}
+	req.SetData(data)
+	if _, err := c.api.MessagesGetBotCallbackAnswer(ctx, req); err != nil {
+		return "", 0, nil, err
+	}
 	deadline := time.Now().Add(c.wait)
 	for time.Now().Before(deadline) {
 		select {
 		case <-ctx.Done():
-			return "", ctx.Err()
+			return "", 0, nil, ctx.Err()
 		case <-time.After(700 * time.Millisecond):
 		}
-		res, err := c.api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: c.peer, MinID: after, Limit: 10})
+		msgs, err := c.history(ctx, msgID-1)
 		if err != nil {
-			return "", err
+			return "", 0, nil, err
+		}
+		var edited, newer *tg.Message
+		for _, raw := range msgs {
+			m, ok := raw.(*tg.Message)
+			if !ok || m.Out {
+				continue
+			}
+			if m.ID == msgID && (m.Message != prev || buttonKey(buttonsOf(m)) != prevKeys) {
+				edited = m
+			}
+			if m.ID > msgID && (newer == nil || m.ID < newer.ID) {
+				newer = m
+			}
+		}
+		if edited != nil {
+			return edited.Message, edited.ID, buttonsOf(edited), nil
+		}
+		if newer != nil {
+			return newer.Message, newer.ID, buttonsOf(newer), nil
+		}
+	}
+	return "", 0, nil, ErrBotFatherSilent
+}
+
+func (c *botFatherChat) readAfter(ctx context.Context, after int) (*tg.Message, error) {
+	deadline := time.Now().Add(c.wait)
+	for time.Now().Before(deadline) {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(700 * time.Millisecond):
+		}
+		msgs, err := c.history(ctx, after)
+		if err != nil {
+			return nil, err
 		}
 		// History comes newest first. The answer to our message is the oldest incoming one after it.
-		var text string
-		best := 0
-		for _, raw := range messagesOf(res) {
+		var best *tg.Message
+		for _, raw := range msgs {
 			m, ok := raw.(*tg.Message)
 			if !ok || m.Out || m.ID <= after {
 				continue
 			}
-			if best == 0 || m.ID < best {
-				best, text = m.ID, m.Message
+			if best == nil || m.ID < best.ID {
+				best = m
 			}
 		}
-		if best != 0 {
-			return text, nil
+		if best != nil {
+			return best, nil
 		}
 	}
-	return "", ErrBotFatherSilent
+	return nil, ErrBotFatherSilent
+}
+
+func (c *botFatherChat) history(ctx context.Context, minID int) ([]tg.MessageClass, error) {
+	res, err := c.api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{Peer: c.peer, MinID: minID, Limit: 15})
+	if err != nil {
+		return nil, err
+	}
+	return messagesOf(res), nil
+}
+
+func buttonsOf(m *tg.Message) []Button {
+	if m == nil || m.ReplyMarkup == nil {
+		return nil
+	}
+	var out []Button
+	switch mk := m.ReplyMarkup.(type) {
+	case *tg.ReplyInlineMarkup:
+		for _, row := range mk.Rows {
+			for _, b := range row.Buttons {
+				btn := Button{Text: b.Text}
+				if cb, ok := b.Type.(*tg.InlineButtonTypeCallback); ok {
+					btn.Data = append([]byte(nil), cb.Data...)
+				}
+				out = append(out, btn)
+			}
+		}
+	case *tg.ReplyKeyboardMarkup:
+		for _, row := range mk.Rows {
+			for _, b := range row.Buttons {
+				out = append(out, Button{Text: b.Text})
+			}
+		}
+	}
+	return out
+}
+
+func buttonKey(buttons []Button) string {
+	var b strings.Builder
+	for _, btn := range buttons {
+		b.WriteString(btn.Text)
+		b.WriteByte(0)
+	}
+	return b.String()
 }
 
 func messagesOf(res tg.MessagesMessagesClass) []tg.MessageClass {
@@ -128,6 +240,22 @@ func CreateChannel(ctx context.Context, api *tg.Client, title, about string) (Cr
 	return Created{}, errors.New("Telegram did not return the new channel")
 }
 
+// archiveFolder is Telegram's Archive. Folder 0 is the main chat list.
+const archiveFolder = 1
+
+// ArchiveChannel moves a channel into Archive. It is done once, when the channel is created.
+// Taking it back out later is left to the person; nothing puts it back.
+func ArchiveChannel(ctx context.Context, api *tg.Client, channelID, accessHash int64) error {
+	_, err := api.FoldersEditPeerFolders(ctx, []tg.InputFolderPeer{{
+		Peer:     &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash},
+		FolderID: archiveFolder,
+	}})
+	if err != nil {
+		return fmt.Errorf("move the channel to Archive: %w", err)
+	}
+	return nil
+}
+
 // BotUser is a bot as a Telegram user.
 type BotUser struct {
 	ID         int64
@@ -164,6 +292,74 @@ func PromoteBot(ctx context.Context, api *tg.Client, channelID, accessHash int64
 		return fmt.Errorf("make @%s an admin: %w", bot.Username, err)
 	}
 	return nil
+}
+
+// LibraryReport describes every channel whose title contains "jellyfin", in the main list and in
+// Archive, and names the bot admins. It is the check that the channel and the bots really exist.
+func LibraryReport(ctx context.Context, api *tg.Client) ([]string, error) {
+	var lines []string
+	for _, folder := range []int{0, 1} {
+		where := "chats"
+		if folder == 1 {
+			where = "archive"
+		}
+		channels, err := channelsInFolder(ctx, api, folder)
+		if err != nil {
+			return lines, err
+		}
+		for _, ch := range channels {
+			if !strings.Contains(strings.ToLower(ch.Title), "jellyfin") {
+				continue
+			}
+			admins, err := BotAdmins(ctx, api, ch.ID, ch.AccessHash)
+			if err != nil {
+				lines = append(lines, fmt.Sprintf("channel %q id=%d in %s: %v", ch.Title, ch.ID, where, err))
+				continue
+			}
+			names := make([]string, 0, len(admins))
+			for _, a := range admins {
+				if a.Username != "" {
+					names = append(names, "@"+a.Username)
+				}
+			}
+			if len(names) == 0 {
+				names = []string{"none"}
+			}
+			lines = append(lines, fmt.Sprintf("channel %q id=%d in %s admins=%s", ch.Title, ch.ID, where, strings.Join(names, " ")))
+		}
+	}
+	return lines, nil
+}
+
+func channelsInFolder(ctx context.Context, api *tg.Client, folder int) ([]*tg.Channel, error) {
+	req := &tg.MessagesGetDialogsRequest{OffsetPeer: &tg.InputPeerEmpty{}, Limit: 100}
+	if folder != 0 {
+		req.SetFolderID(folder)
+	}
+	res, err := api.MessagesGetDialogs(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	var chats []tg.ChatClass
+	switch v := res.(type) {
+	case *tg.MessagesDialogs:
+		chats = v.Chats
+	case *tg.MessagesDialogsSlice:
+		chats = v.Chats
+	default:
+		return nil, nil
+	}
+	var out []*tg.Channel
+	seen := map[int64]bool{}
+	for _, raw := range chats {
+		ch, ok := raw.(*tg.Channel)
+		if !ok || ch.AccessHash == 0 || seen[ch.ID] {
+			continue
+		}
+		seen[ch.ID] = true
+		out = append(out, ch)
+	}
+	return out, nil
 }
 
 // BotAdmins lists the bots that are admins of the channel.

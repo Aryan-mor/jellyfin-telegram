@@ -18,6 +18,13 @@ func TestUsernameShape(t *testing.T) {
 	}
 }
 
+func TestExcludeOwnedDropsBotsAlreadyTaken(t *testing.T) {
+	got := excludeOwned([]OwnedBot{{Username: "Keep_Bot"}, {Username: "old_bot"}}, []string{"keep_bot"})
+	if len(got) != 1 || got[0].Username != "old_bot" {
+		t.Fatalf("got %+v", got)
+	}
+}
+
 func TestSlugNeverStartsWithADigit(t *testing.T) {
 	if got := slug("42"); got[0] < 'a' || got[0] > 'z' {
 		t.Errorf("got %q", got)

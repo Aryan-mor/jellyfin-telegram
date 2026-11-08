@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"golang.org/x/text/unicode/norm"
 )
 
 // Identifier finds the TMDB id of a movie from its title alone, so a file posted without a year
@@ -95,9 +97,14 @@ func pickMeta(title string, results []SearchResult) (int, string, bool, error) {
 	return 0, "", false, nil
 }
 
+// fold compares titles so "Evlilik Guzeldir" and "Evlilik Güzeldir" are the same name.
+// Marks such as ü and ş are dropped. Letters that are different without a mark still differ.
 func fold(s string) string {
 	var b strings.Builder
-	for _, r := range strings.ToLower(s) {
+	for _, r := range norm.NFD.String(strings.ToLower(s)) {
+		if unicode.Is(unicode.Mn, r) {
+			continue
+		}
 		if unicode.IsLetter(r) || unicode.IsDigit(r) {
 			b.WriteRune(r)
 		}

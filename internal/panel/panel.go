@@ -105,6 +105,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/sources/{action}", p.guard(p.handleSourceAction))
 	mux.HandleFunc("POST /panel/mirrors/{action}", p.guard(p.handleMirrorAction))
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
+	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
 	return mux
 }
 
@@ -167,20 +168,36 @@ type botView struct {
 }
 
 type state struct {
-	APIID     int       `json:"api_id"`
-	ChannelID int64     `json:"channel_id"`
-	Language  string    `json:"language"`
-	Bots      []botView `json:"bots"`
-	Addresses []address `json:"addresses"`
-	Seerr     bool      `json:"seerr"`
-	Fladder   bool      `json:"fladder"`
-	Downloads any       `json:"downloads,omitempty"`
-	Mirrors   any       `json:"mirrors,omitempty"`
-	Local     bool      `json:"local"`
-	Sources   bool      `json:"sources"`
-	Telegram  any       `json:"telegram,omitempty"`
-	Accounts  []Account `json:"accounts"`
-	Forum     any       `json:"forum,omitempty"`
+	APIID          int       `json:"api_id,omitempty"`
+	ChannelID      int64     `json:"channel_id"`
+	Language       string    `json:"language"`
+	Bots           []botView `json:"bots"`
+	Addresses      []address `json:"addresses"`
+	Seerr          bool      `json:"seerr"`
+	Fladder        bool      `json:"fladder"`
+	Downloads      any       `json:"downloads,omitempty"`
+	TelegramSearch bool      `json:"telegram_search"`
+	Mirrors        any       `json:"mirrors,omitempty"`
+	Local          bool      `json:"local"`
+	Sources        bool      `json:"sources"`
+	Telegram       any       `json:"telegram,omitempty"`
+	Accounts       []Account `json:"accounts"`
+	Forum          any       `json:"forum,omitempty"`
+}
+
+func (p *panel) handleSearch(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		On *bool `json:"on"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.On == nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := setup.UpdateEnv(p.o.EnvPath, map[string]string{"TELEGRAM_SEARCH": strconv.FormatBool(*body.On)}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
 }
 
 func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
@@ -523,11 +540,12 @@ func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
 	if body.Language != nil && strings.TrimSpace(*body.Language) != cur.language {
 		language = ""
 		if raw := strings.TrimSpace(*body.Language); raw != "" {
-			language = lang.Normalize(raw)
-			if language == "" {
-				writeError(w, http.StatusBadRequest, "the language must be a code such as en, de, fa or ja")
+			codes, err := lang.List(raw)
+			if err != nil || len(codes) == 0 {
+				writeError(w, http.StatusBadRequest, "pick a subtitle language from the list")
 				return
 			}
+			language = strings.Join(codes, ",")
 		}
 	}
 	if err := p.commit(r, apiID, hash, channel, language, cur.tokens); err != nil {
@@ -646,11 +664,12 @@ func writePanelError(w http.ResponseWriter, err error) {
 }
 
 type fileSettings struct {
-	apiID    int
-	hash     string
-	channel  int64
-	language string
-	tokens   []string
+	apiID          int
+	hash           string
+	channel        int64
+	language       string
+	tokens         []string
+	telegramSearch bool
 }
 
 func readFile(path string) (fileSettings, error) {
@@ -675,6 +694,10 @@ func readFile(path string) (fileSettings, error) {
 		return fileSettings{}, fmt.Errorf("TELEGRAM_BOT_TOKENS: %w", err)
 	}
 	s.language = m["SUBTITLE_LANGUAGE"]
+	s.telegramSearch = true
+	if v, ok := m["TELEGRAM_SEARCH"]; ok && strings.EqualFold(strings.TrimSpace(v), "false") {
+		s.telegramSearch = false
+	}
 	return s, nil
 }
 
@@ -689,7 +712,11 @@ func (p *panel) snapshot() (state, error) {
 			live[b.ID] = b
 		}
 	}
-	s := state{APIID: cur.apiID, ChannelID: cur.channel, Language: cur.language, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}}
+	s := state{ChannelID: cur.channel, Language: cur.language, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
+	// The API this build ships with is not a value the person chose, so the panel leaves the field blank.
+	if id, hash, ok := config.DefaultAPI(); !ok || cur.apiID != id || cur.hash != hash {
+		s.APIID = cur.apiID
+	}
 	if p.o.Accounts != nil {
 		s.Accounts = p.o.Accounts()
 	}

@@ -3,6 +3,7 @@
 package lang
 
 import (
+	"fmt"
 	"regexp"
 	"strings"
 	"unicode"
@@ -43,6 +44,27 @@ func Normalize(code string) string {
 		return ""
 	}
 	return base.String()
+}
+
+// List reads one or more language codes, separated by commas. The order is kept and repeats are
+// dropped. One part that is not a language is an error. An empty input is an empty list.
+func List(raw string) ([]string, error) {
+	var out []string
+	seen := map[string]bool{}
+	for _, part := range strings.FieldsFunc(raw, func(r rune) bool {
+		return r == ',' || r == ';' || unicode.IsSpace(r)
+	}) {
+		code := Normalize(part)
+		if code == "" {
+			return nil, fmt.Errorf("%q is not a language code", part)
+		}
+		if seen[code] {
+			continue
+		}
+		seen[code] = true
+		out = append(out, code)
+	}
+	return out, nil
 }
 
 // ISO3 returns the three-letter code of a normalized language.

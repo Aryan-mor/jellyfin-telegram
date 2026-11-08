@@ -15,7 +15,25 @@ if (-not (Test-Path $exe)) {
 
 if ($Build -or -not (Test-Path $exe)) {
     Write-Host "building $exe"
-    & go build -o $exe ./cmd/jellyfin-telegram
+    $ldflags = @()
+    $local = Join-Path $root '.build.local'
+    if (Test-Path $local) {
+        $vars = @{}
+        foreach ($line in Get-Content $local) {
+            if ($line -match '^\s*#' -or $line -notmatch '=') { continue }
+            $key, $value = $line.Split('=', 2)
+            $vars[$key.Trim()] = $value.Trim()
+        }
+        $pkg = 'github.com/Aryan-mor/jellyfin-telegram/internal/config'
+        if ($vars.DefaultAPIID -and $vars.DefaultAPIHash) {
+            $ldflags = "-X ${pkg}.DefaultAPIID=$($vars.DefaultAPIID) -X ${pkg}.DefaultAPIHash=$($vars.DefaultAPIHash)"
+        }
+    }
+    if ($ldflags) {
+        & go build -ldflags $ldflags -o $exe ./cmd/jellyfin-telegram
+    } else {
+        & go build -o $exe ./cmd/jellyfin-telegram
+    }
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 

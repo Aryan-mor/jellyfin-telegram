@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 )
 
@@ -92,6 +93,24 @@ func TestStateHidesTokensAndMarksTailscale(t *testing.T) {
 		if !strings.Contains(text, want) {
 			t.Fatalf("page is missing %q", want)
 		}
+	}
+}
+
+func TestStateOmitsTheBuiltInAPI(t *testing.T) {
+	config.DefaultAPIID, config.DefaultAPIHash = "12345", "abcdef"
+	t.Cleanup(func() { config.DefaultAPIID, config.DefaultAPIHash = "", "" })
+	srv, _ := serve(t, nil, nil)
+	res, err := http.Get(srv.URL + "/panel/state?code=secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var body map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := body["api_id"]; ok {
+		t.Fatalf("the built-in api_id was sent to the browser: %v", body["api_id"])
 	}
 }
 

@@ -5,15 +5,33 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fuckjoin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsearch"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
+	fileresolver "github.com/Aryan-mor/telegram-file-resolver"
 )
+
+// startSearch looks up requested titles on Telegram and copies a file it finds. It stays quiet until
+// Seerr has a request and the switch is on.
+func startSearch(cfg config.Config, envPath string, users *tguser.Manager, log *slog.Logger) *tgsearch.Service {
+	svc := &tgsearch.Service{LibraryChannel: cfg.ChannelID, Log: log, On: tgsearch.Switch(envPath)}
+	if users != nil {
+		svc.TG = users
+	}
+	if cfg.SeerrManaged {
+		svc.Want = &tgsearch.Seerr{Base: (&seerr.Server{}).URL(), Root: filepath.Join(cfg.DataDir, "seerr")}
+	}
+	return svc
+}
 
 // startSources prepares the copier of films and series from other Telegram channels. It stays idle
 // until a person turns it on in the panel, and it needs a signed-in account. It returns nil when
@@ -29,14 +47,26 @@ func startSources(cfg config.Config, cat *catalog.Catalog, users *tguser.Manager
 
 // startNews prepares the list of channels that post bot links. The fuckjoin checkout is downloaded
 // into the data directory the first time it is needed. Nil news means there is no signed-in account.
-func startNews(cfg config.Config, cat *catalog.Catalog, users *tguser.Manager, sources *tgsource.Service, log *slog.Logger) (*newsfeed.Service, *fuckjoin.Runtime) {
+func startNews(ctx context.Context, cfg config.Config, cat *catalog.Catalog, users *tguser.Manager, sources *tgsource.Service, log *slog.Logger) (*newsfeed.Service, *fuckjoin.Runtime) {
 	fj := fuckjoin.New(cfg.DataDir, cfg.APIID, cfg.APIHash, log)
 	if sources == nil || users == nil {
 		return nil, fj
 	}
 	svc := newsfeed.New()
 	svc.Cat, svc.TG, svc.LibraryChannel, svc.Log = cat, users, cfg.ChannelID, log
-	svc.Open = &newsfeed.Bridge{FJ: fj, TG: users}
+	// The resolver runs in this process on the signed-in account, so there is no second login. The
+	// fuckjoin runtime above is kept only until the resolver has passed a live test.
+	rc := fileresolver.DefaultConfig()
+	rc.StateDir, rc.Log = filepath.Join(cfg.DataDir, "resolver"), log
+	// Several private channels per link add up quickly. A slower pace keeps Telegram's join limit away.
+	rc.PacingDelay = 10 * time.Second
+	if eng, err := fileresolver.New(newsfeed.Provider(users), rc); err != nil {
+		log.Warn("news resolver could not start; falling back to fuckjoin", "err", err)
+		svc.Open = &newsfeed.Bridge{FJ: fj, TG: users}
+	} else {
+		go func() { _ = eng.Run(ctx) }()
+		svc.Open = &newsfeed.Resolver{Eng: eng, Note: svc.SetNote}
+	}
 	return svc, fj
 }
 

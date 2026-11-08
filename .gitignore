@@ -1,5 +1,6 @@
 # Secrets and sessions
 .env
+.build.local
 /data/
 
 # Generated library
@@ -19,3 +20,6 @@ Thumbs.db
 .idea/
 .vscode/
 *.log
+
+# graphify knowledge graph (rebuild with: graphify update .)
+/graphify-out/

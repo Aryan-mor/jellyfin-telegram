@@ -22,7 +22,7 @@ func clearEnv(t *testing.T) {
 			strings.HasPrefix(key, "UPLOAD_") || strings.HasPrefix(key, "DOWNLOADS_") || strings.HasPrefix(key, "BITMAGNET_") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
 			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" ||
-			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" {
+			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" || key == "TELEGRAM_SEARCH" {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}
@@ -77,6 +77,13 @@ func TestLoadValid(t *testing.T) {
 	}
 	if c.DownloadsDir != filepath.Join("./data", "downloads") {
 		t.Errorf("downloads dir = %s", c.DownloadsDir)
+	}
+	if !c.TelegramSearch {
+		t.Error("telegram search is on unless turned off")
+	}
+	c, err = load(t, validEnv+"TELEGRAM_SEARCH=false\n")
+	if err != nil || c.TelegramSearch {
+		t.Fatalf("search off: %+v %v", c.TelegramSearch, err)
 	}
 }
 
@@ -193,6 +200,10 @@ func TestSubtitleLanguage(t *testing.T) {
 	c, err := load(t, validEnv+"SUBTITLE_LANGUAGE=ger\n")
 	if err != nil || c.SubtitleLanguage != "de" {
 		t.Errorf("got %q, %v", c.SubtitleLanguage, err)
+	}
+	c, err = load(t, validEnv+"SUBTITLE_LANGUAGE=fa, en, fa\n")
+	if err != nil || c.SubtitleLanguage != "fa" || strings.Join(c.SubtitleLanguages, ",") != "fa,en" {
+		t.Errorf("list: %q %v %v", c.SubtitleLanguage, c.SubtitleLanguages, err)
 	}
 	c, err = load(t, validEnv)
 	if err != nil || c.SubtitleLanguage != "" {

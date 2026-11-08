@@ -41,6 +41,16 @@ func TestParseAndRelPath(t *testing.T) {
 			"Movies/I watched this in (2020)/I watched this in (2020).strm", true},
 		{"episode x form", "Lost 1x05.avi", "",
 			"Shows/Lost/Season 01/Lost S01E05.strm", true},
+		{"zero padded episode is season 1", "Muhtemel.Ask_020_720p(@EADizi).mkv", "",
+			"Shows/Muhtemel Ask/Season 01/Muhtemel Ask S01E20.strm", true},
+		{"glued episode number", "Evlilik.Guzeldir.E009.HardSub.540p.(@EADizi).mp4", "",
+			"Shows/Evlilik Guzeldir/Season 01/Evlilik Guzeldir S01E09.strm", true},
+		{"hyphens in the show name", "Gunesin-Dogdugu-Yer.E008.HardSub.720p.mkv", "",
+			"Shows/Gunesin Dogdugu Yer/Season 01/Gunesin Dogdugu Yer S01E08.strm", true},
+		{"turkish bölüm", "Halef: Köklerin Çağrısı 41. Bölüm.mp4", "",
+			"Shows/Halef - Köklerin Çağrısı/Season 01/Halef - Köklerin Çağrısı S01E41.strm", true},
+		{"bare zero is not an episode", "020.mkv", "",
+			"Movies/020/020.strm", false},
 		{"persian title", "جدایی نادر از سیمین 2011.mkv", "",
 			"Movies/جدایی نادر از سیمین (2011)/جدایی نادر از سیمین (2011).strm", true},
 		{"generic name falls back to caption", "video_2024.mp4", "🎬 Dune (2021)\n1080p",
@@ -49,6 +59,10 @@ func TestParseAndRelPath(t *testing.T) {
 			"Movies/Dune (2021) [tmdbid-438631]/Dune (2021) [tmdbid-438631].strm", true},
 		{"tmdb url in caption", "Dune.2021.mkv", "https://www.themoviedb.org/movie/438631-dune",
 			"Movies/Dune (2021) [tmdbid-438631]/Dune (2021) [tmdbid-438631].strm", true},
+		{"tmdb episode url", "Muhtemel.Ask_020_720p.mkv", "https://www.themoviedb.org/tv/322499/season/1/episode/20",
+			"Shows/Muhtemel Ask [tmdbid-322499]/Season 01/Muhtemel Ask S01E20.strm", true},
+		{"tmdb episode url with a slug", "Muhtemel.Ask_020_720p.mkv", "https://www.themoviedb.org/tv/322499-muhtemel-ask/season/1/episode/20",
+			"Shows/Muhtemel Ask [tmdbid-322499]/Season 01/Muhtemel Ask S01E20.strm", true},
 		{"episode only in caption", "Severance.mkv", "Severance\nS02E04",
 			"Shows/Severance/Season 02/Severance S02E04.strm", true},
 		{"handles and tags removed", "@somechannel Heat [Director Cut] 1995 BluRay.mkv", "",
@@ -76,6 +90,48 @@ func TestParseAndRelPath(t *testing.T) {
 				t.Errorf("Matchable = %v, want %v", p.Matchable(), tc.matchable)
 			}
 		})
+	}
+}
+
+func TestCaptionSuppliesSeasonEpisodeAndTitle(t *testing.T) {
+	caption := strings.Join([]string{
+		".📹سریال : «  ازدواج زیباست  »",
+		"📹 Evlilik Guzeldir",
+		"📂فصل اول",
+		"🔸قسمت  9",
+		"🟢کیفیت  540p",
+		"✔️زیرنویس چسبیده فارسی  TV24",
+		"🔸بدون سانسور",
+		"",
+		"@EvlilikGuzeldir_ir",
+	}, "\n")
+	p := Parse("video.mp4", caption)
+	if !p.Episode || p.Season != 1 || p.Number != 9 || p.Title != "Evlilik Guzeldir" {
+		t.Fatalf("parsed %+v", p)
+	}
+	want := "Shows/Evlilik Guzeldir/Season 01/Evlilik Guzeldir S01E09.strm"
+	if got := p.RelPath(42, ""); got != want {
+		t.Fatalf("RelPath = %q", got)
+	}
+	// A season written in the file name wins over the caption.
+	p = Parse("Show.S02E04.mkv", "فصل اول\nقسمت 9\nEvlilik Guzeldir")
+	if p.Season != 2 || p.Number != 4 {
+		t.Fatalf("caption overrode S02E04: %+v", p)
+	}
+}
+
+func TestHintReady(t *testing.T) {
+	if !HintReady("https://www.themoviedb.org/tv/322499/season/1/episode/20") {
+		t.Fatal("episode link")
+	}
+	if !HintReady("tmdb 603") {
+		t.Fatal("film id")
+	}
+	if HintReady("https://www.themoviedb.org/tv/322499") {
+		t.Fatal("a series link with no episode should wait")
+	}
+	if HintReady("hello") {
+		t.Fatal("plain text")
 	}
 }
 
@@ -200,6 +256,19 @@ func TestSignedLineWinsAndOldCaptionsStay(t *testing.T) {
 	head := Caption(Head{Title: "The Matrix", Year: 1999, TMDB: 603, IMDb: "tt0133093", Label: "1080p", Soft: []string{"fa (srt)", "en (ass)"}, Hard: "none"})
 	if !strings.Contains(head, "The Matrix (1999)") || strings.Contains(head, "#") || !strings.Contains(head, "fa (srt)") {
 		t.Fatal(head)
+	}
+	withSource := Caption(Head{Title: "The Matrix", Year: 1999, Source: SourceLine("Movies", "movies")})
+	if !strings.HasSuffix(withSource, "\n"+SourceLine("Movies", "movies")) {
+		t.Fatalf("source line: %q", withSource)
+	}
+	if SourceLine("Movies", "movies") != "📡 Source: Movies (@movies)" {
+		t.Fatal(SourceLine("Movies", "movies"))
+	}
+	if SourceLine("Secret", "") != "📡 Source: private channel" || strings.Contains(SourceLine("Secret", ""), "Secret") {
+		t.Fatal(SourceLine("Secret", ""))
+	}
+	if SourceIn("note\n"+SourceLine("Movies", "movies")) != SourceLine("Movies", "movies") || SourceIn("note") != "" {
+		t.Fatal("SourceIn")
 	}
 	if len(head) > 900 {
 		t.Fatalf("head is %d characters", len(head))

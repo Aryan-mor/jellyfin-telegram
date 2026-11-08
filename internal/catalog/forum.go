@@ -68,6 +68,24 @@ func (c *Catalog) CloseInboxDoc(ctx context.Context, docID int64) ([]int, error)
 	return ids, err
 }
 
+// InboxAfter lists up to limit message ids in state, strictly after after, oldest first.
+func (c *Catalog) InboxAfter(ctx context.Context, state string, after, limit int) ([]int, error) {
+	rows, err := c.db.QueryContext(ctx, `SELECT message_id FROM inbox_files WHERE state=? AND message_id>? ORDER BY message_id LIMIT ?`, state, after, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []int
+	for rows.Next() {
+		var id int
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, id)
+	}
+	return out, rows.Err()
+}
+
 // OpenInbox lists inbox files that still need a decision.
 func (c *Catalog) OpenInbox(ctx context.Context) ([]int, error) {
 	rows, err := c.db.QueryContext(ctx, `SELECT message_id FROM inbox_files WHERE state=? ORDER BY message_id`, "open")

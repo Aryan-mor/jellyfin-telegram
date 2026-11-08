@@ -14,6 +14,7 @@ require (
 )
 
 require (
+	github.com/Aryan-mor/telegram-file-resolver v0.0.0
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -57,3 +58,5 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )
+
+replace github.com/Aryan-mor/telegram-file-resolver => ../telegram-file-resolver

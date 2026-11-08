@@ -15,14 +15,19 @@ func TestPickTMDB(t *testing.T) {
 		{"one exact match among providers", []SearchResult{tm("The Love Hypothesis", "1032863"), omdb}, 1032863},
 		{"punctuation and case are ignored", []SearchResult{tm("the love hypothesis!", "5")}, 5},
 		{"a different title is not taken", []SearchResult{tm("Love Hypothesis 2", "9")}, 0},
+		{"turkish marks are the same name", []SearchResult{tm("Evlilik Güzeldir", "329662")}, 329662},
 		{"a remake with the same title is ambiguous", []SearchResult{tm("Dune", "1"), tm("Dune", "2")}, 0},
 		{"no results", nil, 0},
 	}
 	for _, c := range cases {
-		got, ok, err := pickTMDB("The Love Hypothesis", c.results)
+		query := "The Love Hypothesis"
 		if c.name == "a remake with the same title is ambiguous" {
-			got, ok, err = pickTMDB("Dune", c.results)
+			query = "Dune"
 		}
+		if c.name == "turkish marks are the same name" {
+			query = "Evlilik Guzeldir"
+		}
+		got, ok, err := pickTMDB(query, c.results)
 		if err != nil || got != c.want || ok != (c.want > 0) {
 			t.Errorf("%s: got %d %v %v", c.name, got, ok, err)
 		}

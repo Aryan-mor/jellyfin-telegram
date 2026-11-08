@@ -98,6 +98,25 @@ func (m *Manager) SetDefaults(p Pace) {
 	m.mu.Unlock()
 }
 
+// HasSaved reports whether a finished sign-in is stored on disk.
+func (m *Manager) HasSaved() bool {
+	entries, err := os.ReadDir(m.dir)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		name := e.Name()
+		if e.IsDir() || !strings.HasSuffix(name, ".json") || strings.HasPrefix(name, "pending-") || strings.HasSuffix(name, ".tmp") {
+			continue
+		}
+		id, err := strconv.ParseInt(strings.TrimSuffix(name, ".json"), 10, 64)
+		if err == nil && id > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Connect starts every saved session. A bad session is reported on the panel and does not stop the others.
 func (m *Manager) Connect(ctx context.Context) error {
 	entries, err := os.ReadDir(m.dir)
@@ -429,6 +448,43 @@ func (m *Manager) SetPace(id int64, p Pace, hoursSet bool) error {
 		lv.meta.Hours = &h
 	}
 	return lv.store.writeMeta(lv.meta)
+}
+
+// LogoutAll ends every saved session and deletes its file, so a different account can sign in.
+func (m *Manager) LogoutAll(ctx context.Context) error {
+	m.mu.Lock()
+	ids := make([]int64, 0, len(m.sessions))
+	for id := range m.sessions {
+		ids = append(ids, id)
+	}
+	m.mu.Unlock()
+	var err error
+	for _, id := range ids {
+		if e := m.Logout(ctx, id); e != nil && err == nil {
+			err = e
+		}
+	}
+	entries, e := os.ReadDir(m.dir)
+	if e != nil {
+		if err == nil {
+			err = e
+		}
+		return err
+	}
+	for _, ent := range entries {
+		name := ent.Name()
+		if ent.IsDir() || !strings.HasSuffix(name, ".json") {
+			continue
+		}
+		if strings.HasPrefix(name, "pending-") || strings.HasSuffix(name, ".tmp") {
+			_ = os.Remove(filepath.Join(m.dir, name))
+			continue
+		}
+		if _, e := strconv.ParseInt(strings.TrimSuffix(name, ".json"), 10, 64); e == nil {
+			_ = os.Remove(filepath.Join(m.dir, name))
+		}
+	}
+	return err
 }
 
 // Logout ends the Telegram session and deletes its file.

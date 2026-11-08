@@ -198,6 +198,19 @@ func (c *Catalog) RestartSourceWalk(ctx context.Context) error {
 	return err
 }
 
+// CopyOrigin is the channel a document was copied from. ok is false when this document was not copied.
+func (c *Catalog) CopyOrigin(ctx context.Context, docID int64) (Source, bool, error) {
+	var id int64
+	err := c.db.QueryRowContext(ctx, `SELECT source_id FROM tgcopied WHERE doc_id=? AND state=?`, docID, CopyDone).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Source{}, false, nil
+	}
+	if err != nil {
+		return Source{}, false, err
+	}
+	return c.Source(ctx, id)
+}
+
 // CopiedDoc reports whether this document was already copied, or already refused for good.
 func (c *Catalog) CopiedDoc(ctx context.Context, docID int64) (bool, error) {
 	var n int

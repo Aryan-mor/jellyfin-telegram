@@ -44,10 +44,12 @@ type Config struct {
 	JellyfinURL    string
 	JellyfinAPIKey string
 
-	// SubtitleLanguage is a normalized language code. Empty turns subtitle handling off.
-	SubtitleLanguage string
-	SubtitlesOnline  bool
-	FFprobePath      string
+	// SubtitleLanguage is the preferred language, the first of SubtitleLanguages. Empty turns
+	// subtitle handling off.
+	SubtitleLanguage  string
+	SubtitleLanguages []string
+	SubtitlesOnline   bool
+	FFprobePath       string
 
 	// ExtractBytesPerSecond limits background subtitle extraction. Zero turns it off.
 	ExtractBytesPerSecond int64
@@ -94,6 +96,9 @@ type Config struct {
 	// SignedLibrary turns on the shared library: new files are reposted with a signed caption that
 	// other installations can read. Off keeps the channel as it always was.
 	SignedLibrary bool
+	// TelegramSearch looks up requested titles on Telegram with the signed-in account and copies a
+	// file it finds into the library. On unless TELEGRAM_SEARCH=false.
+	TelegramSearch bool
 	// InboxDeleteOriginals removes an inbox file after it has been copied to Ready.
 	InboxDeleteOriginals bool
 }
@@ -219,9 +224,12 @@ func Load(envPath string) (Config, error) {
 	}
 	c.ExtractBytesPerSecond = int64(mbps) * 1000 * 1000
 	if raw := get("SUBTITLE_LANGUAGE", ""); raw != "" {
-		c.SubtitleLanguage = lang.Normalize(raw)
-		if c.SubtitleLanguage == "" {
-			fail("SUBTITLE_LANGUAGE must be a language code such as en, de, fa or ja")
+		codes, err := lang.List(raw)
+		if err != nil || len(codes) == 0 {
+			fail("SUBTITLE_LANGUAGE must be language codes such as en, fa or de, separated by commas")
+		} else {
+			c.SubtitleLanguages = codes
+			c.SubtitleLanguage = codes[0]
 		}
 	}
 	c.JellyfinManaged = c.JellyfinURL == "" && !strings.EqualFold(get("JELLYFIN_MANAGED", "true"), "false")
@@ -272,6 +280,8 @@ func Load(envPath string) (Config, error) {
 		}
 	}
 	c.SignedLibrary = strings.EqualFold(get("SIGNED_LIBRARY", ""), "true")
+	search := strings.TrimSpace(get("TELEGRAM_SEARCH", "true"))
+	c.TelegramSearch = search == "" || strings.EqualFold(search, "true") || search == "1"
 	c.InboxDeleteOriginals = strings.EqualFold(get("INBOX_DELETE_ORIGINALS", ""), "true")
 	c.UploadHours = get("UPLOAD_HOURS", "")
 	if _, _, err := ParseHours(c.UploadHours); err != nil {

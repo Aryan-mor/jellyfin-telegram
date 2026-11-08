@@ -7,6 +7,9 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gotd/td/tg"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -63,7 +66,7 @@ func (a *autoSetup) current() (*tguser.Manager, error) {
 }
 
 func loginResult(r tguser.LoginResult) setup.AutoLogin {
-	return setup.AutoLogin{Step: string(r.Step), Warning: r.Warning}
+	return setup.AutoLogin{Step: string(r.Step), Warning: r.Warning, Note: r.Note}
 }
 
 func (a *autoSetup) BeginLogin(ctx context.Context, apiID int, apiHash, phone string) (setup.AutoLogin, error) {
@@ -93,6 +96,15 @@ func (a *autoSetup) SubmitPassword(ctx context.Context, password string) (setup.
 	return loginResult(r), err
 }
 
+func (a *autoSetup) Resend(ctx context.Context) (setup.AutoLogin, error) {
+	users, err := a.current()
+	if err != nil {
+		return setup.AutoLogin{}, err
+	}
+	r, err := users.ResendLogin(ctx)
+	return loginResult(r), err
+}
+
 func (a *autoSetup) CancelLogin() {
 	if users, err := a.current(); err == nil {
 		users.CancelLogin()
@@ -104,6 +116,108 @@ func (a *autoSetup) SignedIn() bool {
 	return err == nil && users.SignedIn()
 }
 
+// Resume connects a session left on disk by an earlier sign-in and waits until it is up.
+// No saved session returns false at once, and the page asks for the phone number.
+func (a *autoSetup) Resume(ctx context.Context) (bool, error) {
+	if a.SignedIn() {
+		a.noteLibrary(ctx)
+		return true, nil
+	}
+	id, hash, ok := config.DefaultAPI()
+	if !ok {
+		return false, nil
+	}
+	users, err := a.manager(id, hash)
+	if err != nil {
+		return false, err
+	}
+	if !users.HasSaved() {
+		if users.SignedIn() {
+			a.noteLibrary(ctx)
+		}
+		return users.SignedIn(), nil
+	}
+	deadline := time.NewTimer(12 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for {
+		if users.SignedIn() {
+			a.noteLibrary(ctx)
+			return true, nil
+		}
+		select {
+		case <-ctx.Done():
+			return false, ctx.Err()
+		case <-deadline.C:
+			if users.SignedIn() {
+				a.noteLibrary(ctx)
+			}
+			return users.SignedIn(), nil
+		case <-tick.C:
+		}
+	}
+}
+
+// noteLibrary writes which library channel exists and which bots are admins. A failure here does
+// not stop sign-in.
+func (a *autoSetup) noteLibrary(ctx context.Context) {
+	users, err := a.current()
+	if err != nil {
+		return
+	}
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	val, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+		return tgsetup.LibraryReport(ctx, api)
+	})
+	if err != nil {
+		tgsetup.Record("library check: " + err.Error())
+		return
+	}
+	lines, _ := val.([]string)
+	if len(lines) == 0 {
+		tgsetup.Record("library check: no Jellyfin channel yet")
+		return
+	}
+	for _, line := range lines {
+		tgsetup.Record(line)
+	}
+}
+
+// Logout ends the account saved on disk. A session that is still connecting gets a few seconds,
+// then the file is removed either way so the next sign-in can use a different number.
+func (a *autoSetup) Logout(ctx context.Context) error {
+	a.mu.Lock()
+	users := a.users
+	a.mu.Unlock()
+	if users == nil {
+		id, hash, ok := config.DefaultAPI()
+		if !ok {
+			return errors.New("sign in first")
+		}
+		var err error
+		users, err = a.manager(id, hash)
+		if err != nil {
+			return err
+		}
+	}
+	deadline := time.NewTimer(8 * time.Second)
+	defer deadline.Stop()
+	tick := time.NewTicker(200 * time.Millisecond)
+	defer tick.Stop()
+	for users.HasSaved() && !users.SignedIn() {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-deadline.C:
+			return users.LogoutAll(ctx)
+		case <-tick.C:
+		}
+	}
+	return users.LogoutAll(ctx)
+}
+
 func (a *autoSetup) runner() (*tgsetup.Runner, error) {
 	users, err := a.current()
 	if err != nil {
@@ -113,7 +227,11 @@ func (a *autoSetup) runner() (*tgsetup.Runner, error) {
 }
 
 func foundOf(f tgsetup.Found) setup.AutoFound {
-	return setup.AutoFound{ChannelID: f.ChannelID, Title: f.Title, Tokens: f.Tokens, Bots: f.Bots, Skipped: f.Skipped}
+	out := setup.AutoFound{ChannelID: f.ChannelID, Title: f.Title, Tokens: f.Tokens, Bots: f.Bots, Skipped: f.Skipped}
+	for _, b := range f.Owned {
+		out.Owned = append(out.Owned, setup.OwnedBot{Username: b.Username, Name: b.Name})
+	}
+	return out
 }
 
 func (a *autoSetup) Existing(ctx context.Context, channel string) (setup.AutoFound, error) {
@@ -125,12 +243,23 @@ func (a *autoSetup) Existing(ctx context.Context, channel string) (setup.AutoFou
 	return foundOf(f), err
 }
 
-func (a *autoSetup) Create(ctx context.Context, o setup.AutoCreate, progress func(string)) (setup.AutoFound, error) {
+func (a *autoSetup) Create(ctx context.Context, o setup.AutoCreate, progress func(string, string)) (setup.AutoFound, error) {
 	r, err := a.runner()
 	if err != nil {
 		return setup.AutoFound{}, err
 	}
 	f, err := r.Create(ctx, tgsetup.CreateOptions{Title: o.Title, Channel: o.Channel, Bots: o.Bots}, progress)
+	return foundOf(f), err
+}
+
+func (a *autoSetup) Reuse(ctx context.Context, o setup.AutoReuse, progress func(string, string)) (setup.AutoFound, error) {
+	r, err := a.runner()
+	if err != nil {
+		return setup.AutoFound{}, err
+	}
+	f, err := r.Reuse(ctx, tgsetup.ReuseOptions{
+		ChannelID: o.ChannelID, Title: o.Title, Tokens: o.Tokens, Bots: o.Bots, Usernames: o.Usernames,
+	}, progress)
 	return foundOf(f), err
 }
 

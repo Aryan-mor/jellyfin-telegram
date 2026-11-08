@@ -236,6 +236,49 @@ func newKey(t *testing.T) *sign.Key {
 	return key
 }
 
+func TestPublishedCaptionNamesAPublicSourceAndHidesAPrivateOne(t *testing.T) {
+	ctx := context.Background()
+	w := newWorld()
+	w.put(film(10, 1000, "The Matrix (1999).mkv", "from a channel"))
+	w.put(film(11, 2000, "Heat (1995).mkv", "from a private channel"))
+	w.put(film(12, 3000, "Dune (2021).mkv", "posted here"))
+	svc := newInstall(t, w, 11, newKey(t))
+	pub, err := svc.Cat.AddSource(ctx, catalog.Source{ChannelID: 500, Username: "movies", Title: "Movies"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, err := svc.Cat.AddSource(ctx, catalog.Source{ChannelID: 501, Title: "Secret Films"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Cat.MarkCopied(ctx, epoch, 1000, pub.ID, 42, "The Matrix (1999).mkv", 1000, catalog.CopyDone, ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := svc.Cat.MarkCopied(ctx, epoch, 2000, priv.ID, 7, "Heat (1995).mkv", 1000, catalog.CopyDone, ""); err != nil {
+		t.Fatal(err)
+	}
+	passes(t, 6, svc)
+	byDoc := map[int64]string{}
+	for _, m := range posts(w) {
+		byDoc[m.File.DocID] = m.File.Caption
+	}
+	if len(byDoc) != 3 {
+		t.Fatalf("signed posts = %d", len(byDoc))
+	}
+	if !strings.Contains(byDoc[1000], "📡 Source: Movies (@movies)") {
+		t.Fatalf("public source missing:\n%s", byDoc[1000])
+	}
+	if !strings.Contains(byDoc[2000], "📡 Source: private channel") || strings.Contains(byDoc[2000], "Secret Films") {
+		t.Fatalf("private source:\n%s", byDoc[2000])
+	}
+	if strings.Contains(byDoc[3000], "📡 Source:") {
+		t.Fatalf("a file posted here has a source line:\n%s", byDoc[3000])
+	}
+	if !strings.HasSuffix(byDoc[1000], "\n#tm_m_603") || len(byDoc[1000]) > sign.CaptionLimit {
+		t.Fatalf("caption shape: %d\n%s", len(byDoc[1000]), byDoc[1000])
+	}
+}
+
 func TestTwoInstallationsClaimOnceAndWriteTheStatusInTheCaption(t *testing.T) {
 	w := newWorld()
 	w.put(film(10, 1000, "The Matrix (1999).mkv", "my own note"))
@@ -343,11 +386,101 @@ func TestUnidentifiedIsRejectedWithAReasonInTheCaption(t *testing.T) {
 		t.Fatalf("state = %q %v", state, err)
 	}
 	// Nobody takes a rejected file up again, not even another installation.
+	// A reply that does not name a title changes nothing either.
+	w.put(media.Message{ID: 11, Exists: true, ReplyTo: 10, Date: epoch, Text: "what is this"})
 	other := newInstall(t, w, 22, newKey(t))
 	edits := w.edits
 	passes(t, 3, other)
 	if w.edits != edits {
 		t.Fatal("a rejected file was edited again")
+	}
+}
+
+func TestTMDBReplyReopensARejectedFile(t *testing.T) {
+	w := newWorld()
+	w.put(film(10, 1000, "Muhtemel.Ask_020_720p.mkv", "from my phone"))
+	svc := newInstall(t, w, 11, newKey(t))
+	svc.Identify = func(context.Context, string, bool) (int, string, bool, error) {
+		return 0, "", false, nil
+	}
+	passes(t, 2, svc)
+	if status(t, caption(w, 10)) != sign.StatusRejected {
+		t.Fatal("the file was not rejected")
+	}
+	// The reply is already behind the cursor: the pass that saw it did not know it was a hint.
+	w.put(media.Message{
+		ID: 11, Exists: true, ReplyTo: 10, Date: epoch,
+		Text: "https://www.themoviedb.org/tv/322499/season/1/episode/20",
+	})
+	if err := svc.Cat.SetStateValue(context.Background(), "forum.cursor", "12"); err != nil {
+		t.Fatal(err)
+	}
+	passes(t, 3, svc)
+	all := posts(w)
+	if len(all) != 1 {
+		t.Fatalf("signed posts = %d, raw = %q", len(all), caption(w, 10))
+	}
+	w.mu.Lock()
+	_, replyLeft := w.msgs[11]
+	w.mu.Unlock()
+	if replyLeft {
+		t.Fatal("the tmdb reply is still in the channel")
+	}
+	meta, ok := sign.ParseCaption(all[0].File.Caption)
+	if !ok || meta.TMDB != 322499 || meta.Kind != "e" || meta.Season != 1 || meta.Episode != 20 {
+		t.Fatalf("meta = %+v ok=%v", meta, ok)
+	}
+	state, _, err := svc.Cat.InboxState(context.Background(), 10)
+	if err != nil || (state != "ready" && state != "duplicate") {
+		t.Fatalf("state = %q %v", state, err)
+	}
+}
+
+func TestRejectedGluedEpisodeIsTriedAgain(t *testing.T) {
+	w := newWorld()
+	note := ".📹سریال : «  ازدواج زیباست  »\n📹 Evlilik Guzeldir\n📂فصل اول\n🔸قسمت  9"
+	raw := sign.WithHeader(sign.StatusRejected, "unidentified", "", note)
+	w.put(film(10, 1000, "Evlilik.Guzeldir.E009.HardSub.540p.mkv", raw))
+	svc := newInstall(t, w, 11, newKey(t))
+	svc.Identify = func(_ context.Context, title string, episode bool) (int, string, bool, error) {
+		if episode && title == "Evlilik Guzeldir" {
+			return 329662, "tt34976627", true, nil
+		}
+		return 0, "", false, nil
+	}
+	if err := svc.Cat.SetInbox(context.Background(), 10, "rejected", 0, 1000); err != nil {
+		t.Fatal(err)
+	}
+	passes(t, 2, svc)
+	all := posts(w)
+	if len(all) != 1 {
+		t.Fatalf("signed posts = %d, raw = %q", len(all), caption(w, 10))
+	}
+	meta, ok := sign.ParseCaption(all[0].File.Caption)
+	if !ok || meta.TMDB != 329662 || meta.Kind != "e" || meta.Season != 1 || meta.Episode != 9 {
+		t.Fatalf("meta = %+v ok=%v", meta, ok)
+	}
+}
+
+func TestSeriesLinkWithoutEpisodeDoesNotReopen(t *testing.T) {
+	w := newWorld()
+	w.put(film(10, 1000, "clip.mkv", "from my phone"))
+	svc := newInstall(t, w, 11, newKey(t))
+	svc.Identify = func(context.Context, string, bool) (int, string, bool, error) {
+		return 0, "", false, nil
+	}
+	passes(t, 2, svc)
+	w.put(media.Message{
+		ID: 11, Exists: true, ReplyTo: 10, Date: epoch,
+		Text: "https://www.themoviedb.org/tv/322499",
+	})
+	edits := w.edits
+	passes(t, 2, svc)
+	w.mu.Lock()
+	_, replyLeft := w.msgs[11]
+	w.mu.Unlock()
+	if w.edits != edits || status(t, caption(w, 10)) != sign.StatusRejected || !replyLeft {
+		t.Fatal("a series link with no episode reopened the file")
 	}
 }
 

@@ -40,6 +40,8 @@ type Values struct {
 	Downloads bool `json:"downloads"`
 	// Group turns on the shared library: new files are posted again with a signed caption.
 	Group bool `json:"group"`
+	// TelegramSearch looks up a requested title on Telegram and copies a file it finds.
+	TelegramSearch bool `json:"telegram_search"`
 	// Auto means the Telegram details come from the automatic setup held on the server: the
 	// api_id, the channel and the bot tokens never pass through the browser.
 	Auto bool `json:"auto"`
@@ -181,9 +183,11 @@ func parse(v Values) (apiID int, channel int64, tokens []string, language string
 // parseExtras checks the part both ways share: the language and an existing Jellyfin.
 func parseExtras(v Values) (language string, err error) {
 	if raw := strings.TrimSpace(v.Language); raw != "" {
-		if language = lang.Normalize(raw); language == "" {
-			return "", errors.New("the language must be a code such as en, de, fa or ja")
+		codes, err := lang.List(raw)
+		if err != nil || len(codes) == 0 {
+			return "", errors.New("pick a subtitle language from the list")
 		}
+		language = strings.Join(codes, ",")
 	}
 	if (strings.TrimSpace(v.JellyfinURL) == "") != (strings.TrimSpace(v.JellyfinKey) == "") {
 		return "", errors.New("an existing Jellyfin needs both its address and an API key")
@@ -261,6 +265,7 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		"FLADDER_MANAGED":        fmt.Sprint(v.Fladder),
 		"DOWNLOADS_ENABLED":      fmt.Sprint(v.Downloads),
 		"SIGNED_LIBRARY":         fmt.Sprint(v.Group),
+		"TELEGRAM_SEARCH":        fmt.Sprint(v.TelegramSearch),
 		"INBOX_DELETE_ORIGINALS": "false",
 	})
 	if err != nil {

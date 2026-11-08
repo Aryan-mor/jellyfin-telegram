@@ -29,14 +29,25 @@ type Parsed struct {
 func (p Parsed) Matchable() bool { return p.TMDBID > 0 || p.Year > 0 || p.Episode }
 
 var (
-	reTMDBURL  = regexp.MustCompile(`(?i)themoviedb\.org/(?:movie|tv)/(\d+)`)
-	reTMDBTag  = regexp.MustCompile(`(?i)\btmdb(?:id)?[\s:=_-]*(\d+)\b`)
+	reTMDBURL = regexp.MustCompile(`(?i)themoviedb\.org/(?:movie|tv)/(\d+)`)
+	reTMDBTag = regexp.MustCompile(`(?i)\btmdb(?:id)?[\s:=_-]*(\d+)\b`)
+	// A slug may sit between the id and /season, as in /tv/322499-muhtemel-ask/season/1/episode/20.
+	reTMDBPage = regexp.MustCompile(`(?i)themoviedb\.org/(movie|tv)/(\d+)[^/\s]*(?:/season/(\d+)/episode/(\d+))?`)
 	reEpisode  = regexp.MustCompile(`(?i)\bS(\d{1,2})\s*-?\s*E(\d{1,3})\b`)
 	reEpisodeX = regexp.MustCompile(`\b(\d{1,2})x(\d{2,3})\b`)
-	reYear     = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
-	reLabel    = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|576p|480p|360p|4k)\b`)
-	reTag      = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|576p|480p|360p|4k|uhd|hdr|bluray|blu ray|brrip|bdrip|web dl|webdl|webrip|hdtv|dvdrip|remux|x264|x265|h264|h265|hevc|av1|aac|dts|ac3|10bit|dubbed|softsub|hardsub)\b`)
-	reBrackets = regexp.MustCompile(`\[[^\]]*\]|\{[^}]*\}`)
+	// E009 is an episode with no season. The E is glued to the number, unlike a bare 020.
+	reEEpisode = regexp.MustCompile(`(?i)\bE(\d{2,3})\b`)
+	// "41. Bölüm" is the Turkish way to write an episode number.
+	reBolum = regexp.MustCompile(`(?i)\b(\d{1,4})\s+b[oö]l[uü]m\b`)
+	// A zero-padded number with no season, as in Show_020_720p. The zero is padding, not season 0.
+	reBareEpisode = regexp.MustCompile(`\b0(\d{2})\b`)
+	reFaSeason    = regexp.MustCompile(`فصل\s*[:：]?\s*(اول|دوم|سوم|چهارم|پنجم|ششم|هفتم|هشتم|نهم|دهم|\d{1,2})`)
+	reFaEpisode   = regexp.MustCompile(`قسمت\s*[:：]?\s*(\d{1,4})`)
+	reQuoted      = regexp.MustCompile(`«\s*([^»]+?)\s*»`)
+	reYear        = regexp.MustCompile(`\b(19\d{2}|20\d{2})\b`)
+	reLabel       = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|576p|480p|360p|4k)\b`)
+	reTag         = regexp.MustCompile(`(?i)\b(2160p|1440p|1080p|720p|576p|480p|360p|4k|uhd|hdr|bluray|blu ray|brrip|bdrip|web dl|webdl|webrip|hdtv|dvdrip|remux|x264|x265|h264|h265|hevc|av1|aac|dts|ac3|10bit|dubbed|softsub|hardsub)\b`)
+	reBrackets    = regexp.MustCompile(`\[[^\]]*\]|\{[^}]*\}`)
 	// A handle stops at a separator, because names like @chan_The_Movie_2018 use
 	// underscores between words and \w would swallow the whole title.
 	reHandle = regexp.MustCompile(`@[^\s._-]+`)
@@ -66,10 +77,24 @@ func Parse(fileName, caption string) Parsed {
 	}
 	parseInto(&p, name)
 
+	_, _, _, explicit, _ := locateEpisode(normalize(name))
 	if !p.Episode {
-		if s, e, ok := findEpisode(normalize(caption)); ok {
+		if s, e, _, ex, ok := locateEpisode(normalize(caption)); ok {
 			p.Episode, p.Season, p.Number = true, s, e
+			explicit = ex
 		}
+	}
+	// A channel post often says the season and episode in Persian under the file name.
+	// "فصل اول" / "قسمت 9" fills whatever the file name left out. A written S02E04 is kept.
+	if cs, ce, ok := faShow(caption); ok {
+		if !p.Episode {
+			p.Episode, p.Season, p.Number = true, cs, ce
+		} else if !explicit && cs > 0 {
+			p.Season = cs
+		}
+	}
+	if title := captionTitle(caption); title != "" && (WeakTitle(p.Title) || !hasLatin(p.Title)) {
+		p.Title = title
 	}
 	if p.Label == "" {
 		if m := reLabel.FindString(normalize(caption)); m != "" {
@@ -90,12 +115,62 @@ func Parse(fileName, caption string) Parsed {
 			p.Year = fromCaption.Year
 		}
 	}
+	// A TMDB page names the title outright. An episode page wins over the file name, which is how
+	// an admin corrects a file the parser could not place. A signed line still wins over that.
+	if ref := tmdbPage(fileName + "\n" + caption); ref.ok {
+		p.TMDBID = ref.id
+		if ref.tv && ref.season > 0 && ref.episode > 0 {
+			p.Episode = true
+			p.Season = ref.season
+			p.Number = ref.episode
+		} else if ref.movie {
+			p.Episode = false
+			p.Season = 0
+			p.Number = 0
+		}
+	}
 	// A signed library line wins over the file name. Old captions have none, so they
 	// keep the result above.
 	if meta, ok := sign.ParseCaption(caption); ok {
 		applySigned(&p, meta)
 	}
 	return p
+}
+
+// HintReady reports whether text names a film, or one episode, by a TMDB link or id.
+// A link to a whole series, with no season and episode, is not enough to index one file.
+func HintReady(text string) bool {
+	if Parse("", text).TMDBID <= 0 {
+		return false
+	}
+	ref := tmdbPage(text)
+	return !ref.ok || !ref.tv || (ref.season > 0 && ref.episode > 0)
+}
+
+type tmdbRef struct {
+	id      int
+	movie   bool
+	tv      bool
+	season  int
+	episode int
+	ok      bool
+}
+
+func tmdbPage(s string) tmdbRef {
+	m := reTMDBPage.FindStringSubmatch(s)
+	if m == nil {
+		return tmdbRef{}
+	}
+	id, _ := strconv.Atoi(m[2])
+	if id <= 0 {
+		return tmdbRef{}
+	}
+	ref := tmdbRef{id: id, ok: true, movie: strings.EqualFold(m[1], "movie"), tv: strings.EqualFold(m[1], "tv")}
+	if m[4] != "" {
+		ref.season, _ = strconv.Atoi(m[3])
+		ref.episode, _ = strconv.Atoi(m[4])
+	}
+	return ref
 }
 
 // Head is the readable part of a signed library caption.
@@ -113,6 +188,8 @@ type Head struct {
 	// Audio is already display text, such as "fa (dubbed)". Empty leaves the audio line out.
 	Audio []string
 	Hard  string
+	// Source is already a caption line, such as "📡 Source: Movies (@movies)". Empty leaves it out.
+	Source string
 }
 
 // Caption builds the readable head. The signed line is added by the caller.
@@ -151,7 +228,40 @@ func Caption(h Head) string {
 	if line := audioLine(h.Audio); line != "" {
 		head += "\n" + line
 	}
-	return fmt.Sprintf("%s\n💬 Soft: %s · Hard: %s", head, soft, hard)
+	head = fmt.Sprintf("%s\n💬 Soft: %s · Hard: %s", head, soft, hard)
+	if h.Source != "" {
+		head += "\n" + h.Source
+	}
+	return head
+}
+
+// Source prefix of the line that says where a copied file came from.
+const sourcePrefix = "📡 Source: "
+
+// SourceLine names the channel a file was copied from.
+// A public channel (one with a username) is named. A private channel is not: the caption is
+// copied onward, and a private title should not travel with it.
+func SourceLine(title, username string) string {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	title = strings.TrimSpace(title)
+	if username == "" {
+		return sourcePrefix + "private channel"
+	}
+	if title == "" {
+		return sourcePrefix + "@" + username
+	}
+	return fmt.Sprintf("%s%s (@%s)", sourcePrefix, title, username)
+}
+
+// SourceIn reads a source line already written in a caption. An empty string means there is none.
+func SourceIn(caption string) string {
+	for _, line := range strings.Split(caption, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, sourcePrefix) {
+			return line
+		}
+	}
+	return ""
 }
 
 // Tag is the hashtag that ends a library caption: #tm_m_<tmdb> for a film and
@@ -376,7 +486,7 @@ func parseInto(p *Parsed, raw string) {
 func normalize(s string) string {
 	s = reBrackets.ReplaceAllString(s, " ")
 	s = reHandle.ReplaceAllString(s, " ")
-	s = strings.NewReplacer(".", " ", "_", " ", "(", " ", ")", " ", "\n", " ", "\r", " ").Replace(s)
+	s = strings.NewReplacer(".", " ", "_", " ", "-", " ", "(", " ", ")", " ", "\n", " ", "\r", " ").Replace(s)
 	return strings.Join(strings.Fields(s), " ")
 }
 
@@ -387,23 +497,163 @@ func cleanTitle(s string) string {
 }
 
 func findEpisode(s string) (season, episode int, ok bool) {
-	for _, re := range []*regexp.Regexp{reEpisode, reEpisodeX} {
-		if m := re.FindStringSubmatch(s); m != nil {
-			season, _ = strconv.Atoi(m[1])
-			episode, _ = strconv.Atoi(m[2])
-			return season, episode, true
-		}
-	}
-	return 0, 0, false
+	season, episode, _, _, ok = locateEpisode(s)
+	return season, episode, ok
 }
 
 func episodeIndex(s string) int {
-	for _, re := range []*regexp.Regexp{reEpisode, reEpisodeX} {
-		if loc := re.FindStringIndex(s); loc != nil {
-			return loc[0]
-		}
+	if _, _, at, _, ok := locateEpisode(s); ok {
+		return at
 	}
 	return len(s)
+}
+
+// locateEpisode finds a season and episode. explicit is true when the name itself wrote the
+// season, as in S01E02 or 1x02. E009, "41. Bölüm" and a bare 020 name no season, so the season
+// is 1. A written S00 stays season 0: that is a special, not a missing season.
+func locateEpisode(s string) (season, episode, at int, explicit, ok bool) {
+	for _, re := range []*regexp.Regexp{reEpisode, reEpisodeX} {
+		loc := re.FindStringSubmatchIndex(s)
+		if loc == nil {
+			continue
+		}
+		season, _ = strconv.Atoi(s[loc[2]:loc[3]])
+		episode, _ = strconv.Atoi(s[loc[4]:loc[5]])
+		if episode <= 0 {
+			continue
+		}
+		return season, episode, loc[0], true, true
+	}
+	for _, re := range []*regexp.Regexp{reEEpisode, reBolum, reBareEpisode} {
+		all := re.FindAllStringSubmatchIndex(s, -1)
+		for i := len(all) - 1; i >= 0; i-- {
+			loc := all[i]
+			episode, _ = strconv.Atoi(s[loc[2]:loc[3]])
+			if episode <= 0 {
+				continue
+			}
+			head := strings.Trim(s[:loc[0]], " -")
+			if head == "" || !strings.ContainsFunc(head, unicode.IsLetter) {
+				continue
+			}
+			return 1, episode, loc[0], false, true
+		}
+	}
+	return 0, 0, 0, false, false
+}
+
+var faOrdinals = map[string]int{
+	"اول": 1, "دوم": 2, "سوم": 3, "چهارم": 4, "پنجم": 5,
+	"ششم": 6, "هفتم": 7, "هشتم": 8, "نهم": 9, "دهم": 10,
+}
+
+var faDigits = strings.NewReplacer(
+	"۰", "0", "۱", "1", "۲", "2", "۳", "3", "۴", "4",
+	"۵", "5", "۶", "6", "۷", "7", "۸", "8", "۹", "9",
+)
+
+// faShow reads "فصل اول" and "قسمت 9" from a channel caption. The season is 1 when the
+// caption names an episode and no season.
+func faShow(caption string) (season, episode int, ok bool) {
+	text := faDigits.Replace(caption)
+	if m := reFaEpisode.FindStringSubmatch(text); m != nil {
+		episode, _ = strconv.Atoi(m[1])
+	}
+	if episode <= 0 {
+		return 0, 0, false
+	}
+	season = 1
+	if m := reFaSeason.FindStringSubmatch(text); m != nil {
+		if n, err := strconv.Atoi(m[1]); err == nil && n > 0 {
+			season = n
+		} else if n, known := faOrdinals[m[1]]; known {
+			season = n
+		}
+	}
+	return season, episode, true
+}
+
+// captionTitle is the clean name a post wrote under the file: a Latin line such as
+// "Evlilik Guzeldir", or the name inside « ». Metadata lines are skipped.
+func captionTitle(caption string) string {
+	var latin, quoted string
+	for _, line := range strings.Split(caption, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.Contains(line, "@") {
+			continue
+		}
+		if m := reQuoted.FindStringSubmatch(line); m != nil && quoted == "" {
+			if t := cleanTitle(m[1]); t != "" {
+				quoted = t
+			}
+		}
+		bare := cleanTitle(strings.TrimLeftFunc(line, func(r rune) bool {
+			return !unicode.IsLetter(r) && !unicode.IsDigit(r)
+		}))
+		if bare == "" || captionMeta(bare) || !latinTitle(bare) {
+			continue
+		}
+		if latin == "" {
+			latin = bare
+		}
+	}
+	if latin != "" {
+		return latin
+	}
+	return quoted
+}
+
+func captionMeta(s string) bool {
+	for _, word := range []string{"فصل", "قسمت", "کیفیت", "زیرنویس", "سانسور", "سریال"} {
+		if strings.Contains(s, word) {
+			return true
+		}
+	}
+	return false
+}
+
+func latinTitle(s string) bool {
+	letters := 0
+	for _, r := range s {
+		if unicode.IsDigit(r) {
+			return false
+		}
+		if unicode.IsLetter(r) {
+			if !unicode.Is(unicode.Latin, r) {
+				return false
+			}
+			letters++
+		}
+	}
+	return letters >= 4 && strings.Contains(s, " ")
+}
+
+// WeakTitle reports a name that is not a show or a film: too short, or a uuid.
+func WeakTitle(s string) bool {
+	letters := 0
+	hex := true
+	for _, r := range s {
+		switch {
+		case unicode.IsLetter(r):
+			letters++
+			if !unicode.Is(unicode.Hex_Digit, r) {
+				hex = false
+			}
+		case unicode.IsDigit(r), unicode.IsSpace(r), r == '-':
+		default:
+			hex = false
+		}
+	}
+	return letters < 4 || hex
+}
+
+func hasLatin(s string) bool {
+	for _, r := range s {
+		if unicode.Is(unicode.Latin, r) {
+			return true
+		}
+	}
+	return false
 }
 
 func tmdbID(s string) int {

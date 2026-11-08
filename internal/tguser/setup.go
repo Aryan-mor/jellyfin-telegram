@@ -30,6 +30,10 @@ func (m *Manager) Run(ctx context.Context, fn func(context.Context, *tg.Client) 
 func (m *Manager) SignedIn() bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+	return m.signedInLocked()
+}
+
+func (m *Manager) signedInLocked() bool {
 	for _, s := range m.sessions {
 		if s.connected.Load() {
 			return true

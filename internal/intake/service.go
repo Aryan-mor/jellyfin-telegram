@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -35,6 +36,13 @@ const (
 	// maxPerPass is how many files one pass takes up. A pass runs every minute, which keeps the
 	// pace of edits and reposts well under Telegram's limits.
 	maxPerPass = 5
+	// hintLookback is how far behind the cursor a TMDB reply is still read. A reply is not a
+	// file, so the pass that first saw it moved on, and later passes have to look back for it.
+	hintLookback = batchSize
+	// reparseKey is set once the rejected files have been given one more pass after the
+	// parser learned to read E009 and a Persian caption. reparseAtKey is how far that walk got.
+	reparseKey   = "inbox.reparse_episode"
+	reparseAtKey = "inbox.reparse_episode_at"
 	// claimFor is how long a claim is held before another installation may take the file.
 	claimFor = 2 * time.Hour
 )
@@ -134,6 +142,12 @@ func (s *Service) now() time.Time {
 // Pass reads new messages, then takes up the files that are still open.
 func (s *Service) Pass(ctx context.Context) error {
 	if err := s.scan(ctx); err != nil {
+		return err
+	}
+	if err := s.caughtReplies(ctx); err != nil {
+		return err
+	}
+	if err := s.reconsider(ctx); err != nil {
 		return err
 	}
 	open, err := s.Cat.OpenInbox(ctx)
@@ -252,7 +266,7 @@ func isRaw(f *media.File) bool {
 
 func (s *Service) observe(ctx context.Context, m media.Message) error {
 	if m.File == nil {
-		return nil
+		return s.hint(ctx, m)
 	}
 	if _, signed := sign.ParseCaption(m.File.Caption); signed {
 		// Only a verified post closes an inbox file, so a stranger cannot make files vanish from the queue.
@@ -346,7 +360,7 @@ func (s *Service) one(ctx context.Context, id int) (did bool, err error) {
 		status = sign.StatusSubtitles
 	}
 	meta.Status = status
-	readyID, err := s.TG.Repost(ctx, bot, id, s.caption(file, meta))
+	readyID, err := s.TG.Repost(ctx, bot, id, s.caption(ctx, file, meta))
 	if err != nil {
 		return true, err
 	}
@@ -463,9 +477,29 @@ func (s *Service) audioOf(ctx context.Context, in []naming.AudioIn, p naming.Par
 
 // caption is the whole post: the status line, the readable head, the signed machine line, and the
 // hashtag last. The line is fitted so that all of it stays inside Telegram's caption length.
-func (s *Service) caption(file *media.File, meta sign.Meta) string {
+func (s *Service) caption(ctx context.Context, file *media.File, meta sign.Meta) string {
 	h := s.headOf(file, meta)
+	if h.Source == "" {
+		h.Source = s.originLine(ctx, file.DocID)
+	}
 	return s.compose(meta.Status, naming.Caption(h), h.Tag(), "", meta)
+}
+
+// originLine is the source line for a document copied from another channel, or empty when this
+// file was not copied.
+func (s *Service) originLine(ctx context.Context, docID int64) string {
+	if docID == 0 || s.Cat == nil {
+		return ""
+	}
+	src, ok, err := s.Cat.CopyOrigin(ctx, docID)
+	if err != nil {
+		s.log().Warn("cannot read the source of a file", "doc", docID, "err", err)
+		return ""
+	}
+	if !ok {
+		return ""
+	}
+	return naming.SourceLine(src.Title, src.Username)
 }
 
 // compose lays out a library post. claimLine is empty unless somebody is working on it.
@@ -489,6 +523,7 @@ func (s *Service) headOf(file *media.File, m sign.Meta) naming.Head {
 		Title: p.Title, Year: p.Year, Episode: m.Kind == "e",
 		Season: m.Season, Number: m.Episode, TMDB: m.TMDB, IMDb: m.IMDb,
 		Label: m.Quality, Soft: naming.ShowTracks(m.Soft, s.Lang), Audio: naming.ShowAudio(m.Audio), Hard: m.Hard,
+		Source: naming.SourceIn(file.Caption),
 	}
 }
 
@@ -661,6 +696,146 @@ func (s *Service) edit(ctx context.Context, messageID int, anyKey bool, change f
 	room := sign.WithHeader(status, "", claimLine, naming.Caption(hd)) + "\n" + hd.Tag()
 	line := s.Key.Post(room, next)
 	return s.write(ctx, messageID, sign.WithHeader(status, "", claimLine, sign.ReplaceLine(body, line)))
+}
+
+// reconsider gives each rejected file one more look. A file the parser can now place as an
+// episode is put back in the queue. One that still cannot be placed stays rejected.
+func (s *Service) reconsider(ctx context.Context) error {
+	done, err := s.Cat.StateValue(ctx, reparseKey)
+	if err != nil || done == "1" {
+		return err
+	}
+	raw, err := s.Cat.StateValue(ctx, reparseAtKey)
+	if err != nil {
+		return err
+	}
+	at, _ := strconv.Atoi(raw)
+	ids, err := s.Cat.InboxAfter(ctx, "rejected", at, maxPerPass)
+	if err != nil {
+		return err
+	}
+	if len(ids) == 0 {
+		return s.Cat.SetStateValue(ctx, reparseKey, "1")
+	}
+	for _, id := range ids {
+		if err := s.Cat.SetStateValue(ctx, reparseAtKey, strconv.Itoa(id)); err != nil {
+			return err
+		}
+		if err := s.reopenEpisode(ctx, id); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// reopenEpisode clears a rejection when the file name or caption now says which episode it is.
+func (s *Service) reopenEpisode(ctx context.Context, id int) error {
+	msgs, err := s.TG.Messages(ctx, []int{id})
+	if err != nil || len(msgs) == 0 || !msgs[0].Exists || msgs[0].File == nil {
+		return err
+	}
+	file := msgs[0].File
+	if h, _ := sign.SplitHeader(file.Caption); h.Status != sign.StatusRejected {
+		return nil
+	}
+	p := naming.Parse(file.FileName, file.Caption)
+	// A uuid with an episode number copied into the caption is still not a title.
+	if !p.Episode || p.Title == "" || naming.WeakTitle(p.Title) {
+		return nil
+	}
+	if err := s.write(ctx, id, sign.StripHeader(file.Caption)); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.tries, id)
+	s.mu.Unlock()
+	s.log().Info("reopened a rejected episode", "message", id, "title", p.Title, "season", p.Season, "episode", p.Number)
+	return s.Cat.SetInbox(ctx, id, "open", 0, file.DocID)
+}
+
+// caughtReplies reads the messages just behind the cursor. A TMDB reply is not a video, so the
+// pass that first walked over it left it there. Looking back is what makes that reply count.
+func (s *Service) caughtReplies(ctx context.Context) error {
+	raw, err := s.Cat.StateValue(ctx, cursorKey)
+	if err != nil {
+		return err
+	}
+	cursor, _ := strconv.Atoi(raw)
+	if cursor < 1 {
+		return nil
+	}
+	start := cursor - hintLookback + 1
+	if start < 1 {
+		start = 1
+	}
+	msgs, err := s.TG.Messages(ctx, idRange(start, cursor-start+1))
+	if err != nil {
+		return err
+	}
+	for _, m := range msgs {
+		if !m.Exists || m.File != nil {
+			continue
+		}
+		if err := s.hint(ctx, m); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// hint reopens a rejected file when a reply names its TMDB film, or one episode of a series.
+// Whoever can post in the library channel can do this, the same as putting a tmdbid in a file name.
+func (s *Service) hint(ctx context.Context, m media.Message) error {
+	if m.ReplyTo == 0 || !naming.HintReady(m.Text) {
+		return nil
+	}
+	state, _, err := s.Cat.InboxState(ctx, m.ReplyTo)
+	if err != nil {
+		return err
+	}
+	// The file is already in the library, so the reply has done its job.
+	if state == "ready" || state == "duplicate" {
+		s.dropHint(ctx, m.ID)
+		return nil
+	}
+	if state != "rejected" {
+		return nil
+	}
+	msgs, err := s.TG.Messages(ctx, []int{m.ReplyTo})
+	if err != nil {
+		return err
+	}
+	if len(msgs) == 0 || !msgs[0].Exists || msgs[0].File == nil {
+		return nil
+	}
+	file := msgs[0].File
+	body := sign.StripHeader(file.Caption)
+	line := strings.TrimSpace(m.Text)
+	// The link is already on the file and it is still rejected, so applying it again would loop.
+	if line == "" || strings.Contains(body, line) {
+		return nil
+	}
+	if body != "" {
+		body += "\n"
+	}
+	body += line
+	if err := s.write(ctx, file.MessageID, body); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	delete(s.tries, file.MessageID)
+	s.mu.Unlock()
+	s.log().Info("reopened from a tmdb reply", "message", file.MessageID, "reply", m.ID, "tmdb", naming.Parse("", line).TMDBID)
+	return s.Cat.SetInbox(ctx, file.MessageID, "open", 0, file.DocID)
+}
+
+// dropHint removes a TMDB reply once the file it points at has been accepted.
+func (s *Service) dropHint(ctx context.Context, id int) {
+	if err := s.TG.DeleteMessages(ctx, []int{id}); err != nil {
+		s.log().Warn("cannot delete a tmdb reply", "message", id, "err", err)
+		return
+	}
+	s.log().Info("deleted tmdb reply", "message", id)
 }
 
 func idRange(start, n int) []int {
