@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS tgnewslinks (
 	updated_unix INTEGER NOT NULL
 );`
 
-const newsColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, last_scan_unix, error, found, copied, added_unix FROM tgnews`
+const newsColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, last_scan_unix, error, found, copied, added_unix, 'manual', '' FROM tgnews`
 
 // NewsLink is one bot deep link taken from a news post.
 type NewsLink struct {

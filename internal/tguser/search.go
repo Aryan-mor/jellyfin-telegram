@@ -15,6 +15,8 @@ type SearchHit struct {
 	Size       int64
 	Video      bool
 	NoForward  bool
+	// Duration is the running time in seconds, or zero when Telegram gave none.
+	Duration int
 }
 
 // SearchHashtag searches every chat this account can see for query, which is a hashtag such as
@@ -62,7 +64,7 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 				ChannelID: peer.ChannelID, AccessHash: channels[peer.ChannelID],
 				MessageID: post.ID, Caption: post.Caption, Size: post.Size,
 				Video:     post.MIME == "video/mp4" || post.MIME == "video/x-matroska" || post.MIME == "video/webm" || post.Duration > 0,
-				NoForward: post.NoForward,
+				NoForward: post.NoForward, Duration: int(post.Duration.Seconds()),
 			})
 		}
 		return hits, nil

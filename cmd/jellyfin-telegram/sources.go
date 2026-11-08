@@ -19,15 +19,50 @@ import (
 	fileresolver "github.com/Aryan-mor/telegram-file-resolver"
 )
 
-// startSearch looks up requested titles on Telegram and copies a file it finds. It stays quiet until
-// Seerr has a request and the switch is on.
-func startSearch(cfg config.Config, envPath string, users *tguser.Manager, log *slog.Logger) *tgsearch.Service {
+// startSearch looks up wanted titles on Telegram and copies a file that passes verification. It
+// stays quiet until Seerr has a request, or trending is on, and the switch is on.
+func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, sources *tgsource.Service, users *tguser.Manager, log *slog.Logger) *tgsearch.Service {
 	svc := &tgsearch.Service{LibraryChannel: cfg.ChannelID, Log: log, On: tgsearch.Switch(envPath)}
 	if users != nil {
 		svc.TG = users
 	}
+	svc.Verify = tgsearch.Thresholds{
+		MinSeconds:       cfg.SearchMinMinutes * 60,
+		MinBytes:         int64(cfg.SearchMinMB) << 20,
+		RuntimeTolerance: float64(cfg.SearchRuntimeTolerancePct) / 100,
+	}
+	svc.Limits = tgsearch.Limits{PromoteAt: cfg.SearchPromoteAt, MaxDiscovered: cfg.SearchMaxDiscovered, DenyAfter: cfg.SearchDenyAfter}
+	if cfg.SearchMaxDiscovered == 0 {
+		svc.Limits.MaxDiscovered = -1
+	}
+	if cat != nil {
+		svc.Store = cat
+	}
+	if sources != nil {
+		svc.Promote = sources
+	}
+	var want tgsearch.Multi
 	if cfg.SeerrManaged {
-		svc.Want = &tgsearch.Seerr{Base: (&seerr.Server{}).URL(), Root: filepath.Join(cfg.DataDir, "seerr")}
+		want = append(want, &tgsearch.Seerr{Base: (&seerr.Server{}).URL(), Root: filepath.Join(cfg.DataDir, "seerr")})
+	}
+	if cfg.TrendingSearch && strings.TrimSpace(cfg.TMDBAPIKey) != "" {
+		tr := &tgsearch.Trending{
+			Key: cfg.TMDBAPIKey, MaxPerDay: cfg.TrendingMaxPerDay,
+			Filter: tgsearch.TrendingFilter{
+				AllowAdult: cfg.TrendingAllowAdult,
+				Include:    tgsearch.ParseList(cfg.TrendingGenres),
+				Exclude:    tgsearch.ParseList(cfg.TrendingExcludeGenres),
+			},
+		}
+		if cat != nil {
+			tr.Store = cat
+		}
+		want = append(want, tr)
+	} else if cfg.TrendingSearch {
+		log.Warn("TRENDING_SEARCH is on but TMDB_API_KEY is empty; trending titles are not searched")
+	}
+	if len(want) > 0 {
+		svc.Want = want
 	}
 	return svc
 }

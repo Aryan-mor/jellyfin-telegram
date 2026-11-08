@@ -502,6 +502,34 @@ func (s *Service) Add(ctx context.Context, input string) (catalog.Source, error)
 	return src, nil
 }
 
+// AddDiscovered adds a channel the Telegram search found trustworthy. It reports false when the
+// channel is already a source, cannot be copied from, or is the library channel. The channel is
+// marked as discovered, so the panel can tell it from one a person added.
+func (s *Service) AddDiscovered(ctx context.Context, channelID int64, note string) (bool, error) {
+	if channelID == s.LibraryChannel {
+		return false, nil
+	}
+	if _, found, err := s.Cat.SourceByChannel(ctx, channelID); err != nil || found {
+		return false, err
+	}
+	ch, err := s.TG.Lookup(ctx, fmt.Sprintf("-100%d", channelID))
+	if err != nil {
+		return false, err
+	}
+	if ch.NoForwards {
+		return false, nil
+	}
+	src, added, err := s.Cat.AddDiscoveredSource(ctx, catalog.Source{ChannelID: ch.ID, Username: ch.Username, Title: ch.Title}, note)
+	if err != nil {
+		return false, err
+	}
+	if added {
+		s.logf("a discovered channel was added to the direct file channels", "channel", src.ChannelID, "note", note)
+		s.kick()
+	}
+	return added, nil
+}
+
 // Remove forgets a channel. What it already gave the library stays.
 func (s *Service) Remove(ctx context.Context, id int64) error { return s.Cat.DeleteSource(ctx, id) }
 

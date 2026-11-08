@@ -78,6 +78,14 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply source schema: %w", err)
 	}
+	if err := ensureSourceOrigin(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate sources: %w", err)
+	}
+	if _, err := db.Exec(trustSchema); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("apply trust schema: %w", err)
+	}
 	if _, err := db.Exec(newsSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply news schema: %w", err)

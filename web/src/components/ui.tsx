@@ -62,7 +62,7 @@ export function CardBody({ className, ...props }: ComponentProps<"div">) {
 export function SwitchBox({ checked, onCheckedChange, label }: { checked: boolean; onCheckedChange: (v: boolean) => void; label: string }) {
   return (
     <Switch.Root checked={checked} onCheckedChange={onCheckedChange} aria-label={label} className="relative h-5 w-9 shrink-0 rounded-full bg-input data-[state=checked]:bg-primary">
-      <Switch.Thumb className="block size-4 translate-x-0.5 rounded-full bg-white transition-transform data-[state=checked]:translate-x-4" />
+      <Switch.Thumb className="block size-4 translate-x-0.5 rounded-full bg-white shadow transition-transform data-[state=checked]:translate-x-4 data-[state=checked]:bg-primary-foreground" />
     </Switch.Root>
   )
 }

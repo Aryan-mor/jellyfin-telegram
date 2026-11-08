@@ -70,15 +70,20 @@ type Source struct {
 	Copied      int    `json:"copied"`
 	Added       int64  `json:"added"`
 	InProgress  bool   `json:"in_progress"`
+	// Origin is OriginManual for a channel a person added and OriginDiscovered for one the search
+	// promoted after its files kept passing verification.
+	Origin string `json:"origin"`
+	// OriginNote says why a discovered channel was added, for example "10 verified files".
+	OriginNote string `json:"origin_note,omitempty"`
 }
 
-const sourceColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, last_scan_unix, error, found, copied, added_unix FROM tgsources`
+const sourceColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, last_scan_unix, error, found, copied, added_unix, origin, origin_note FROM tgsources`
 
 func scanSource(s scanner) (Source, error) {
 	var src Source
 	var nf, en, st int
 	err := s.Scan(&src.ID, &src.ChannelID, &src.Username, &src.Title, &nf, &en, &st, &src.Cursor, &src.ScanTop,
-		&src.Watermark, &src.CoveredDays, &src.LastScan, &src.Error, &src.Found, &src.Copied, &src.Added)
+		&src.Watermark, &src.CoveredDays, &src.LastScan, &src.Error, &src.Found, &src.Copied, &src.Added, &src.Origin, &src.OriginNote)
 	src.NoForwards = nf != 0
 	src.Enabled = en != 0
 	src.Strict = st != 0

@@ -470,6 +470,45 @@ On each check the account reads new posts and sends each bot link to
 this program and waits for the video. A file that passes the same rules as a direct copy is
 forwarded into the library channel. The indexer then adds it like any other post.
 
+### Telegram search and trending
+
+With a signed-in account the program looks up wanted titles by their hashtag (`#tm_m_<tmdb>` for a
+film, `#tm_tv_<tmdb>_<s>_<e>` for an episode) and copies a matching file into the library. There is
+no approval queue. A file is copied only if it passes verification, and sources earn trust.
+
+**Verification.** The hashtag must match the wanted title exactly. The file must not be a sample or
+trailer (shortest running time and smallest size). A film must run about as long as TMDB says. A
+`jftg:` signature, when present, must be valid and agree with the title; a bad signature rejects
+the file. A forged line never counts against the key it names.
+
+**Trust.** Each accepted file gives one point to its channel and to its signer key, and the search
+prefers higher-trust channels and keys. A channel that reaches `TELEGRAM_SEARCH_PROMOTE_AT` points
+is added to the direct file channels (marked as discovered, with the reason), up to
+`TELEGRAM_SEARCH_MAX_DISCOVERED`. A channel or key whose files fail repeatedly, and more often than
+they pass, goes on a denylist. Points, the denylist and what was already tried survive a restart.
+Global searches run one at a time and back off when Telegram asks for a wait.
+
+**Trending (off by default).** With `TRENDING_SEARCH=true` and a `TMDB_API_KEY`, the top of TMDB's
+daily trending list is searched once a day. Titles not released yet are skipped and looked at again
+on a later day. The content filter applies to trending only, never to Seerr requests: adult-flagged
+and erotic titles are dropped unless `TRENDING_ALLOW_ADULT=true`, and only titles with a genre in
+`TRENDING_GENRES` (default: the popular genres, including Action) and none in
+`TRENDING_EXCLUDE_GENRES` are kept. Genre names are TMDB's English names, separated by commas.
+
+| Setting | Default | Meaning |
+| --- | --- | --- |
+| `TELEGRAM_SEARCH_MIN_MINUTES` | 10 | Shortest running time accepted (0 = off) |
+| `TELEGRAM_SEARCH_MIN_MB` | 50 | Smallest file accepted (0 = off) |
+| `TELEGRAM_SEARCH_RUNTIME_TOLERANCE_PCT` | 25 | Allowed difference from a film's TMDB runtime (0 = off) |
+| `TELEGRAM_SEARCH_PROMOTE_AT` | 10 | Accepted files that make a channel a direct file channel |
+| `TELEGRAM_SEARCH_MAX_DISCOVERED` | 20 | Most channels the search may add (0 = never add) |
+| `TELEGRAM_SEARCH_DENY_AFTER` | 3 | Failed files before a channel or key is denylisted |
+| `TRENDING_SEARCH` | false | Search TMDB trending once a day |
+| `TMDB_API_KEY` | empty | TMDB v3 key or v4 read token |
+| `TRENDING_ALLOW_ADULT` | false | Let adult-flagged titles through |
+| `TRENDING_GENRES` / `TRENDING_EXCLUDE_GENRES` | popular genres / empty | Genre include and exclude lists |
+| `TRENDING_MAX_PER_DAY` | 10 | Most trending titles searched per day |
+
 ### Local media
 
 Set `LOCAL_MEDIA_DIRS` or add folders in the panel. It lists your videos as films and series,

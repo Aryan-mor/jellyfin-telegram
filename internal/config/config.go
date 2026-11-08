@@ -99,6 +99,31 @@ type Config struct {
 	// TelegramSearch looks up requested titles on Telegram with the signed-in account and copies a
 	// file it finds into the library. On unless TELEGRAM_SEARCH=false.
 	TelegramSearch bool
+	// SearchMinMinutes and SearchMinMB are the smallest running time and size of a file the search
+	// accepts. SearchRuntimeTolerancePct is how far a film may differ from TMDB's runtime, in
+	// percent; zero turns that check off.
+	SearchMinMinutes          int
+	SearchMinMB               int
+	SearchRuntimeTolerancePct int
+	// SearchPromoteAt is how many accepted files make a channel a direct file channel, and
+	// SearchMaxDiscovered caps how many the search may add (0 turns promotion off).
+	// SearchDenyAfter is how many failed files put a channel or a signer key on the denylist.
+	SearchPromoteAt     int
+	SearchMaxDiscovered int
+	SearchDenyAfter     int
+	// TMDBAPIKey is a TMDB v3 key or v4 read token. Only the trending source uses it.
+	TMDBAPIKey string
+	// TrendingSearch looks up TMDB's trending titles once a day. Off until TRENDING_SEARCH=true,
+	// and it needs TMDB_API_KEY.
+	TrendingSearch bool
+	// TrendingAllowAdult lets adult-flagged and erotic titles through the trending filter.
+	TrendingAllowAdult bool
+	// TrendingGenres and TrendingExcludeGenres are comma separated TMDB genre names. An empty
+	// include list means the popular genres.
+	TrendingGenres        string
+	TrendingExcludeGenres string
+	// TrendingMaxPerDay caps the trending titles searched per day.
+	TrendingMaxPerDay int
 	// InboxDeleteOriginals removes an inbox file after it has been copied to Ready.
 	InboxDeleteOriginals bool
 }
@@ -282,6 +307,18 @@ func Load(envPath string) (Config, error) {
 	c.SignedLibrary = strings.EqualFold(get("SIGNED_LIBRARY", ""), "true")
 	search := strings.TrimSpace(get("TELEGRAM_SEARCH", "true"))
 	c.TelegramSearch = search == "" || strings.EqualFold(search, "true") || search == "1"
+	c.SearchMinMinutes = getInt("TELEGRAM_SEARCH_MIN_MINUTES", 10, fail)
+	c.SearchMinMB = getInt("TELEGRAM_SEARCH_MIN_MB", 50, fail)
+	c.SearchRuntimeTolerancePct = getInt("TELEGRAM_SEARCH_RUNTIME_TOLERANCE_PCT", 25, fail)
+	c.SearchPromoteAt = getInt("TELEGRAM_SEARCH_PROMOTE_AT", 10, fail)
+	c.SearchMaxDiscovered = getInt("TELEGRAM_SEARCH_MAX_DISCOVERED", 20, fail)
+	c.SearchDenyAfter = getInt("TELEGRAM_SEARCH_DENY_AFTER", 3, fail)
+	c.TMDBAPIKey = get("TMDB_API_KEY", "")
+	c.TrendingSearch = strings.EqualFold(get("TRENDING_SEARCH", ""), "true") || get("TRENDING_SEARCH", "") == "1"
+	c.TrendingAllowAdult = strings.EqualFold(get("TRENDING_ALLOW_ADULT", ""), "true")
+	c.TrendingGenres = get("TRENDING_GENRES", "")
+	c.TrendingExcludeGenres = get("TRENDING_EXCLUDE_GENRES", "")
+	c.TrendingMaxPerDay = getInt("TRENDING_MAX_PER_DAY", 10, fail)
 	c.InboxDeleteOriginals = strings.EqualFold(get("INBOX_DELETE_ORIGINALS", ""), "true")
 	c.UploadHours = get("UPLOAD_HOURS", "")
 	if _, _, err := ParseHours(c.UploadHours); err != nil {
