@@ -1,14 +1,19 @@
 package main
 
-import "testing"
+import (
+	"strings"
+	"testing"
 
-func TestChannelUsernameShape(t *testing.T) {
-	if !usableChannelUsername("films_ab12cd") {
-		t.Fatal("a generated username was refused")
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
+)
+
+func TestFallbackMirrorTitleMakesAUsableName(t *testing.T) {
+	title := fallbackMirrorTitle()
+	if !strings.HasPrefix(title, "Films ") {
+		t.Fatalf("title = %q", title)
 	}
-	for _, bad := range []string{"", "ab", "1films", "Films_ab", "has space", "way_too_long_for_a_telegram_username_ok"} {
-		if usableChannelUsername(bad) {
-			t.Errorf("%q was accepted", bad)
-		}
+	name := "films_" + strings.TrimPrefix(title, "Films ")
+	if !tgsetup.ValidChannelUsername(name) {
+		t.Fatalf("%q is not a usable username", name)
 	}
 }

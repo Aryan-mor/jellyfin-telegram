@@ -2,7 +2,9 @@ package tgsetup
 
 import (
 	"context"
+	"errors"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/gotd/td/bin"
@@ -86,5 +88,44 @@ func TestClearUsernameSendsAnEmptyName(t *testing.T) {
 	}
 	if len(script.updates) != 1 || script.updates[0] != "" {
 		t.Fatalf("updates = %v", script.updates)
+	}
+}
+
+func TestValidChannelUsername(t *testing.T) {
+	for name, want := range map[string]bool{
+		"films_ab12cd": true, "abcde": true, "abcd": false, "1films": false, "_films": false,
+		"films_": false, "fil__ms": false, "films-hd": false, "a234567890123456789012345678901b": true,
+		"a2345678901234567890123456789012c": false,
+	} {
+		if got := ValidChannelUsername(name); got != want {
+			t.Errorf("%q = %v, want %v", name, got, want)
+		}
+	}
+	for range 50 {
+		if name := channelUsername("Films"); !ValidChannelUsername(name) {
+			t.Fatalf("random name %q is not valid", name)
+		}
+	}
+}
+
+func TestUsernameErrorIsReadable(t *testing.T) {
+	if err := usernameError("x", "set", errors.New("rpc error code 400: USERNAME_OCCUPIED")); !errors.Is(err, errUsernameTaken) {
+		t.Errorf("occupied = %v", err)
+	}
+	if err := usernameError("x", "set", errors.New("rpc error code 400: CHANNELS_ADMIN_PUBLIC_TOO_MUCH")); !errors.Is(err, ErrPublicLimit) {
+		t.Errorf("limit = %v", err)
+	}
+	if err := usernameError("x", "set", errors.New("rpc error code 400: USERNAME_INVALID")); errors.Is(err, errUsernameTaken) || !strings.Contains(err.Error(), "not a valid username") {
+		t.Errorf("invalid = %v", err)
+	}
+}
+
+func TestSetPublicUsernameRefusesABadName(t *testing.T) {
+	script := &usernameScript{}
+	if _, err := SetPublicUsername(context.Background(), tg.NewClient(script), 7, 9, "-bad", "Films"); err == nil {
+		t.Fatal("a bad name was accepted")
+	}
+	if len(script.checks) != 0 {
+		t.Fatalf("Telegram was asked about a bad name: %v", script.checks)
 	}
 }

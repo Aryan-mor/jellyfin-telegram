@@ -12,6 +12,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
@@ -55,7 +56,7 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 		title = fallbackMirrorTitle()
 	}
 	username := strings.TrimPrefix(strings.ToLower(strings.TrimSpace(os.Getenv("MIRROR_USERNAME"))), "@")
-	if !usableChannelUsername(username) {
+	if !tgsetup.ValidChannelUsername(username) {
 		username = ""
 	}
 	wizard.SetStatus(setup.Status{Stage: "Creating a public mirror", Percent: 99})
@@ -87,21 +88,4 @@ func randomSuffix(n int) string {
 		raw[i] = letters[int(b)%len(letters)]
 	}
 	return string(raw)
-}
-
-func usableChannelUsername(s string) bool {
-	if len(s) < 5 || len(s) > 32 {
-		return false
-	}
-	for i, r := range s {
-		letter := r >= 'a' && r <= 'z'
-		digit := r >= '0' && r <= '9'
-		if i == 0 && !letter {
-			return false
-		}
-		if !letter && !digit && r != '_' {
-			return false
-		}
-	}
-	return true
 }

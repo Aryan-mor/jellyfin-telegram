@@ -4,7 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster, toast } from "sonner"
 import "@/index.css"
 import { api, panelCode } from "@/lib/api"
-import { Button, Card, CardBody, FieldLabel, Input, SwitchBox, Textarea } from "@/components/ui"
+import { Button, Card, CardBody, Checkbox, FieldLabel, Input, SwitchBox, Textarea } from "@/components/ui"
 import { CopyField, LoginForm, MultiSelect, ProgressSteps } from "@/components/widgets"
 
 const client = new QueryClient()
@@ -36,7 +36,7 @@ function Setup() {
   const [channel, setChannel] = useState("")
   const [manual, setManual] = useState({ api_id: "", api_hash: "", channel: "", bots: "" })
   const [prefs, setPrefs] = useState({ fladder: false, seerr: true, downloads: false, group: true, telegram_search: true, jellyfin_url: "", jellyfin_key: "" })
-  const [mirrorOn, setMirrorOn] = useState(true)
+  const [mirrorOn, setMirrorOn] = useState(false)
   const [mirror, setMirror] = useState(randomMirror)
   const [advanced, setAdvanced] = useState(false)
   const [status, setStatus] = useState<Status | null>(null)
@@ -83,8 +83,8 @@ function Setup() {
           {!available && <p className="text-sm">The automatic setup is not available in this run. Use the manual way.</p>}
         </>}
         {mode === "auto" && step === "login" && <>
-          <LoginForm path="/setup/auto/login" extra={own && apiId && apiHash ? { api_id: apiId, api_hash: apiHash } : undefined} onDone={() => setStep("channel")} />
-          <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={own} onChange={(e) => setOwn(e.target.checked)} />Advanced: use my own api_id</label>
+          <LoginForm resend path="/setup/auto/login" extra={own && apiId && apiHash ? { api_id: apiId, api_hash: apiHash } : undefined} onDone={() => setStep("channel")} />
+          <Checkbox checked={own} onCheckedChange={setOwn} label="Advanced: use my own api_id" />
           {own && <div className="grid grid-cols-2 gap-2"><Input placeholder="API ID" value={apiId} onChange={(e) => setApiId(e.target.value)} /><Input placeholder="API hash" value={apiHash} onChange={(e) => setApiHash(e.target.value)} /></div>}
         </>}
         {mode === "auto" && step === "channel" && <>
@@ -108,7 +108,7 @@ function Setup() {
           </>}
           <ProgressSteps lines={job?.progress ?? []} />
           {job?.error && <p className="text-sm text-destructive">{job.error}</p>}
-          {owned.map((b) => <label key={b.username} className="flex gap-2 text-sm"><input type="checkbox" checked={picked.includes(b.username)} onChange={(e) => setPicked(e.target.checked ? [...picked, b.username] : picked.filter((n) => n !== b.username))} />@{b.username}</label>)}
+          {owned.map((b) => <Checkbox key={b.username} label={"@" + b.username} checked={picked.includes(b.username)} onCheckedChange={(on) => setPicked(on ? [...picked, b.username] : picked.filter((n) => n !== b.username))} />)}
           {!!owned.length && <div className="flex justify-end"><Button size="sm" onClick={() => api("/setup/auto/reuse", { usernames: picked }).then(() => setOwned([])).catch((e) => toast.error(e.message))}>Use the selected bots</Button></div>}
         </>}
         {mode === "manual" && step === "login" && <>
@@ -126,9 +126,9 @@ function Setup() {
           <MultiSelect value={langs} onChange={setLangs} />
           {found && <p className="text-sm">Channel {found.title}. Bots: {found.bots.map((b) => "@" + b).join(", ") || "none yet"}.</p>}
           <label className="flex items-center justify-between text-sm">Public mirror <SwitchBox label="Public mirror" checked={mirrorOn} onCheckedChange={setMirrorOn} /></label>
-          <p className="text-sm text-muted-foreground">A public channel for films and series. A name and a username are chosen for you.</p>
-          <button type="button" className="text-left text-sm underline" onClick={() => setAdvanced((v) => !v)}>Advanced</button>
-          {advanced && <>
+          <p className="text-sm text-muted-foreground">A second, public channel that gets a copy of films and series. Off by default. A name and a username are chosen for you.</p>
+          {mirrorOn && <button type="button" className="text-left text-sm underline" onClick={() => setAdvanced((v) => !v)}>Choose the name and username</button>}
+          {mirrorOn && advanced && <>
             <FieldLabel>Name</FieldLabel>
             <Input value={mirror.title} onChange={(e) => setMirror({ ...mirror, title: e.target.value })} />
             <FieldLabel>Username</FieldLabel>

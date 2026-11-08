@@ -27,6 +27,8 @@ type panelJobs struct {
 	running bool
 	steps   []panel.JobLine
 	errText string
+	// restart stays true once any job saved a new bot. start does not clear it: the restart is
+	// still owed until the program starts again, which also resets this value.
 	restart bool
 	result  any
 	owned   any
@@ -154,16 +156,23 @@ func (j *panelJobs) botCreate(users *tguser.Manager, envPath string, main int64)
 				found, err := runner.Create(ctx, tgsetup.CreateOptions{
 					Title: "Jellyfin library", Channel: strconv.FormatInt(main, 10), Bots: count,
 				}, func(text, state string) { progress(text, state) })
+				// A bot made before a later step failed is still a working bot of this account.
+				// Its token is saved either way, so a failure never leaves a bot nobody can use.
+				if len(found.Tokens) > 0 {
+					if serr := appendBotTokens(envPath, found.Tokens); serr != nil {
+						return nil, errors.Join(err, serr)
+					}
+				}
 				if len(found.Owned) > 0 {
 					j.mu.Lock()
 					j.draft = &found
 					j.mu.Unlock()
-					return map[string]any{"owned": ownedView(found.Owned), "kept": found.Bots}, err
+					return map[string]any{"owned": ownedView(found.Owned), "kept": found.Bots, "restart": len(found.Tokens) > 0}, err
 				}
 				if err != nil {
-					return nil, err
-				}
-				if err := appendBotTokens(envPath, found.Tokens); err != nil {
+					if len(found.Tokens) > 0 {
+						return map[string]any{"restart": true, "bots": found.Bots}, err
+					}
 					return nil, err
 				}
 				return map[string]any{"ok": true, "restart": true, "bots": found.Bots}, nil
@@ -206,10 +215,15 @@ func (j *panelJobs) botCreate(users *tguser.Manager, envPath string, main int64)
 				found, err := runner.Reuse(ctx, tgsetup.ReuseOptions{
 					ChannelID: draft.ChannelID, Title: draft.Title, Tokens: draft.Tokens, Bots: draft.Bots, Usernames: chosen,
 				}, func(text, state string) { progress(text, state) })
-				if err != nil {
-					return nil, err
+				if len(found.Tokens) > 0 {
+					if serr := appendBotTokens(envPath, found.Tokens); serr != nil {
+						return nil, errors.Join(err, serr)
+					}
 				}
-				if err := appendBotTokens(envPath, found.Tokens); err != nil {
+				if err != nil {
+					if len(found.Tokens) > 0 {
+						return map[string]any{"restart": true, "bots": found.Bots}, err
+					}
 					return nil, err
 				}
 				j.mu.Lock()
@@ -242,6 +256,25 @@ func createMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, 
 	}
 	ch := val.(tgsetup.Created)
 	progress("Channel "+ch.Title+" created", "ok")
+	// Until the mirror is saved, a failure removes the new channel again. Otherwise every retry would
+	// leave one more empty channel in the account. A bot made on the way keeps its token either way.
+	saved := false
+	created := ch
+	defer func() {
+		if saved {
+			return
+		}
+		progress("Removing the unfinished channel", "wait")
+		dctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if _, err := users.Run(dctx, func(ctx context.Context, api *tg.Client) (any, error) {
+			return nil, tgsetup.DeleteChannel(ctx, api, created.ID, created.AccessHash)
+		}); err != nil {
+			progress("Could not remove the unfinished channel "+created.Title+": "+err.Error(), "bad")
+			return
+		}
+		progress("Unfinished channel removed", "ok")
+	}()
 
 	var username string
 	if public {
@@ -313,16 +346,22 @@ func createMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, 
 		ch.ID, ch.Title = got, titleGot
 		postBot = botID
 	}
-	saved, err := cat.AddMirror(ctx, ch.ID, postBot, ch.Title, kinds)
+	row, err := cat.AddMirror(ctx, ch.ID, postBot, ch.Title, kinds)
 	if err != nil {
 		return result, err
 	}
+	saved = true
 	if username != "" {
-		if err := cat.SetMirrorUsername(ctx, saved.ID, username); err != nil {
+		if err := cat.SetMirrorUsername(ctx, row.ID, username); err != nil {
 			return result, err
 		}
 	}
-	result["id"] = saved.ID
+	if fresh {
+		// The new bot joins the pool at the next start. Until then the mirror says so instead of
+		// showing a send error.
+		_ = cat.SetMirrorError(ctx, row.ID, "waits for a restart: the new bot connects then")
+	}
+	result["id"] = row.ID
 	return result, nil
 }
 
@@ -364,6 +403,11 @@ func mirrorVisibility(r *http.Request, cat *catalog.Catalog, users *tguser.Manag
 	if !found {
 		return nil, errors.New("that mirror is not listed")
 	}
+	if public == (current.Username != "") {
+		// Already in the state asked for. Making a public channel public again would replace its
+		// name and break every link people already have.
+		return map[string]any{"ok": true, "username": current.Username, "link": mirrorLink(current.Username)}, nil
+	}
 	var name string
 	_, err = users.Run(r.Context(), func(ctx context.Context, api *tg.Client) (any, error) {
 		ch, err := tguser.ResolveChannelInput(ctx, api, strconv.FormatInt(current.ChannelID, 10))
@@ -383,11 +427,14 @@ func mirrorVisibility(r *http.Request, cat *catalog.Catalog, users *tguser.Manag
 	if err := cat.SetMirrorUsername(r.Context(), id, name); err != nil {
 		return nil, err
 	}
-	link := ""
-	if name != "" {
-		link = "https://t.me/" + name
+	return map[string]any{"ok": true, "username": name, "link": mirrorLink(name)}, nil
+}
+
+func mirrorLink(username string) string {
+	if username == "" {
+		return ""
 	}
-	return map[string]any{"ok": true, "username": name, "link": link}, nil
+	return "https://t.me/" + username
 }
 
 func mirrorAdmin(r *http.Request, pool *tgpool.Pool, users *tguser.Manager, body map[string]any) (any, error) {

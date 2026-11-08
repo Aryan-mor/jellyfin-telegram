@@ -23,3 +23,6 @@ Thumbs.db
 
 # graphify knowledge graph (rebuild with: graphify update .)
 /graphify-out/
+
+# Backups the build leaves next to the binary
+*.exe~

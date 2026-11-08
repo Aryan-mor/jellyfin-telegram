@@ -1,7 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet } from "react-router"
 import { useQuery } from "@tanstack/react-query"
-import { Home, KeyRound, Menu, Moon, Sun } from "lucide-react"
+import {
+  Bot, Cable, CloudDownload, Film, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
+  Radio, Send, Share2, Sun, Tv, UserRound,
+} from "lucide-react"
 import { toast } from "sonner"
 import { api, panelCode, pollingPaused } from "@/lib/api"
 import { Button, Sheet } from "@/components/ui"
@@ -76,29 +79,29 @@ export function Shell() {
   const botBad = (s?.bots ?? []).some((b) => b.connected && (!b.ok || !b.admin || b.error))
   const nav = (
     <nav className="flex h-full flex-col gap-4 text-sm">
-      <div className="px-2 text-sm font-semibold">jellyfin-telegram</div>
+      <div className="flex items-center gap-2 px-2 text-sm font-semibold"><span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"><Send className="size-3.5" /></span>jellyfin-telegram</div>
       <Nav to="/" label="Overview" icon={<Home className="size-4" />} />
       <Nav to="/accounts" label="Sign in details" icon={<KeyRound className="size-4" />} />
       <Group title="Library">
-        <Nav to="/channel" label="Main channel" />
-        <Nav to="/channel/mirrors" label="Mirrors" />
-        <Nav to="/channel/shared" label="Shared library" />
-        <Nav to="/channel/home" label="Home videos" />
-        <Nav to="/channel/subtitles" label="Subtitles" />
+        <Nav to="/channel" label="Main channel" icon={<Tv className="size-4" />} />
+        <Nav to="/channel/mirrors" label="Mirrors" icon={<Radio className="size-4" />} />
+        <Nav to="/channel/shared" label="Shared library" icon={<Share2 className="size-4" />} />
+        <Nav to="/channel/home" label="Home videos" icon={<Images className="size-4" />} />
+        <Nav to="/channel/subtitles" label="Subtitles" icon={<Languages className="size-4" />} />
       </Group>
       <Group title="Telegram">
-        <Nav to="/telegram" label="Accounts" dot={!signed} />
-        <Nav to="/bots" label="Bots" dot={botBad} />
-        <Nav to="/api" label="API" />
+        <Nav to="/telegram" label="Accounts" icon={<UserRound className="size-4" />} dot={!signed} />
+        <Nav to="/bots" label="Bots" icon={<Bot className="size-4" />} dot={botBad} />
+        <Nav to="/api" label="API" icon={<Cable className="size-4" />} />
       </Group>
       <Group title="Sources">
-        {s?.sources && signed && <Nav to="/sources" label="Direct files" />}
-        {s?.sources && signed && <Nav to="/news" label="News channels" />}
-        {s?.local && <Nav to="/local" label="Local files" />}
-        {s?.downloads && signed && <Nav to="/downloads" label="Torrents" />}
+        {s?.sources && signed && <Nav to="/sources" label="Direct files" icon={<Film className="size-4" />} />}
+        {s?.sources && signed && <Nav to="/news" label="News channels" icon={<Newspaper className="size-4" />} />}
+        {s?.local && <Nav to="/local" label="Local files" icon={<HardDrive className="size-4" />} />}
+        {s?.downloads && signed && <Nav to="/downloads" label="Torrents" icon={<CloudDownload className="size-4" />} />}
       </Group>
       <Group title="Access">
-        <Nav to="/away" label="Away from home" />
+        <Nav to="/away" label="Away from home" icon={<Globe className="size-4" />} />
       </Group>
       <div className="mt-auto flex items-center justify-between px-2">
         <span className="text-xs text-muted-foreground">Appearance</span>
@@ -133,7 +136,7 @@ export function Shell() {
 }
 
 async function restartProgram(setBusy: (v: boolean) => void) {
-  const ok = await confirmDialog("Restart now?", "Playback stops until the program is back. This usually takes under a minute.", "Restart")
+  const ok = await confirmDialog("Restart now?", "Playback stops until the program is back. This usually takes under a minute.", "Restart", false)
   if (!ok) return
   setBusy(true)
   try {

@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -404,6 +405,17 @@ func BotAdmins(ctx context.Context, api *tg.Client, channelID, accessHash int64)
 // errUsernameTaken means Telegram already gave that public name to someone else.
 var errUsernameTaken = errors.New("that username is taken")
 
+// ErrPublicLimit means the account already owns as many public channels as Telegram allows.
+var ErrPublicLimit = errors.New("this Telegram account already has as many public channels as Telegram allows. Make one of them private, or keep this mirror private")
+
+// reChannelUsername is what Telegram accepts as a public channel name.
+var reChannelUsername = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{3,30}[A-Za-z0-9]$`)
+
+// ValidChannelUsername reports whether Telegram would accept name as a public channel name.
+func ValidChannelUsername(name string) bool {
+	return reChannelUsername.MatchString(name) && !strings.Contains(name, "__")
+}
+
 // channelUsername builds a public channel username: a short slug, then six random characters.
 func channelUsername(title string) string {
 	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
@@ -416,35 +428,43 @@ func channelUsername(title string) string {
 	return slug(title) + "_" + string(suffix)
 }
 
+func rpcHas(err error, code string) bool {
+	return err != nil && strings.Contains(strings.ToUpper(err.Error()), code)
+}
+
 func usernameTaken(err error) bool {
-	if errors.Is(err, errUsernameTaken) {
-		return true
+	return errors.Is(err, errUsernameTaken) || rpcHas(err, "USERNAME_OCCUPIED") || rpcHas(err, "USERNAME_PURCHASE_AVAILABLE")
+}
+
+// usernameError turns a refusal from Telegram into a message the person can act on.
+func usernameError(name, verb string, err error) error {
+	switch {
+	case usernameTaken(err):
+		return errUsernameTaken
+	case rpcHas(err, "CHANNELS_ADMIN_PUBLIC_TOO_MUCH"):
+		return ErrPublicLimit
+	case rpcHas(err, "USERNAME_INVALID"):
+		return fmt.Errorf("@%s is not a valid username: use 5 to 32 letters, digits or _, starting with a letter", name)
+	default:
+		return fmt.Errorf("%s @%s: %w", verb, name, err)
 	}
-	if err == nil {
-		return false
-	}
-	msg := strings.ToUpper(err.Error())
-	return strings.Contains(msg, "USERNAME_OCCUPIED") || strings.Contains(msg, "USERNAME_INVALID")
 }
 
 func applyUsername(ctx context.Context, api *tg.Client, channelID, accessHash int64, name string) error {
 	ch := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
 	ok, err := api.ChannelsCheckUsername(ctx, &tg.ChannelsCheckUsernameRequest{Channel: ch, Username: name})
 	if err != nil {
-		if usernameTaken(err) {
-			return errUsernameTaken
-		}
-		return fmt.Errorf("check @%s: %w", name, err)
+		return usernameError(name, "check", err)
 	}
 	if !ok {
 		return errUsernameTaken
 	}
 	ok, err = api.ChannelsUpdateUsername(ctx, &tg.ChannelsUpdateUsernameRequest{Channel: ch, Username: name})
 	if err != nil {
-		if usernameTaken(err) {
-			return errUsernameTaken
+		if rpcHas(err, "USERNAME_NOT_MODIFIED") {
+			return nil
 		}
-		return fmt.Errorf("set @%s: %w", name, err)
+		return usernameError(name, "set", err)
 	}
 	if !ok {
 		return errUsernameTaken
@@ -457,7 +477,13 @@ func applyUsername(ctx context.Context, api *tg.Client, channelID, accessHash in
 func SetPublicUsername(ctx context.Context, api *tg.Client, channelID, accessHash int64, preferred, title string) (string, error) {
 	name := strings.TrimPrefix(strings.TrimSpace(preferred), "@")
 	if name != "" {
+		if !ValidChannelUsername(name) {
+			return "", fmt.Errorf("@%s is not a valid username: use 5 to 32 letters, digits or _, starting with a letter", name)
+		}
 		if err := applyUsername(ctx, api, channelID, accessHash, name); err != nil {
+			if errors.Is(err, errUsernameTaken) {
+				return "", fmt.Errorf("@%s is taken. Choose another name, or leave it empty for a random one", name)
+			}
 			return "", err
 		}
 		return name, nil
@@ -486,8 +512,16 @@ func ClearUsername(ctx context.Context, api *tg.Client, channelID, accessHash in
 		Channel:  &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash},
 		Username: "",
 	})
-	if err != nil {
+	// A channel that is already private answers USERNAME_NOT_MODIFIED. That is the state asked for.
+	if err != nil && !rpcHas(err, "USERNAME_NOT_MODIFIED") {
 		return fmt.Errorf("make the channel private: %w", err)
 	}
 	return nil
+}
+
+// DeleteChannel removes a channel this account owns. It is used to undo a channel that was just
+// made when a later step failed, so a retry does not leave empty channels behind.
+func DeleteChannel(ctx context.Context, api *tg.Client, channelID, accessHash int64) error {
+	_, err := api.ChannelsDeleteChannel(ctx, &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash})
+	return err
 }

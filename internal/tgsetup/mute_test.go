@@ -9,7 +9,9 @@ import (
 )
 
 // recorder is a Telegram connection that remembers the one request it was given.
-type recorder struct{ got *tg.AccountUpdateNotifySettingsRequest }
+type recorder struct {
+	got *tg.AccountUpdateNotifySettingsRequest
+}
 
 func (r *recorder) Invoke(_ context.Context, in bin.Encoder, out bin.Decoder) error {
 	var b bin.Buffer
