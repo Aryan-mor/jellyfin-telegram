@@ -21,6 +21,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/version"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 )
 
@@ -139,6 +140,9 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
 	mux.HandleFunc("POST /panel/restart", p.guard(p.handleRestart))
+	mux.HandleFunc("GET /panel/update", p.guard(func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, version.Check(r.Context()))
+	}))
 	return mux
 }
 

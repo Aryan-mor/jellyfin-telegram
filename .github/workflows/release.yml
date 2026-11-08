@@ -1,0 +1,96 @@
+name: Release
+
+# Every push to main builds the panel UI and the program, then publishes a numbered release
+# (1.0.<run number>) with ready-to-run files for Windows and Linux. Nothing has to be built or
+# committed by hand: the UI is built here.
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: build ${{ matrix.goos }}-${{ matrix.goarch }}
+    runs-on: ubuntu-latest
+    env:
+      VERSION: 1.0.${{ github.run_number }}
+    strategy:
+      matrix:
+        include:
+          - { goos: windows, goarch: amd64 }
+          - { goos: linux, goarch: amd64 }
+          - { goos: linux, goarch: arm64 }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - name: build panel ui
+        working-directory: web
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: "0"
+          # Optional repository secrets. With them, "Automatic" setup needs no api_id typed in.
+          API_ID: ${{ secrets.TELEGRAM_API_ID }}
+          API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
+        run: |
+          mod=github.com/Aryan-mor/jellyfin-telegram/internal
+          ext=""; [ "$GOOS" = windows ] && ext=".exe"
+          mkdir -p dist
+          go build -trimpath -ldflags "-s -w -X $mod/version.Version=$VERSION -X $mod/config.DefaultAPIID=$API_ID -X $mod/config.DefaultAPIHash=$API_HASH" \
+            -o "dist/jellyfin-telegram$ext" ./cmd/jellyfin-telegram
+          cd dist
+          if [ "$GOOS" = windows ]; then
+            zip "jellyfin-telegram-windows-$GOARCH.zip" jellyfin-telegram.exe
+          else
+            tar czf "jellyfin-telegram-linux-$GOARCH.tar.gz" jellyfin-telegram
+          fi
+          rm -f jellyfin-telegram jellyfin-telegram.exe
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: dist/*
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    env:
+      VERSION: 1.0.${{ github.run_number }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp install.ps1 install.sh install-windows.cmd dist/
+          cd dist
+          sha256sum * > SHA256SUMS.txt
+          gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "v$VERSION" --generate-notes --latest *

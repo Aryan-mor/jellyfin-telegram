@@ -61,6 +61,12 @@ function themeNow() {
 export function Shell() {
   const state = usePanel()
   const job = useJob()
+  const update = useQuery({
+    queryKey: ["panel-update"],
+    queryFn: () => api<{ current: string; latest?: string; available: boolean; url?: string }>("/panel/update"),
+    refetchInterval: () => (pollingPaused() ? false : 6 * 60 * 60 * 1000),
+    staleTime: 60 * 60 * 1000,
+  })
   const [restart, setRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
   const [open, setOpen] = useState(false)
@@ -105,7 +111,7 @@ export function Shell() {
         <Nav to="/away" label="Away from home" icon={<Globe className="size-4" />} />
       </Group>
       <div className="mt-auto flex items-center justify-between px-2">
-        <span className="text-xs text-muted-foreground">Appearance</span>
+        <span className="text-xs text-muted-foreground">Appearance{update.data?.current ? ` · v${update.data.current}` : ""}</span>
         <Button type="button" size="icon" variant="ghost" aria-label="Switch light or dark theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </Button>
@@ -121,6 +127,14 @@ export function Shell() {
           <Button type="button" size="icon" variant="ghost" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="size-4" /></Button>
           <span className="text-sm font-medium">Panel</span>
         </div>
+        {update.data?.available && (
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-sky-500/15 px-4 py-2 text-sm">
+            <span>
+              A new version is out: <b>{update.data.latest}</b> (you have {update.data.current}). To update, run the install command from the README again; your settings and library are kept.
+            </span>
+            {update.data.url && <a className="font-medium underline" href={update.data.url} target="_blank" rel="noreferrer">What changed</a>}
+          </div>
+        )}
         {restart && (
           <div className="flex items-center justify-between gap-3 bg-amber-500/15 px-4 py-2 text-sm">
             <span>Restart needed. New settings apply the next time the program starts.</span>

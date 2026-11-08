@@ -33,6 +33,44 @@ with the full video. Feel free to contribute: see [Contributing](#contributing).
 
 It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database server.
 
+## Quick start (about two minutes)
+
+You do not need Go, Git, Node or a terminal full of steps. One command installs it, starts it at
+every login and opens the setup page. There you type your **phone number** and the code Telegram
+sends you. The channel, the bots and Jellyfin are created and configured for you.
+
+**Windows**: download [`install-windows.cmd`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install-windows.cmd)
+and double-click it. Or paste this in PowerShell:
+
+```powershell
+irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 | iex
+```
+
+**Linux**:
+
+```shell
+curl -fsSL https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.sh | sh
+```
+
+Prefer to do it by hand? Download the zip or tar.gz for your system from the
+[latest release](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest), unpack it into an
+empty folder and run the one file inside. The setup page opens by itself.
+
+The installer also puts a **jellyfin-telegram panel** shortcut on your Desktop (and in the Start
+menu or applications menu). Click it any time to open the panel.
+
+When the setup page finishes, Jellyfin is at `http://127.0.0.1:8097` and the panel is at
+`http://127.0.0.1:8097/panel`.
+
+**Updates.** Every push to `main` builds and publishes a new numbered release
+(`1.0.<number>`) with GitHub Actions; you can also download any of them from the
+[Releases page](https://github.com/Aryan-mor/jellyfin-telegram/releases). The panel checks for a
+newer release and shows a blue bar at the top when there is one. To update, run the same install
+command again: your settings and library are kept.
+
+**Something went wrong?** See [Troubleshooting](docs/TROUBLESHOOTING.md): every common error
+message and what to do. Everything else in this file is optional detail.
+
 ## Features
 
 - Stock Jellyfin: any official client works, nothing to patch
@@ -47,7 +85,8 @@ It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database
 - [Features](#features)
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
-- [Install](#install) ([Windows](#windows), [Linux](#linux), [Docker for the extras](#docker-for-the-extras))
+- [Quick start](#quick-start-about-two-minutes)
+- [Install from source](#install) ([Windows](#windows), [Linux](#linux), [Docker for the extras](#docker-for-the-extras))
 - [First run and setup](#first-run-and-setup)
 - [Using the panel](#using-the-panel)
 - [Using your own Jellyfin](#using-your-own-jellyfin)
@@ -98,6 +137,9 @@ It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database
 
 ## Requirements
 
+With the Quick start and **Automatic** setup you only need a Telegram account (your phone number).
+The list below is what Manual setup needs, and the setup page creates all of it for you otherwise.
+
 - A **private Telegram channel** that holds your videos
 - **One or more bots** from [@BotFather](https://t.me/BotFather). Every bot must be an **admin**
   of that channel, with permission to post (used for subtitle archives).
@@ -110,6 +152,8 @@ It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database
 
 ### Telegram preparation, step by step
 
+Skip this if you use **Automatic** setup (phone number only). It is for the Manual way.
+
 1. Create a private channel in Telegram.
 2. Talk to [@BotFather](https://t.me/BotFather), send `/newbot` and keep the token. Repeat for
    as many bots as you want.
@@ -121,7 +165,9 @@ It is one binary for Windows and Linux. It needs no CGO, no FUSE and no database
 
 ## Install
 
-Both platforms build the same way. There are no prebuilt releases yet.
+The [Quick start](#quick-start-about-two-minutes) above is the normal way to install. This section
+is for building from source, which needs Go, and for running it as a system service. The installer
+already sets up start-at-login: a Task Scheduler task on Windows, a systemd user service on Linux.
 
 ### Windows
 

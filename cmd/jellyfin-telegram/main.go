@@ -5,6 +5,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/signal"
@@ -35,7 +36,7 @@ func main() {
 	if *verbose {
 		level = slog.LevelDebug
 	}
-	log := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	log := slog.New(slog.NewTextHandler(logOutput(), &slog.HandlerOptions{Level: level}))
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -81,4 +82,27 @@ func newPool(cfg config.Config, tokens []string, log *slog.Logger) (*tgpool.Pool
 		SessionDir:  filepath.Join(cfg.DataDir, "sessions"),
 		Log:         log,
 	})
+}
+
+// logOutput writes the log to the terminal and to data/jellyfin-telegram.log, so a user who started
+// the program from a shortcut or a service can still send the last lines. The file starts over once
+// it passes 5 MB. If it cannot be opened, only the terminal is used.
+func logOutput() io.Writer {
+	dir := os.Getenv("DATA_DIR")
+	if dir == "" {
+		dir = "data"
+	}
+	path := filepath.Join(dir, "jellyfin-telegram.log")
+	flags := os.O_CREATE | os.O_WRONLY | os.O_APPEND
+	if st, err := os.Stat(path); err == nil && st.Size() > 5<<20 {
+		flags = os.O_CREATE | os.O_WRONLY | os.O_TRUNC
+	}
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		return os.Stderr
+	}
+	f, err := os.OpenFile(path, flags, 0o644)
+	if err != nil {
+		return os.Stderr
+	}
+	return io.MultiWriter(os.Stderr, f)
 }
