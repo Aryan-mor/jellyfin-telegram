@@ -61,10 +61,11 @@ function main() {
   }
   const dirty = run("git", ["status", "--porcelain"])
   if (dirty) fail("Commit or stash local edits first. The release is built from GitHub, not from this folder.")
-  run("git", ["fetch", "origin", "main"], { stdio: "inherit" })
+  // `git fetch origin main` writes FETCH_HEAD only and leaves origin/main stale.
+  run("git", ["fetch", "origin", "+refs/heads/main:refs/remotes/origin/main"], { stdio: "inherit" })
   const head = run("git", ["rev-parse", "HEAD"])
   const remote = run("git", ["rev-parse", "origin/main"])
-  if (head !== remote) fail("This commit is not origin/main. Push main, then release.")
+  if (head !== remote) fail(`This commit is not origin/main.\n  local  ${head}\n  github ${remote}\nPush main, then release.`)
 
   const repo = run("gh", ["repo", "view", "--json", "nameWithOwner", "-q", ".nameWithOwner"])
   const listed = JSON.parse(run("gh", ["release", "list", "--repo", repo, "--limit", "200", "--json", "tagName"]))
