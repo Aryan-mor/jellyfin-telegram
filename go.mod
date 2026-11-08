@@ -3,6 +3,7 @@ module github.com/Aryan-mor/jellyfin-telegram
 go 1.26.0
 
 require (
+	github.com/Aryan-mor/telegram-file-resolver v0.0.0-20261108105341-c835c20b9571
 	github.com/abadojack/whatlanggo v1.0.1
 	github.com/gotd/td v0.163.0
 	github.com/joho/godotenv v1.5.1
@@ -14,7 +15,6 @@ require (
 )
 
 require (
-	github.com/Aryan-mor/telegram-file-resolver v0.0.0
 	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/cenkalti/backoff/v4 v4.3.0 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
@@ -58,5 +58,3 @@ require (
 	modernc.org/memory v1.12.1 // indirect
 	rsc.io/qr v0.2.0 // indirect
 )
-
-replace github.com/Aryan-mor/telegram-file-resolver => ../telegram-file-resolver
