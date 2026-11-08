@@ -60,12 +60,7 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 			if !ok || post.Animated || post.Round {
 				continue
 			}
-			hits = append(hits, SearchHit{
-				ChannelID: peer.ChannelID, AccessHash: channels[peer.ChannelID],
-				MessageID: post.ID, Caption: post.Caption, Size: post.Size,
-				Video:     post.MIME == "video/mp4" || post.MIME == "video/x-matroska" || post.MIME == "video/webm" || post.Duration > 0,
-				NoForward: post.NoForward, Duration: int(post.Duration.Seconds()),
-			})
+			hits = append(hits, hitFrom(peer.ChannelID, channels[peer.ChannelID], post))
 		}
 		return hits, nil
 	})
@@ -74,6 +69,16 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 	}
 	hits, _ := val.([]SearchHit)
 	return hits, nil
+}
+
+// hitFrom turns a file post of a channel into a search hit.
+func hitFrom(channelID, accessHash int64, post Post) SearchHit {
+	return SearchHit{
+		ChannelID: channelID, AccessHash: accessHash,
+		MessageID: post.ID, Caption: post.Caption, Size: post.Size,
+		Video:     post.MIME == "video/mp4" || post.MIME == "video/x-matroska" || post.MIME == "video/webm" || post.Duration > 0,
+		NoForward: post.NoForward, Duration: int(post.Duration.Seconds()),
+	}
 }
 
 func messageChats(res tg.MessagesMessagesClass) []tg.ChatClass {

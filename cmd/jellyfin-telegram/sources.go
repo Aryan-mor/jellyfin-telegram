@@ -11,6 +11,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hashindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsearch"
@@ -21,10 +22,14 @@ import (
 
 // startSearch looks up wanted titles on Telegram and copies a file that passes verification. It
 // stays quiet until Seerr has a request, or trending is on, and the switch is on.
-func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, sources *tgsource.Service, users *tguser.Manager, log *slog.Logger) *tgsearch.Service {
+func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, sources *tgsource.Service, users *tguser.Manager, idx *hashindex.Client, log *slog.Logger) *tgsearch.Service {
 	svc := &tgsearch.Service{LibraryChannel: cfg.ChannelID, Log: log, On: tgsearch.Switch(envPath)}
 	if users != nil {
 		svc.TG = users
+		// With the hashtag index on, requests and trending also look there.
+		if idx != nil {
+			svc.TG = &hashindex.Searcher{Account: users, Index: idx, Skip: ownMirror(cat), Log: log}
+		}
 	}
 	svc.Verify = tgsearch.Thresholds{
 		MinSeconds:       cfg.SearchMinMinutes * 60,

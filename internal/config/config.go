@@ -111,6 +111,9 @@ type Config struct {
 	SearchPromoteAt     int
 	SearchMaxDiscovered int
 	SearchDenyAfter     int
+	// HashtagIndexBot is the username of the hashtag index bot (telegram-hashtag-index). When set,
+	// public mirror posts are shared with it and searches ask it too. Empty turns it off.
+	HashtagIndexBot string
 	// TMDBAPIKey is a TMDB v3 key or v4 read token. Only the trending source uses it.
 	TMDBAPIKey string
 	// TrendingSearch looks up TMDB's trending titles once a day. Off until TRENDING_SEARCH=true,
@@ -313,6 +316,7 @@ func Load(envPath string) (Config, error) {
 	c.SearchPromoteAt = getInt("TELEGRAM_SEARCH_PROMOTE_AT", 10, fail)
 	c.SearchMaxDiscovered = getInt("TELEGRAM_SEARCH_MAX_DISCOVERED", 20, fail)
 	c.SearchDenyAfter = getInt("TELEGRAM_SEARCH_DENY_AFTER", 3, fail)
+	c.HashtagIndexBot = strings.TrimPrefix(strings.TrimSpace(get("HASHTAG_INDEX_BOT", "")), "@")
 	c.TMDBAPIKey = get("TMDB_API_KEY", "")
 	c.TrendingSearch = strings.EqualFold(get("TRENDING_SEARCH", ""), "true") || get("TRENDING_SEARCH", "") == "1"
 	c.TrendingAllowAdult = strings.EqualFold(get("TRENDING_ALLOW_ADULT", ""), "true")

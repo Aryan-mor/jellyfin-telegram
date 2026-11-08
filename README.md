@@ -551,6 +551,17 @@ is added to the direct file channels (marked as discovered, with the reason), up
 they pass, goes on a denylist. Points, the denylist and what was already tried survive a restart.
 Global searches run one at a time and back off when Telegram asks for a wait.
 
+**Hashtag index (off by default).** Telegram's own search only finds posts in chats the account
+has joined. [telegram-hashtag-index](https://github.com/Aryan-mor/telegram-hashtag-index) is a
+small bot that keeps links to public posts under hashtags. Set `HASHTAG_INDEX_BOT` to its
+username and, with a signed-in account:
+
+- every post this library copies into a **public mirror** is handed to the index with its
+  hashtag (a durable queue, 25 links a minute, nothing is sent twice);
+- every title search, from Seerr requests and from trending, also asks the index
+  (`#tm_m_<tmdb>`, `#tm_m_<tmdb>_*` or `#tm_tv_<tmdb>_*`), reads the posts it names and sends them
+  through the same verification as any other hit. Posts in this library's own mirrors are skipped.
+
 **Trending (off by default).** With `TRENDING_SEARCH=true` and a `TMDB_API_KEY`, the top of TMDB's
 daily trending list is searched once a day. Titles not released yet are skipped and looked at again
 on a later day. The content filter applies to trending only, never to Seerr requests: adult-flagged
@@ -566,6 +577,7 @@ and erotic titles are dropped unless `TRENDING_ALLOW_ADULT=true`, and only title
 | `TELEGRAM_SEARCH_PROMOTE_AT` | 10 | Accepted files that make a channel a direct file channel |
 | `TELEGRAM_SEARCH_MAX_DISCOVERED` | 20 | Most channels the search may add (0 = never add) |
 | `TELEGRAM_SEARCH_DENY_AFTER` | 3 | Failed files before a channel or key is denylisted |
+| `HASHTAG_INDEX_BOT` | empty | Username of the hashtag index bot; public mirror posts are shared with it and searches ask it |
 | `TRENDING_SEARCH` | false | Search TMDB trending once a day |
 | `TMDB_API_KEY` | empty | TMDB v3 key or v4 read token |
 | `TRENDING_ALLOW_ADULT` | false | Let adult-flagged titles through |

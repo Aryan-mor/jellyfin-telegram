@@ -90,7 +90,7 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply news schema: %w", err)
 	}
-	if _, err := db.Exec(mirrorSchema); err != nil {
+	if _, err := db.Exec(mirrorSchema + indexSharedSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply mirror schema: %w", err)
 	}

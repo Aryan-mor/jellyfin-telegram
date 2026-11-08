@@ -305,3 +305,54 @@ func (c *Catalog) UnmirroredArchives(ctx context.Context, id int64) ([]int, erro
 	}
 	return out, rows.Err()
 }
+
+// SharePost is a post in a public mirror that has not been shared with the hashtag index yet.
+type SharePost struct {
+	MirrorID  int64
+	MessageID int
+	// DestID is the message id inside the mirror channel.
+	DestID   int
+	Username string
+	Caption  string
+}
+
+const indexSharedSchema = `
+CREATE TABLE IF NOT EXISTS index_shared (
+	mirror_id  INTEGER NOT NULL,
+	message_id INTEGER NOT NULL,
+	PRIMARY KEY (mirror_id, message_id)
+);
+`
+
+// UnsharedMirrorPosts returns copied posts of public mirrors that were not shared with the hashtag
+// index yet, oldest first.
+func (c *Catalog) UnsharedMirrorPosts(ctx context.Context, limit int) ([]SharePost, error) {
+	rows, err := c.db.QueryContext(ctx, `
+		SELECT s.mirror_id, s.message_id, s.dest_id, m.username, f.caption
+		FROM mirror_sent s
+		JOIN mirrors m ON m.id = s.mirror_id
+		JOIN files f ON f.message_id = s.message_id
+		WHERE s.dest_id > 0 AND m.username <> ''
+		  AND NOT EXISTS (SELECT 1 FROM index_shared i WHERE i.mirror_id = s.mirror_id AND i.message_id = s.message_id)
+		ORDER BY s.dest_id LIMIT ?`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SharePost
+	for rows.Next() {
+		var p SharePost
+		if err := rows.Scan(&p.MirrorID, &p.MessageID, &p.DestID, &p.Username, &p.Caption); err != nil {
+			return nil, err
+		}
+		out = append(out, p)
+	}
+	return out, rows.Err()
+}
+
+// MarkShared records that a mirror post was handed to the hashtag index, or has nothing to hand
+// over.
+func (c *Catalog) MarkShared(ctx context.Context, mirrorID int64, messageID int) error {
+	_, err := c.db.ExecContext(ctx, `INSERT OR IGNORE INTO index_shared (mirror_id, message_id) VALUES (?,?)`, mirrorID, messageID)
+	return err
+}

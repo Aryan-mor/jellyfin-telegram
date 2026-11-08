@@ -269,7 +269,8 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	local := startLocal(cfg, envPath, cat, pool, users, log)
 	sources := startSources(cfg, cat, users)
 	news := startNews(ctx, cfg, cat, users, sources, log)
-	go startSearch(cfg, envPath, cat, sources, users, log).Run(ctx)
+	tagIndex := startHashIndex(ctx, cfg, cat, users, log)
+	go startSearch(cfg, envPath, cat, sources, users, tagIndex, log).Run(ctx)
 	// A failed group setup must not stop playback. The library then runs as a plain channel, and
 	// the panel shows what went wrong.
 	hub := newGroupHub(ctx, log, cfg.SignedLibrary, func(ctx context.Context) (*intake.Service, error) {
