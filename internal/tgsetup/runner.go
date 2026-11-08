@@ -142,6 +142,13 @@ func (r *Runner) Create(ctx context.Context, o CreateOptions, progress Step) (Fo
 			return found, err
 		}
 		progress("Channel moved to Archive", "ok")
+		// Muting is a comfort, not a requirement: a channel that stays loud is still a working library.
+		progress("Muting the channel", "wait")
+		if err := r.mute(ctx, ch.ID, hash); err != nil {
+			progress("Could not mute the channel: "+err.Error(), "bad")
+		} else {
+			progress("Channel muted", "ok")
+		}
 	} else {
 		progress(fmt.Sprintf("Channel %q found", ch.Title), "ok")
 	}
@@ -290,6 +297,13 @@ func (r *Runner) Reuse(ctx context.Context, o ReuseOptions, progress Step) (Foun
 func (r *Runner) archive(ctx context.Context, id, hash int64) error {
 	_, err := r.S.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
 		return nil, ArchiveChannel(ctx, api, id, hash)
+	})
+	return err
+}
+
+func (r *Runner) mute(ctx context.Context, id, hash int64) error {
+	_, err := r.S.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+		return nil, MuteChannel(ctx, api, id, hash)
 	})
 	return err
 }

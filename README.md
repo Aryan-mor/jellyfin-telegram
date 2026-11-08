@@ -443,16 +443,13 @@ already a member.
 ### News channels
 
 Some channels never post the file. The post is a bot link such as `https://t.me/SomeBot?start=…`.
-Add those on the same tab, under **News channels**, and sign fuckjoin in once with the same
-Telegram account (phone and code). That sign-in is a second session, stored under
-`data/fuckjoin`, not inside this source tree.
+Add those on the same tab, under **News channels**. They use the Telegram account that is already
+signed in, so there is no second login.
 
-On each check the account reads new posts, sends each bot link to
-[fuckjoin](https://github.com/AmirHBuilds/fuckjoin), and waits for the video. A file that passes
-the same rules as a direct copy is forwarded into the library channel. The indexer then adds it
-like any other post. **Update fuckjoin** checks out the latest upstream `main` and restarts that
-program. Python 3.10 or newer and git are required for this list. The pinned commit it starts
-from is `1b28f6ee958c8b9b13578ffb224522a510333e6e`.
+On each check the account reads new posts and sends each bot link to
+[telegram-file-resolver](https://github.com/Aryan-mor/telegram-file-resolver), which runs inside
+this program and waits for the video. A file that passes the same rules as a direct copy is
+forwarded into the library channel. The indexer then adds it like any other post.
 
 ### Local media
 
@@ -526,7 +523,5 @@ This project is not affiliated with Jellyfin or Telegram.
 
 ## Thanks
 
-News channels open bot links with [fuckjoin](https://github.com/AmirHBuilds/fuckjoin),
-built by [AmirHosein Najafi](https://github.com/AmirHBuilds) ([amirhosein-najafi.com](https://amirhosein-najafi.com)).
-Thank you for making that tool and publishing it under the MIT license. This project checks out
-his repository and runs it. It does not ship a copy of the source.
+News channels open bot links with [telegram-file-resolver](https://github.com/Aryan-mor/telegram-file-resolver),
+which runs inside this program.

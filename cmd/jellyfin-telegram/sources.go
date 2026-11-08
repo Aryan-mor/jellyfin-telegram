@@ -11,7 +11,6 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/fuckjoin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsearch"
@@ -45,33 +44,29 @@ func startSources(cfg config.Config, cat *catalog.Catalog, users *tguser.Manager
 	return svc
 }
 
-// startNews prepares the list of channels that post bot links. The fuckjoin checkout is downloaded
-// into the data directory the first time it is needed. Nil news means there is no signed-in account.
-func startNews(ctx context.Context, cfg config.Config, cat *catalog.Catalog, users *tguser.Manager, sources *tgsource.Service, log *slog.Logger) (*newsfeed.Service, *fuckjoin.Runtime) {
-	fj := fuckjoin.New(cfg.DataDir, cfg.APIID, cfg.APIHash, log)
+// startNews prepares the list of channels that post bot links. The resolver runs in this process on
+// a signed-in account. Nil news means there is no signed-in account or the resolver could not start.
+func startNews(ctx context.Context, cfg config.Config, cat *catalog.Catalog, users *tguser.Manager, sources *tgsource.Service, log *slog.Logger) *newsfeed.Service {
 	if sources == nil || users == nil {
-		return nil, fj
+		return nil
 	}
 	svc := newsfeed.New()
 	svc.Cat, svc.TG, svc.LibraryChannel, svc.Log = cat, users, cfg.ChannelID, log
-	// The resolver runs in this process on the signed-in account, so there is no second login. The
-	// fuckjoin runtime above is kept only until the resolver has passed a live test.
 	rc := fileresolver.DefaultConfig()
 	rc.StateDir, rc.Log = filepath.Join(cfg.DataDir, "resolver"), log
 	// Several private channels per link add up quickly. A slower pace keeps Telegram's join limit away.
 	rc.PacingDelay = 10 * time.Second
-	if eng, err := fileresolver.New(newsfeed.Provider(users), rc); err != nil {
-		log.Warn("news resolver could not start; falling back to fuckjoin", "err", err)
-		svc.Open = &newsfeed.Bridge{FJ: fj, TG: users}
-	} else {
-		go func() { _ = eng.Run(ctx) }()
-		svc.Open = &newsfeed.Resolver{Eng: eng, Note: svc.SetNote}
+	eng, err := fileresolver.New(newsfeed.Provider(users), rc)
+	if err != nil {
+		log.Warn("news resolver could not start; news channels are off", "err", err)
+		return nil
 	}
-	return svc, fj
+	go func() { _ = eng.Run(ctx) }()
+	svc.Open = &newsfeed.Resolver{Eng: eng, Note: svc.SetNote}
+	return svc
 }
 
-// sourceState is what the Channels tab draws: the copier's own status and which accounts it can use.
-func sourceState(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, users *tguser.Manager) func(context.Context) (any, error) {
+func sourceState(svc *tgsource.Service, news *newsfeed.Service, users *tguser.Manager) func(context.Context) (any, error) {
 	return func(ctx context.Context) (any, error) {
 		st, err := svc.Status(ctx)
 		if err != nil {
@@ -85,9 +80,6 @@ func sourceState(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Run
 			if err != nil {
 				return nil, err
 			}
-			if fj != nil {
-				n["fuckjoin"] = fj.View()
-			}
 			sessions := make([]map[string]any, 0, len(views))
 			for _, v := range views {
 				sessions = append(sessions, map[string]any{"user_id": v.UserID, "phone": v.Phone, "username": v.Username})
@@ -100,7 +92,7 @@ func sourceState(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Run
 }
 
 // sourceActions runs what the Channels tab asks for. Nothing is copied until the switch is turned on.
-func sourceActions(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime) func(*http.Request, string, map[string]any) (any, error) {
+func sourceActions(svc *tgsource.Service, news *newsfeed.Service) func(*http.Request, string, map[string]any) (any, error) {
 	return func(r *http.Request, action string, body map[string]any) (any, error) {
 		ctx := r.Context()
 		switch action {
@@ -131,7 +123,7 @@ func sourceActions(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.R
 			}
 			return nil, svc.Rescan(ctx)
 		case "news":
-			return nil, setNews(ctx, svc, news, fj, body)
+			return nil, setNews(ctx, svc, news, body)
 		case "news_add":
 			if news == nil {
 				return nil, errors.New("news channels are not available")
@@ -153,37 +145,10 @@ func sourceActions(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.R
 			}
 			on, _ := body["enabled"].(bool)
 			return nil, news.Pause(ctx, int64(number(body["id"])), on)
-		case "news_phone":
-			phone, _ := body["phone"].(string)
-			if err := fj.SendCode(ctx, phone); err != nil {
-				return nil, err
-			}
-			return map[string]any{"step": "code"}, nil
-		case "news_code":
-			code, _ := body["code"].(string)
-			if err := fj.SignIn(ctx, code); err != nil {
-				return nil, err
-			}
-			if fj.View().Phase == "password" {
-				return map[string]any{"step": "password"}, nil
-			}
-			return map[string]any{"step": "done"}, nil
-		case "news_password":
-			password, _ := body["password"].(string)
-			if err := fj.Password(ctx, password); err != nil {
-				return nil, err
-			}
-			return map[string]any{"step": "done"}, nil
 		case "news_account":
 			return nil, setNewsUser(ctx, news, int64(number(body["user_id"])))
 		case "news_settings":
 			return nil, saveNewsRules(ctx, news, body)
-		case "news_update":
-			sha, err := fj.Update(ctx)
-			if err != nil {
-				return nil, err
-			}
-			return map[string]any{"commit": sha}, nil
 		case "settings":
 			cur, err := svc.Settings(ctx)
 			if err != nil {
@@ -226,7 +191,7 @@ func sourceActions(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.R
 	}
 }
 
-func setNews(ctx context.Context, svc *tgsource.Service, news *newsfeed.Service, _ *fuckjoin.Runtime, body map[string]any) error {
+func setNews(ctx context.Context, svc *tgsource.Service, news *newsfeed.Service, body map[string]any) error {
 	if news == nil {
 		return errors.New("news channels are not available")
 	}
@@ -296,18 +261,18 @@ func mustHaveAccount(svc *tgsource.Service) error {
 }
 
 // sourcesView and sourcesDo leave the tab out of the panel when the copier could not start.
-func sourcesView(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, users *tguser.Manager) func(context.Context) (any, error) {
+func sourcesView(svc *tgsource.Service, news *newsfeed.Service, users *tguser.Manager) func(context.Context) (any, error) {
 	if svc == nil {
 		return nil
 	}
-	return sourceState(svc, news, fj, users)
+	return sourceState(svc, news, users)
 }
 
-func sourcesDo(svc *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime) func(*http.Request, string, map[string]any) (any, error) {
+func sourcesDo(svc *tgsource.Service, news *newsfeed.Service) func(*http.Request, string, map[string]any) (any, error) {
 	if svc == nil {
 		return nil
 	}
-	return sourceActions(svc, news, fj)
+	return sourceActions(svc, news)
 }
 
 // sessionsView lists the signed-in accounts for the panel's account tab.

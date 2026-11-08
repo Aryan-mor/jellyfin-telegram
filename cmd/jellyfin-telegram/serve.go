@@ -25,7 +25,6 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fladder"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/fuckjoin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/home"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
@@ -47,8 +46,10 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
+	"github.com/gotd/td/tg"
 )
 
 const (
@@ -263,7 +264,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	dl := startDownloads(cfg, envPath, cat, pool, users, seerrTarget, log)
 	local := startLocal(cfg, envPath, cat, pool, users, log)
 	sources := startSources(cfg, cat, users)
-	news, fj := startNews(ctx, cfg, cat, users, sources, log)
+	news := startNews(ctx, cfg, cat, users, sources, log)
 	go startSearch(cfg, envPath, users, log).Run(ctx)
 	// A failed group setup must not stop playback. The library then runs as a plain channel, and
 	// the panel shows what went wrong.
@@ -275,7 +276,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, fj, hub,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, hub,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -486,7 +487,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, fj *fuckjoin.Runtime, hub *groupHub, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, accounts func() []panel.Account) http.Handler {
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -509,10 +510,10 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		},
 		HomeDo:   homeActions(personal),
 		Sessions: sessionsView(users),
-		Sources:  sourcesView(sources, news, fj, users),
-		SourceDo: sourcesDo(sources, news, fj),
+		Sources:  sourcesView(sources, news, users),
+		SourceDo: sourcesDo(sources, news),
 		Mirrors:  mirrorsView(cat),
-		MirrorDo: mirrorsDo(cat, pool, channel),
+		MirrorDo: mirrorsDo(cat, pool, users, channel),
 		Forum:    forumView(cat, hub),
 		ForumDo:  forumDo(envPath, cat, hub, pool),
 		Verify:   verifyTelegram(dataDir, log),
@@ -557,7 +558,7 @@ func mirrorsView(cat *catalog.Catalog) func(context.Context) (any, error) {
 	}
 }
 
-func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, main int64) func(*http.Request, string, map[string]any) (any, error) {
+func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, main int64) func(*http.Request, string, map[string]any) (any, error) {
 	return func(r *http.Request, action string, body map[string]any) (any, error) {
 		switch action {
 		case "remove":
@@ -592,6 +593,11 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, main int64) func(*http.R
 				}
 				if _, err := cat.AddMirror(r.Context(), id, botID, title, kinds); err != nil {
 					return nil, err
+				}
+				// Muted once, when the channel is first listed. A mirror only receives copies, so the
+				// account has no reason to hear about each one. A failure here never blocks the mirror.
+				if err := muteMirror(r.Context(), users, id); err != nil {
+					slog.Warn("could not mute the mirror channel", "channel", id, "err", err)
 				}
 				return map[string]any{"ok": true}, nil
 			}
@@ -1626,4 +1632,20 @@ func publishAddress(ctx context.Context, cfg config.Config, log *slog.Logger) {
 	case changed:
 		log.Info("Jellyfin now announces this service's address to apps that search the network", "address", cfg.GatewayPublicURL)
 	}
+}
+
+// muteMirror mutes a mirror channel for the signed-in account. Without a signed-in account, or when
+// the account is not a member of the channel, there is nothing to mute and it reports why.
+func muteMirror(ctx context.Context, users *tguser.Manager, channelID int64) error {
+	if users == nil || !users.SignedIn() {
+		return nil
+	}
+	_, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+		ch, err := tguser.ResolveChannelInput(ctx, api, "-100"+strconv.FormatInt(channelID, 10))
+		if err != nil {
+			return nil, err
+		}
+		return nil, tgsetup.MuteChannel(ctx, api, ch.ID, ch.AccessHash)
+	})
+	return err
 }

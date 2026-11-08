@@ -256,6 +256,22 @@ func ArchiveChannel(ctx context.Context, api *tg.Client, channelID, accessHash i
 	return nil
 }
 
+// muteForever is Telegram's "mute until" for a mute with no end.
+const muteForever = 2147483647
+
+// MuteChannel silences a channel for this account for good. Like Archive it is done once, when the
+// channel is first set up; turning notifications back on later is left to the person.
+func MuteChannel(ctx context.Context, api *tg.Client, channelID, accessHash int64) error {
+	_, err := api.AccountUpdateNotifySettings(ctx, &tg.AccountUpdateNotifySettingsRequest{
+		Peer:     &tg.InputNotifyPeer{Peer: &tg.InputPeerChannel{ChannelID: channelID, AccessHash: accessHash}},
+		Settings: tg.InputPeerNotifySettings{MuteUntil: muteForever},
+	})
+	if err != nil {
+		return fmt.Errorf("mute the channel: %w", err)
+	}
+	return nil
+}
+
 // BotUser is a bot as a Telegram user.
 type BotUser struct {
 	ID         int64

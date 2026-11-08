@@ -169,6 +169,7 @@ type botView struct {
 
 type state struct {
 	APIID          int       `json:"api_id,omitempty"`
+	DefaultAPI     bool      `json:"default_api,omitempty"`
 	ChannelID      int64     `json:"channel_id"`
 	Language       string    `json:"language"`
 	Bots           []botView `json:"bots"`
@@ -512,15 +513,22 @@ func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	apiID := cur.apiID
-	if body.APIID != nil && strings.TrimSpace(*body.APIID) != "" {
+	idSet := body.APIID != nil && strings.TrimSpace(*body.APIID) != ""
+	if idSet {
 		if _, err := fmt.Sscan(strings.TrimSpace(*body.APIID), &apiID); err != nil || apiID <= 0 {
 			writeError(w, http.StatusBadRequest, "api_id must be the number from my.telegram.org")
 			return
 		}
 	}
 	hash := cur.hash
-	if body.APIHash != nil && strings.TrimSpace(*body.APIHash) != "" {
+	hashSet := body.APIHash != nil && strings.TrimSpace(*body.APIHash) != ""
+	if hashSet {
 		hash = strings.TrimSpace(*body.APIHash)
+	}
+	// A half-filled form would keep one half of the built-in pair. Both parts have to change together.
+	if defID, defHash, ok := config.DefaultAPI(); ok && cur.apiID == defID && cur.hash == defHash && idSet != hashSet {
+		writeError(w, http.StatusBadRequest, "enter both an API ID and an API hash to replace the default")
+		return
 	}
 	channel := cur.channel
 	if body.Channel != nil && strings.TrimSpace(*body.Channel) != "" {
@@ -713,8 +721,11 @@ func (p *panel) snapshot() (state, error) {
 		}
 	}
 	s := state{ChannelID: cur.channel, Language: cur.language, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
-	// The API this build ships with is not a value the person chose, so the panel leaves the field blank.
-	if id, hash, ok := config.DefaultAPI(); !ok || cur.apiID != id || cur.hash != hash {
+	// The API this build ships with is not a value the person chose. The panel says "default"
+	// and never sends that id, even when only the hash was replaced.
+	if defID, defHash, ok := config.DefaultAPI(); ok && cur.apiID == defID && cur.hash == defHash {
+		s.DefaultAPI = true
+	} else if defID, _, ok := config.DefaultAPI(); !ok || cur.apiID != defID {
 		s.APIID = cur.apiID
 	}
 	if p.o.Accounts != nil {

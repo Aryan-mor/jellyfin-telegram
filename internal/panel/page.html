@@ -458,8 +458,16 @@ details.grp .cat-body { padding:0 12px 4px; }
 
     <!-- API -->
     <section id="tab-api" hidden>
-      <div class="page-head"><h1>Telegram API</h1><p>The API ID and API hash are required. They are not the bot token.</p></div>
+      <div class="page-head"><h1>Telegram API</h1><p>The API ID and API hash identify this program to Telegram. They are not the bot token.</p></div>
       <div class="card">
+        <div id="api-default" class="item" hidden>
+          <div class="main">
+            <div class="title">Default</div>
+            <div class="meta">You're using the default. Replace it here if you want your own.</div>
+          </div>
+          <button id="replace-api" class="btn ghost sm" type="button">Replace</button>
+        </div>
+        <div id="api-edit">
         <details class="guide"><summary>Where do I get these?</summary>
           <p style="margin:0;padding:0 16px 8px;color:var(--muted)">Telegram does not offer a public ID you can download or copy from someone else. Each person creates a pair, free, with their own phone number. This program speaks Telegram’s own protocol, and that protocol refuses a connection without this pair.</p>
           <ol class="steps">
@@ -474,8 +482,12 @@ details.grp .cat-body { padding:0 12px 4px; }
           <div class="field"><label for="api_id">API ID</label><input id="api_id" inputmode="numeric" autocomplete="off" placeholder="Unchanged if empty"></div>
           <div class="field"><label for="api_hash">API hash</label><div class="input-wrap"><input id="api_hash" type="password" autocomplete="off" placeholder="Unchanged if empty"><button class="btn icon" type="button" data-reveal="api_hash" aria-label="Show or hide the hash"><svg class="i"><use href="#i-eye"/></svg></button></div></div>
         </div>
-        <div class="actions"><button id="save-api" class="btn" type="button">Save API</button></div>
+        <div class="actions">
+          <button id="save-api" class="btn" type="button">Save API</button>
+          <button id="cancel-api" class="btn ghost" type="button" hidden>Cancel</button>
+        </div>
         <div id="api-msg" class="alert"></div>
+        </div>
       </div>
     </section>
 
@@ -761,7 +773,7 @@ details.grp .cat-body { padding:0 12px 4px; }
 
     <!-- News channels -->
     <section id="tab-news" hidden>
-      <div class="page-head"><h1>News channels</h1><p>These channels post a bot link instead of the film. The account you pick below reads the post, fuckjoin opens the link, and a video that passes the rules on this tab is forwarded into your library channel. Jellyfin indexes it on the next check. The rules here are separate from Direct files.</p></div>
+      <div class="page-head"><h1>News channels</h1><p>These channels post a bot link instead of the film. The account you pick below reads the post, telegram-file-resolver opens the link, and a video that passes the rules on this tab is forwarded into your library channel. Jellyfin indexes it on the next check. The rules here are separate from Direct files.</p></div>
       <div class="card">
         <div class="item" style="padding:0;border:0">
           <div class="main"><div class="title" id="news-switch-label">Off</div><div class="meta" id="news-switch-meta"></div></div>
@@ -800,7 +812,6 @@ details.grp .cat-body { padding:0 12px 4px; }
         </div>
         <div class="actions">
           <button id="nw-save" class="btn" type="button">Save rules</button>
-          <button id="news-update" class="btn ghost sm" type="button">Update fuckjoin</button>
         </div>
         <div id="nw-rules-msg" class="alert"></div>
       </div>
@@ -931,9 +942,22 @@ function drawAccounts(s) {
   if (!list.length) box.append(el('div', 'empty', 'No accounts to show yet.'));
 }
 
+function drawAPI(s) {
+  const usingDefault = !!s.default_api;
+  $('api-default').hidden = !usingDefault;
+  const editing = $('api-edit').dataset.open === '1';
+  $('api-edit').hidden = usingDefault && !editing;
+  $('cancel-api').hidden = !usingDefault || !editing;
+  if (editing) return;
+  $('api_id').value = usingDefault ? '' : (s.api_id || '');
+  $('api_hash').value = '';
+  $('api_id').placeholder = usingDefault ? 'API ID' : 'Unchanged if empty';
+  $('api_hash').placeholder = usingDefault ? 'API hash' : 'Unchanged if empty';
+}
+
 function draw(s) {
   drawAccounts(s);
-  $('api_id').value = s.api_id || '';
+  drawAPI(s);
   setLanguage(s.language || '');
   drawMain(s);
 
@@ -1091,6 +1115,7 @@ async function save(body, btn, msg) {
     say(msg, 'Saved. Restart jellyfin-telegram to use it.', 'ok');
     toast('Saved');
     $('api_hash').value = '';
+    if (body.api_id !== undefined || body.api_hash !== undefined) $('api-edit').dataset.open = '';
     if (body.channel !== undefined) {
       $('channel').value = '';
       $('main-edit').dataset.open = '';
@@ -1167,7 +1192,30 @@ document.querySelectorAll('[data-reveal]').forEach(b => { b.onclick = () => { co
 window.addEventListener('hashchange', () => show(location.hash.slice(1)));
 $('add-btn').onclick = () => changeBots({add: $('add').value.trim()});
 $('add').addEventListener('keydown', e => { if (e.key === 'Enter') $('add-btn').click(); });
-$('save-api').onclick = () => save({api_id:$('api_id').value, api_hash:$('api_hash').value}, $('save-api'), 'api-msg');
+$('save-api').onclick = () => {
+  const id = $('api_id').value.trim();
+  const hash = $('api_hash').value.trim();
+  if ($('api-edit').dataset.open === '1' && (!id || !hash)) {
+    say('api-msg', 'Enter both an API ID and an API hash.', 'bad');
+    return;
+  }
+  save({api_id: id, api_hash: hash}, $('save-api'), 'api-msg');
+};
+$('replace-api').onclick = () => {
+  $('api-edit').dataset.open = '1';
+  $('api_id').value = '';
+  $('api_hash').value = '';
+  $('api-edit').hidden = false;
+  $('cancel-api').hidden = false;
+  $('api_id').focus();
+};
+$('cancel-api').onclick = () => {
+  $('api-edit').dataset.open = '';
+  $('api_id').value = '';
+  $('api_hash').value = '';
+  $('api-edit').hidden = true;
+  say('api-msg', '');
+};
 $('save-channel').onclick = () => {
   if (!$('channel').value.trim()) { say('channel-msg', 'Paste the new channel link or id.', 'bad'); return; }
   save({channel:$('channel').value}, $('save-channel'), 'channel-msg');
@@ -1441,16 +1489,12 @@ const loginCopy = {
 };
 let loginStep = 'phone';
 let loginBusy = false;
-let loginTarget = 'account';
 let loginPhone = '';
 function showLoginStep(step) {
   loginStep = step;
   const c = loginCopy[step];
   $('login-title').textContent = c.title;
   $('login-help').textContent = c.help;
-  if (loginTarget === 'fuckjoin' && step === 'phone') {
-    $('login-help').textContent = 'This number is the account already chosen for news channels. Change it to open links with a different account. Telegram sends nothing until you press the button.';
-  }
   $('login-next').textContent = c.button;
   const input = $('login-input');
   input.type = c.type; input.inputMode = c.mode; input.autocomplete = c.auto; input.placeholder = c.hint; input.value = '';
@@ -1462,23 +1506,14 @@ function showLoginStep(step) {
   input.focus();
 }
 function openLogin() {
-  loginTarget = 'account';
   say('login-msg', '');
   $('login-modal').hidden = false;
   showLoginStep('phone');
-}
-function openNewsLogin(phone) {
-  loginTarget = 'fuckjoin';
-  loginPhone = phone || '';
-  say('login-msg', '');
-  $('login-modal').hidden = false;
-  showLoginStep('phone');
-  if (loginPhone) $('login-input').value = loginPhone;
 }
 async function closeLogin(cancelServer) {
   $('login-modal').hidden = true;
   $('login-input').value = '';
-  if (cancelServer && loginStep !== 'phone' && loginTarget === 'account') {
+  if (cancelServer && loginStep !== 'phone') {
     try { await api('/panel/downloads/login', {cancel:true}); } catch (e) {}
   }
 }
@@ -1492,20 +1527,13 @@ async function nextLogin() {
   busy($('login-next'), true);
   say('login-msg', loginStep === 'phone' ? 'Asking Telegram to send a code…' : 'Checking with Telegram…');
   const failedAt = loginStep;
-  const path = loginTarget === 'fuckjoin'
-    ? '/panel/sources/news_' + (loginStep === 'phone' ? 'phone' : loginStep === 'code' ? 'code' : 'password')
-    : '/panel/downloads/login';
+  const path = '/panel/downloads/login';
   if (loginStep === 'phone') loginPhone = value;
   try {
     const res = await api(path, body);
     if (res.step === 'done') {
-      const target = loginTarget;
       await closeLogin(false);
-      if (target === 'fuckjoin') {
-        say('news-msg', 'Signed in for news channels.', 'ok');
-        toast('Signed in');
-        loadSources(true);
-      } else if (res.warning) say('acct-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
+      if (res.warning) say('acct-msg', 'Signed in, but it cannot post in the channel yet: ' + res.warning + ' Make it an admin with permission to post and it connects by itself.', 'bad');
       else { say('acct-msg', 'Signed in.', 'ok'); toast('Signed in'); }
       draw(await api('/panel/state'));
     } else {
@@ -1961,15 +1989,12 @@ function accountLabel(a) {
 }
 function drawNews(n) {
   const set = n.settings || {};
-  const fj = n.fuckjoin || {};
   $('news-switch-label').textContent = set.enabled ? 'Opening bot links is on' : 'Opening bot links is off';
   $('news-toggle').setAttribute('aria-checked', set.enabled ? 'true' : 'false');
   const bits = [];
-  if (fj.commit) bits.push('fuckjoin ' + fj.commit);
   if (set.enabled) bits.push(n.running ? 'checking now' : 'waiting for the next check');
   $('news-switch-meta').textContent = bits.join(' · ');
   if (n.note) say('news-msg', n.note, '');
-  else if (fj.note) say('news-msg', fj.note, '');
   if (!nwDirty && set.look_back_days !== undefined) fillNewsRules(set);
 
   const accounts = $('news-accounts');
@@ -1998,15 +2023,6 @@ function drawNews(n) {
     accounts.append(row);
   }
   if (!sessions.length) accounts.append(el('div', 'empty', 'No account yet.'));
-  if (!fj.ready && sessions.length) {
-    const b = el('button', 'btn sm', 'Sign in');
-    b.type = 'button';
-    b.onclick = () => {
-      const a = sessions.find(s => s.user_id === chosen) || sessions[0] || {};
-      openNewsLogin(a.phone || '');
-    };
-    accounts.append(b);
-  }
 
   const list = $('news-list');
   list.replaceChildren();
@@ -2088,13 +2104,6 @@ $('nw-save').onclick = async () => {
     say('nw-rules-msg', 'Saved.', 'ok'); toast('News rules saved');
     loadSources(true);
   } catch (e) { say('nw-rules-msg', e.message, 'bad'); }
-};
-$('news-update').onclick = async () => {
-  busy($('news-update'), true);
-  say('news-msg', 'Fetching the latest fuckjoin…');
-  try { const res = await srcApi('news_update'); say('news-msg', 'Updated to ' + (res.commit || 'the latest commit') + '.', 'ok'); loadSources(true); }
-  catch (e) { say('news-msg', e.message, 'bad'); }
-  busy($('news-update'), false);
 };
 setInterval(() => { if (!document.hidden && (!$('tab-sources').hidden || !$('tab-news').hidden) && $('login-modal').hidden) loadSources(false); }, 5000);
 

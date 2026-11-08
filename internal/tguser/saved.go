@@ -16,7 +16,7 @@ type Saved struct {
 }
 
 // SendSaved posts text into Saved Messages and returns the new message id.
-// The fuckjoin session of this same account reads that chat.
+// The resolver on this same account reads that chat.
 func (m *Manager) SendSaved(ctx context.Context, text string) (int, error) {
 	lv, err := m.pick(ctx)
 	if err != nil {

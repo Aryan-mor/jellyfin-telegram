@@ -42,7 +42,7 @@ func Provider(l Lender) fileresolver.Provider {
 }
 
 // Resolver opens a bot link with the in-process resolver and returns the video messages it copied
-// into Saved Messages of the same account. It replaces the fuckjoin userbot.
+// into Saved Messages of the same account.
 type Resolver struct {
 	Eng *fileresolver.Engine
 	// Note shows what the walk is doing, such as a wait for Telegram's join limit. Nil ignores it.

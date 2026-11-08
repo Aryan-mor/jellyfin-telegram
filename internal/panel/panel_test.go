@@ -89,7 +89,7 @@ func TestStateHidesTokensAndMarksTailscale(t *testing.T) {
 	defer page.Body.Close()
 	html, _ := io.ReadAll(page.Body)
 	text := string(html)
-	for _, want := range []string{"Tailscale", "Add a bot", "/newbot", "does not offer a public ID", `href="/"`, "https://github.com/DonutWare/Fladder/releases"} {
+	for _, want := range []string{"Tailscale", "Add a bot", "/newbot", "does not offer a public ID", "You're using the default. Replace it here if you want your own.", `href="/"`, "https://github.com/DonutWare/Fladder/releases"} {
 		if !strings.Contains(text, want) {
 			t.Fatalf("page is missing %q", want)
 		}
@@ -111,6 +111,44 @@ func TestStateOmitsTheBuiltInAPI(t *testing.T) {
 	}
 	if _, ok := body["api_id"]; ok {
 		t.Fatalf("the built-in api_id was sent to the browser: %v", body["api_id"])
+	}
+	if body["default_api"] != true {
+		t.Fatalf("default_api = %v", body["default_api"])
+	}
+}
+
+func TestReplacingTheDefaultAPINeedsBoth(t *testing.T) {
+	config.DefaultAPIID, config.DefaultAPIHash = "12345", "abcdef"
+	t.Cleanup(func() { config.DefaultAPIID, config.DefaultAPIHash = "", "" })
+	srv, path := serve(t, func(context.Context, int, string, int64, []string) (setup.Report, error) {
+		return setup.Report{Bots: []setup.BotReport{{Name: "@reader", OK: true}}}, nil
+	}, nil)
+	res, err := http.Post(srv.URL+"/panel/settings?code=secret", "application/json", strings.NewReader(`{"api_id":"99999"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(saved), "TELEGRAM_API_ID=12345") || !strings.Contains(string(saved), "TELEGRAM_API_HASH=abcdef") {
+		t.Fatalf("file = %s", saved)
+	}
+	res, err = http.Post(srv.URL+"/panel/settings?code=secret", "application/json", strings.NewReader(`{"api_id":"99999","api_hash":"newhash"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	saved, _ = os.ReadFile(path)
+	if strings.Contains(string(saved), "abcdef") || !strings.Contains(string(saved), "TELEGRAM_API_ID=99999") || !strings.Contains(string(saved), "TELEGRAM_API_HASH=newhash") {
+		t.Fatalf("file = %s", saved)
 	}
 }
 

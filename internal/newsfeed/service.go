@@ -1,5 +1,5 @@
 // Package newsfeed reads channels that post bot links instead of files.
-// Each link is handed to the fuckjoin userbot. A video that passes the same rules as a direct
+// Each link is handed to the resolver. A video that passes the same rules as a direct
 // copy is forwarded into the library channel, and the indexer picks it up on its next pass.
 package newsfeed
 
@@ -29,7 +29,7 @@ type Telegram interface {
 	ForwardSaved(ctx context.Context, ids []int) error
 }
 
-// Opener turns one bot deep link into the video messages fuckjoin delivered.
+// Opener turns one bot deep link into the video messages the resolver delivered.
 type Opener interface {
 	Open(ctx context.Context, url string) ([]tguser.Post, error)
 }

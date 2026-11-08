@@ -104,3 +104,9 @@ func (l *Lent) ChannelsLeaveChannel(ctx context.Context, c tg.InputChannelClass)
 		return a.ChannelsLeaveChannel(ctx, c)
 	})
 }
+
+func (l *Lent) AccountUpdateNotifySettings(ctx context.Context, r *tg.AccountUpdateNotifySettingsRequest) (bool, error) {
+	return lent(ctx, l, func(ctx context.Context, a *tg.Client) (bool, error) {
+		return a.AccountUpdateNotifySettings(ctx, r)
+	})
+}

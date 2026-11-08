@@ -24,8 +24,7 @@
 | `internal/autoupload` | Polls Radarr and Sonarr, uploads one file per session, and deletes the disk copy after a probe |
 | `internal/downloads` | Panel switch. A failure here is logged and does not stop playback |
 | `internal/tgsource` | Walks other Telegram channels with a signed-in account and forwards films and series into the library channel server side. Progress and what was copied live in the catalog |
-| `internal/newsfeed` | Watches a separate list of channels that post bot links, asks the fuckjoin checkout to open each link, and forwards a video that passes the copy rules |
-| `internal/fuckjoin` | Checks out [fuckjoin](https://github.com/AmirHBuilds/fuckjoin) under the data directory at a pinned commit and runs it. Update moves that checkout to upstream `main` |
+| `internal/newsfeed` | Watches a separate list of channels that post bot links, asks telegram-file-resolver to open each link, and forwards a video that passes the copy rules |
 
 ## Reading a video
 
