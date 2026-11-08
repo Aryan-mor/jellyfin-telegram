@@ -11,10 +11,28 @@ $dir = Join-Path $env:LOCALAPPDATA 'jellyfin-telegram'
 $exe = Join-Path $dir 'jellyfin-telegram.exe'
 New-Item -ItemType Directory -Force $dir | Out-Null
 
-Write-Host 'Downloading jellyfin-telegram...'
+# A later run with no channel set stays on the channel already installed.
+$channelFile = Join-Path $dir 'channel'
+$channel = $env:JFTG_CHANNEL
+if (-not $channel -and (Test-Path $channelFile)) { $channel = (Get-Content $channelFile -Raw).Trim() }
+if ($channel -ne 'nightly') { $channel = 'stable' }
+Set-Content -Path $channelFile -Value $channel -Encoding ascii
+
+Write-Host "Downloading jellyfin-telegram ($channel)..."
 Get-Process -Name 'jellyfin-telegram' -ErrorAction SilentlyContinue | Stop-Process -Force
 $zip = Join-Path $env:TEMP 'jellyfin-telegram.zip'
-Invoke-WebRequest "https://github.com/$repo/releases/latest/download/jellyfin-telegram-windows-amd64.zip" -OutFile $zip
+if ($channel -eq 'nightly') {
+  $rels = Invoke-RestMethod -Headers @{ 'User-Agent' = 'jellyfin-telegram'; Accept = 'application/vnd.github+json' } -Uri "https://api.github.com/repos/$repo/releases?per_page=30"
+  $tag = $null
+  foreach ($rel in $rels) {
+    if ($rel.prerelease -and $rel.tag_name -match '-nightly\.\d+$') { $tag = $rel.tag_name; break }
+  }
+  if (-not $tag) { throw 'No nightly release yet.' }
+  $url = "https://github.com/$repo/releases/download/$tag/jellyfin-telegram-windows-amd64.zip"
+} else {
+  $url = "https://github.com/$repo/releases/latest/download/jellyfin-telegram-windows-amd64.zip"
+}
+Invoke-WebRequest $url -OutFile $zip
 Expand-Archive $zip -DestinationPath $dir -Force
 Remove-Item $zip
 

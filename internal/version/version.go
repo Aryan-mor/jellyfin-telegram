@@ -16,6 +16,10 @@ import (
 // A build from source has "dev" and never reports an update.
 var Version = "dev"
 
+// Channel is "stable" or "nightly", set at build time next to Version.
+// A stable install only hears about stable releases. A nightly install only hears about nightlies.
+var Channel = "stable"
+
 // Repo is the GitHub repository whose releases are checked.
 const Repo = "Aryan-mor/jellyfin-telegram"
 
@@ -24,10 +28,19 @@ const cacheFor = 6 * time.Hour
 // Info is what the panel shows.
 type Info struct {
 	Current   string `json:"current"`
+	Channel   string `json:"channel,omitempty"`
 	Latest    string `json:"latest,omitempty"`
 	Available bool   `json:"available"`
 	URL       string `json:"url,omitempty"`
 	Notes     string `json:"notes,omitempty"`
+}
+
+// Release is one GitHub release, newest-or-not. Choose picks the one this install should follow.
+type Release struct {
+	Tag   string
+	URL   string
+	Notes string
+	Pre   bool
 }
 
 var (
@@ -41,7 +54,7 @@ var (
 // Check returns the running version and the newest release. The answer is cached for six hours,
 // and a failed lookup (offline, rate limited) simply reports no update.
 func Check(ctx context.Context) Info {
-	info := Info{Current: Version}
+	info := Info{Current: Version, Channel: Channel}
 	if Version == "dev" {
 		return info
 	}
@@ -49,6 +62,7 @@ func Check(ctx context.Context) Info {
 	defer mu.Unlock()
 	if time.Since(fetched) < cacheFor {
 		cached.Current = Version
+		cached.Channel = Channel
 		return cached
 	}
 	tag, url, notes, err := Fetch(ctx)
@@ -88,6 +102,19 @@ func Newer(a, b string) bool {
 
 func parts(v string) []int {
 	v = strings.TrimPrefix(strings.TrimSpace(v), "v")
+	nightly := 0
+	hasNightly := false
+	if base, n, ok := strings.Cut(v, "-nightly."); ok {
+		num, err := strconv.Atoi(n)
+		if err != nil || num < 1 || strings.Contains(base, "-") {
+			return nil
+		}
+		v = base
+		nightly = num
+		hasNightly = true
+	} else if strings.Contains(v, "-") {
+		return nil
+	}
 	var out []int
 	for _, s := range strings.Split(v, ".") {
 		n, err := strconv.Atoi(s)
@@ -96,13 +123,37 @@ func parts(v string) []int {
 		}
 		out = append(out, n)
 	}
+	if hasNightly {
+		out = append(out, nightly)
+	}
 	return out
+}
+
+// Choose returns the newest release on this channel. Stable ignores prereleases.
+// Nightly ignores everything that is not a nightly prerelease.
+func Choose(channel string, list []Release) (Release, bool) {
+	var best Release
+	found := false
+	for _, rel := range list {
+		if channel == "nightly" {
+			if !rel.Pre || parts(rel.Tag) == nil || !strings.Contains(rel.Tag, "-nightly.") {
+				continue
+			}
+		} else if rel.Pre || strings.Contains(rel.Tag, "-nightly.") || parts(rel.Tag) == nil {
+			continue
+		}
+		if !found || Newer(rel.Tag, best.Tag) {
+			best = rel
+			found = true
+		}
+	}
+	return best, found
 }
 
 func fetchLatest(ctx context.Context) (tag, url, notes string, err error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+Repo+"/releases/latest", nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+Repo+"/releases?per_page=30", nil)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -116,16 +167,26 @@ func fetchLatest(ctx context.Context) (tag, url, notes string, err error) {
 	if res.StatusCode != http.StatusOK {
 		return "", "", "", fmt.Errorf("github answered %d", res.StatusCode)
 	}
-	var body struct {
+	var body []struct {
 		Tag  string `json:"tag_name"`
 		URL  string `json:"html_url"`
 		Body string `json:"body"`
+		Pre  bool   `json:"prerelease"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
 		return "", "", "", err
 	}
-	if len(body.Body) > 1500 {
-		body.Body = body.Body[:1500]
+	list := make([]Release, 0, len(body))
+	for _, rel := range body {
+		notes := rel.Body
+		if len(notes) > 1500 {
+			notes = notes[:1500]
+		}
+		list = append(list, Release{Tag: rel.Tag, URL: rel.URL, Notes: notes, Pre: rel.Pre})
 	}
-	return body.Tag, body.URL, body.Body, nil
+	chosen, ok := Choose(Channel, list)
+	if !ok {
+		return "", "", "", fmt.Errorf("no %s release", Channel)
+	}
+	return chosen.Tag, chosen.URL, chosen.Notes, nil
 }

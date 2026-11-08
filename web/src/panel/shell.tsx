@@ -63,7 +63,7 @@ export function Shell() {
   const job = useJob()
   const update = useQuery({
     queryKey: ["panel-update"],
-    queryFn: () => api<{ current: string; latest?: string; available: boolean; url?: string }>("/panel/update"),
+    queryFn: () => api<{ current: string; channel?: string; latest?: string; available: boolean; url?: string }>("/panel/update"),
     refetchInterval: () => (pollingPaused() ? false : 6 * 60 * 60 * 1000),
     staleTime: 60 * 60 * 1000,
   })
@@ -130,7 +130,7 @@ export function Shell() {
         {update.data?.available && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-sky-500/15 px-4 py-2 text-sm">
             <span>
-              A new version is out: <b>{update.data.latest}</b> (you have {update.data.current}). To update, run the install command from the README again; your settings and library are kept.
+              A new {update.data.channel === "nightly" ? "nightly" : "version"} is out: <b>{update.data.latest}</b> (you have {update.data.current}). Run the installer again. It stays on this channel, and your settings and library are kept.
             </span>
             {update.data.url && <a className="font-medium underline" href={update.data.url} target="_blank" rel="noreferrer">What changed</a>}
           </div>

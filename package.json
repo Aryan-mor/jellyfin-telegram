@@ -9,6 +9,8 @@
     "ui:check": "pnpm --dir web exec tsc -p tsconfig.app.json --noEmit && pnpm --dir web exec oxlint",
     "restart": "pnpm run ui:build && powershell -NoProfile -ExecutionPolicy Bypass -File ./restart.ps1 -Build",
     "test": "go vet ./... && go test ./...",
-    "check": "pnpm run ui:check && pnpm run test"
+    "check": "pnpm run ui:check && pnpm run test",
+    "release:stable": "node scripts/release.mjs stable",
+    "release:nightly": "node scripts/release.mjs nightly"
   }
 }

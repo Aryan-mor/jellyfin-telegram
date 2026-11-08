@@ -15,9 +15,38 @@ case "$(uname -m)" in
 esac
 
 mkdir -p "$dir"
-echo "Downloading jellyfin-telegram..."
+# A later run with no channel set stays on the channel already installed.
+channel="${JFTG_CHANNEL:-}"
+if [ -z "$channel" ] && [ -f "$dir/channel" ]; then
+  channel=$(tr -d '[:space:]' < "$dir/channel")
+fi
+case "$channel" in
+  nightly) channel=nightly ;;
+  *) channel=stable ;;
+esac
+printf '%s\n' "$channel" > "$dir/channel"
+
+echo "Downloading jellyfin-telegram ($channel)..."
 tmp="$(mktemp)"
-curl -fsSL "https://github.com/$repo/releases/latest/download/jellyfin-telegram-linux-$arch.tar.gz" -o "$tmp"
+if [ "$channel" = nightly ]; then
+  tag=$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: jellyfin-telegram" \
+    "https://api.github.com/repos/$repo/releases?per_page=30" | awk '
+      /"tag_name"/ {
+        tag = $0
+        sub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", tag)
+        sub(/".*/, "", tag)
+      }
+      /"prerelease"[[:space:]]*:[[:space:]]*true/ && tag ~ /-nightly\.[0-9]+$/ { print tag; exit }
+    ')
+  if [ -z "$tag" ]; then
+    echo "No nightly release yet." >&2
+    exit 1
+  fi
+  url="https://github.com/$repo/releases/download/$tag/jellyfin-telegram-linux-$arch.tar.gz"
+else
+  url="https://github.com/$repo/releases/latest/download/jellyfin-telegram-linux-$arch.tar.gz"
+fi
+curl -fsSL "$url" -o "$tmp"
 systemctl --user stop jellyfin-telegram 2>/dev/null || true
 tar xzf "$tmp" -C "$dir"
 rm -f "$tmp"

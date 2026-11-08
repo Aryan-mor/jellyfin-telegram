@@ -1,15 +1,21 @@
 name: Release
 
-# Every push to main builds the panel UI and the program, then publishes a numbered release
-# (1.0.<run number>) with ready-to-run files for Windows and Linux. Nothing has to be built or
-# committed by hand: the UI is built here.
+# pnpm release:stable and pnpm release:nightly start this. Stable is the release GitHub calls
+# latest. Nightly is a prerelease, so a stable install never sees it.
 on:
-  push:
-    branches: [main]
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
   workflow_dispatch:
+    inputs:
+      channel:
+        description: Who should be offered this update
+        required: true
+        type: choice
+        options:
+          - stable
+          - nightly
+      version:
+        description: "Version without v. Stable: 1.0.44. Nightly: 1.0.44-nightly.2"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -23,7 +29,8 @@ jobs:
     name: build ${{ matrix.goos }}-${{ matrix.goarch }}
     runs-on: ubuntu-latest
     env:
-      VERSION: 1.0.${{ github.run_number }}
+      VERSION: ${{ github.event.inputs.version }}
+      CHANNEL: ${{ github.event.inputs.channel }}
     strategy:
       matrix:
         include:
@@ -57,10 +64,17 @@ jobs:
           API_ID: ${{ secrets.TELEGRAM_API_ID }}
           API_HASH: ${{ secrets.TELEGRAM_API_HASH }}
         run: |
+          if [ "$CHANNEL" = stable ]; then
+            printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "stable version must look like 1.0.44"; exit 1; }
+          elif [ "$CHANNEL" = nightly ]; then
+            printf '%s\n' "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]+$' || { echo "nightly version must look like 1.0.44-nightly.2"; exit 1; }
+          else
+            echo "bad channel: $CHANNEL"; exit 1
+          fi
           mod=github.com/Aryan-mor/jellyfin-telegram/internal
           ext=""; [ "$GOOS" = windows ] && ext=".exe"
           mkdir -p dist
-          go build -trimpath -ldflags "-s -w -X $mod/version.Version=$VERSION -X $mod/config.DefaultAPIID=$API_ID -X $mod/config.DefaultAPIHash=$API_HASH" \
+          go build -trimpath -ldflags "-s -w -X $mod/version.Version=$VERSION -X $mod/version.Channel=$CHANNEL -X $mod/config.DefaultAPIID=$API_ID -X $mod/config.DefaultAPIHash=$API_HASH" \
             -o "dist/jellyfin-telegram$ext" ./cmd/jellyfin-telegram
           cd dist
           if [ "$GOOS" = windows ]; then
@@ -78,7 +92,8 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     env:
-      VERSION: 1.0.${{ github.run_number }}
+      VERSION: ${{ github.event.inputs.version }}
+      CHANNEL: ${{ github.event.inputs.channel }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -89,8 +104,10 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp install.ps1 install.sh install-windows.cmd dist/
+          cp install.ps1 install.sh install-windows.cmd install-nightly-windows.cmd dist/
           cd dist
           sha256sum * > SHA256SUMS.txt
+          mark=(--latest)
+          if [ "$CHANNEL" = nightly ]; then mark=(--prerelease); fi
           gh release create "v$VERSION" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "v$VERSION" --generate-notes --latest *
+            --title "v$VERSION" --generate-notes "${mark[@]}" *

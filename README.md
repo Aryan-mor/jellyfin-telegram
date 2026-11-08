@@ -63,17 +63,27 @@ empty folder and run `./jellyfin-telegram`. The setup page opens by itself.
 - A normal PC: [`jellyfin-telegram-linux-amd64.tar.gz`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/jellyfin-telegram-linux-amd64.tar.gz)
 - A Raspberry Pi or other ARM64 machine: [`jellyfin-telegram-linux-arm64.tar.gz`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/jellyfin-telegram-linux-arm64.tar.gz)
 
+**Nightly.** Same installers, but the build is the nightly one. A nightly install only offers newer
+nightlies. A stable install only offers stable releases. Run the installer again to update; it
+stays on the channel it was installed with.
+
+Windows: download [`install-nightly-windows.cmd`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install-nightly-windows.cmd)
+and double-click it. Linux:
+
+```shell
+curl -fsSL https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.sh | JFTG_CHANNEL=nightly sh
+```
+
 The installer also puts a **jellyfin-telegram panel** shortcut on your Desktop (and in the Start
 menu or applications menu). Click it any time to open the panel.
 
 When the setup page finishes, Jellyfin is at `http://127.0.0.1:8097` and the panel is at
 `http://127.0.0.1:8097/panel`.
 
-**Updates.** Every push to `main` builds and publishes a new numbered release
-(`1.0.<number>`) with GitHub Actions; you can also download any of them from the
-[Releases page](https://github.com/Aryan-mor/jellyfin-telegram/releases). The panel checks for a
-newer release and shows a blue bar at the top when there is one. To update, run the same install
-command again: your settings and library are kept.
+**Updates.** A release is published when someone runs `pnpm release:stable` or
+`pnpm release:nightly`. Stable versions are `1.0.N`. Nightly versions are `1.0.N-nightly.K` and
+do not move the stable download. The panel shows a blue bar only for a newer build on the same
+channel. To update, run the same install command again: your settings and library are kept.
 
 **Something went wrong?** See [Troubleshooting](docs/TROUBLESHOOTING.md): every common error
 message and what to do. Everything else in this file is optional detail.
