@@ -259,9 +259,17 @@ Upload a video to the channel and within about a minute it is in your library.
 Open `http://127.0.0.1:8097/panel` on the machine that runs the service. The panel is plain HTTP,
 so it accepts sign-in from this computer or over Tailscale.
 
-The pages are a React app in `web/`. `pnpm build` (from `web/`) writes `internal/webui/dist`,
-and that folder is embedded in the Go binary, so `go build` does not need Node. Commit the
-built files with the source change.
+The pages are a React app in `web/`. Building it writes `internal/webui/dist`, and that folder is
+embedded in the Go binary, so `go build` does not need Node. Commit the built files with the
+source change. From the project folder:
+
+| Command | What it does |
+|---|---|
+| `npm run setup` | Installs the UI packages once |
+| `npm run restart` | Builds the UI, builds the program, stops the running one and starts the new one |
+| `npm run ui:dev` | Runs the UI with live reload (the program must be running) |
+| `npm run ui:build` | Builds the UI into `internal/webui/dist` |
+| `npm run check` | Type-checks and lints the UI, then runs `go vet` and `go test` |
 
 | Page | Use it to |
 |---|---|

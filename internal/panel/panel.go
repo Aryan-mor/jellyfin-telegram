@@ -26,11 +26,12 @@ import (
 
 // LiveBot is one bot the running service already connected.
 type LiveBot struct {
-	ID    int64
-	Name  string
-	OK    bool
-	Admin bool
-	Error string
+	ID           int64
+	Name         string
+	OK           bool
+	Admin        bool
+	Error        string
+	ChannelTitle string
 }
 
 // Options wires the page to the running service.
@@ -203,6 +204,7 @@ type state struct {
 	APIID          int       `json:"api_id,omitempty"`
 	DefaultAPI     bool      `json:"default_api,omitempty"`
 	ChannelID      int64     `json:"channel_id"`
+	ChannelTitle   string    `json:"channel_title,omitempty"`
 	Language       string    `json:"language"`
 	Bots           []botView `json:"bots"`
 	Addresses      []address `json:"addresses"`
@@ -871,6 +873,9 @@ func (p *panel) snapshot() (state, error) {
 			view.Error = b.Error
 			if b.Name != "" {
 				view.Name = "@" + strings.TrimPrefix(b.Name, "@")
+			}
+			if s.ChannelTitle == "" {
+				s.ChannelTitle = b.ChannelTitle
 			}
 		}
 		s.Bots = append(s.Bots, view)

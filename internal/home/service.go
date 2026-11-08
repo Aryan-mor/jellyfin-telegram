@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -51,6 +52,14 @@ type Service struct {
 	scanned  time.Time
 	scanning bool
 	wake     chan struct{}
+	namedID  int64
+	named    string
+	namedAt  time.Time
+}
+
+// channelNamer resolves a channel the signed-in account already belongs to.
+type channelNamer interface {
+	Lookup(ctx context.Context, input string) (tguser.Channel, error)
 }
 
 // New returns a service for these folders.
@@ -277,6 +286,7 @@ type File struct {
 // View is what the Home tab shows.
 type View struct {
 	Channel  int64               `json:"channel"`
+	Title    string              `json:"title,omitempty"`
 	Running  int64               `json:"running"`
 	Folders  []localmedia.Folder `json:"folders"`
 	Files    []FileView          `json:"files"`
@@ -310,6 +320,7 @@ func (s *Service) State(ctx context.Context) (View, error) {
 			return View{}, err
 		}
 	}
+	v.Title = s.channelTitle(ctx, v.Channel)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.scanned.IsZero() {
@@ -335,6 +346,36 @@ func (s *Service) State(ctx context.Context) (View, error) {
 		v.Files = append(v.Files, fv)
 	}
 	return v, nil
+}
+
+// channelTitle is the Telegram name of the personal channel. A miss waits a minute before asking again.
+func (s *Service) channelTitle(ctx context.Context, id int64) string {
+	if id == 0 || s.Sender == nil {
+		return ""
+	}
+	s.mu.Lock()
+	if s.namedID == id && (s.named != "" || time.Since(s.namedAt) < time.Minute) {
+		name := s.named
+		s.mu.Unlock()
+		return name
+	}
+	s.mu.Unlock()
+	namer, ok := s.Sender.(channelNamer)
+	if !ok {
+		return ""
+	}
+	ch, err := namer.Lookup(ctx, strconv.FormatInt(id, 10))
+	s.mu.Lock()
+	s.namedID = id
+	s.namedAt = time.Now()
+	if err == nil {
+		s.named = ch.Title
+	} else {
+		s.named = ""
+	}
+	name := s.named
+	s.mu.Unlock()
+	return name
 }
 
 func (s *Service) fileChannel() int64 {

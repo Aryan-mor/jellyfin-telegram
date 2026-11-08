@@ -31,7 +31,9 @@ func serve(t *testing.T, verify setup.Verifier, same func(int64) error) (*httpte
 	}
 	h := New(Options{
 		Code: "secret", EnvPath: path, Verify: verify, SameChannel: same,
-		Bots: func() []LiveBot { return []LiveBot{{ID: 111, Name: "reader", OK: true, Admin: true}} },
+		Bots: func() []LiveBot {
+			return []LiveBot{{ID: 111, Name: "reader", OK: true, Admin: true, ChannelTitle: "Films"}}
+		},
 		URLs: func() []string { return []string{"http://192.168.1.4:8097", "http://100.122.54.9:8097"} },
 	})
 	srv := httptest.NewServer(h)
@@ -82,6 +84,9 @@ func TestStateHidesTokensAndMarksTailscale(t *testing.T) {
 	}
 	if !strings.Contains(string(raw), "aaaa") || !strings.Contains(string(raw), "@reader") {
 		t.Fatalf("state = %s", raw)
+	}
+	if body["channel_title"] != "Films" {
+		t.Fatalf("channel_title = %v", body["channel_title"])
 	}
 	page, err := http.Get(srv.URL + "/panel?code=secret")
 	if err != nil {

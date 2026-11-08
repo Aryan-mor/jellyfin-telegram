@@ -15,6 +15,7 @@ export type PanelState = {
   api_id?: number
   default_api?: boolean
   channel_id: number
+  channel_title?: string
   language: string
   bots: { id: number; name: string; hint: string; ok: boolean; admin: boolean; connected: boolean; error?: string }[]
   addresses: { url: string; away: boolean }[]

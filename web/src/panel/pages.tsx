@@ -87,8 +87,17 @@ function useBusy() {
   return { busy, run }
 }
 
-function Stat({ label, value, sub, to }: { label: string; value: string; sub: string; to?: string }) {
-  const body = <><div className="text-xs text-muted-foreground">{label}</div><div className="truncate text-lg font-semibold">{value}</div><div className="truncate text-xs text-muted-foreground">{sub}</div></>
+function channelID(id: number) {
+  return id ? "-100" + id : ""
+}
+
+function ChannelName({ name, id, className }: { name?: string; id: number; className?: string }) {
+  const tip = channelID(id)
+  return <div className={className} title={tip || undefined}>{name?.trim() || tip || "Channel"}</div>
+}
+
+function Stat({ label, value, sub, to, tip }: { label: string; value: string; sub: string; to?: string; tip?: string }) {
+  const body = <><div className="text-xs text-muted-foreground">{label}</div><div className="truncate text-lg font-semibold" title={tip}>{value}</div><div className="truncate text-xs text-muted-foreground">{sub}</div></>
   if (to) return <Link to={to} className="rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50">{body}</Link>
   return <div className="rounded-lg border bg-card p-3">{body}</div>
 }
@@ -131,7 +140,7 @@ export function Overview() {
       </div>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
         <Stat label="Bots" value={botsOk + " / " + s.bots.length} sub={botsOk === s.bots.length ? "All ready" : "Some need a look"} to="/bots" />
-        <Stat label="Channel" value={"-100" + s.channel_id} sub={(s.language ? "Subtitles " + s.language : "No subtitles") + (mirrors ? " · " + plural(mirrors, "mirror") : "")} to="/channel" />
+        <Stat label="Channel" value={s.channel_title || channelID(s.channel_id)} tip={channelID(s.channel_id)} sub={(s.language ? "Subtitles " + s.language : "No subtitles") + (mirrors ? " · " + plural(mirrors, "mirror") : "")} to="/channel" />
         <Stat label="Shared library" value={forumValue} sub={forumSub} to="/channel/shared" />
         {s.downloads && <Stat label="Downloads" value={dl?.enabled ? "On" : "Off"} sub={dl?.enabled ? (dl.queue?.length ?? 0) + " in the queue" : "Files in the channel still play"} to={signed ? "/downloads" : undefined} />}
       </div>
@@ -195,7 +204,7 @@ export function Channel() {
   return (
     <Page title="Main channel" text="The channel that holds the library. Replacing it is refused once files are indexed, because the library would point at the wrong messages.">
       <Section title="Library channel" actions={!editing && <Button size="sm" variant="outline" onClick={() => setEditing(true)}>Replace</Button>}>
-        <code className="text-sm">-100{s.channel_id}</code>
+        <ChannelName name={s.channel_title} id={s.channel_id} className="text-sm font-medium" />
         {editing && <div className="space-y-2">
           <FieldLabel htmlFor="main-channel">New channel</FieldLabel>
           <Input id="main-channel" value={channel} placeholder="https://t.me/c/1234567890/5 or -100…" onChange={(e) => setChannel(e.target.value)} />
@@ -331,7 +340,7 @@ function MirrorRow({ m, bots, onDone }: { m: NonNullable<PanelState["mirrors"]>[
   return (
     <TR>
       <TD className="pl-4">
-        <div className="font-medium">{m.title || "Channel " + m.channel_id}</div>
+        <ChannelName name={m.title} id={m.channel_id} className="font-medium" />
         <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs text-muted-foreground">
           {m.username ? <a className="underline-offset-2 hover:underline" href={"https://t.me/" + m.username} target="_blank" rel="noreferrer">t.me/{m.username}</a> : <StatusBadge>private</StatusBadge>}
           <span>{m.sent} copied</span>
@@ -421,14 +430,14 @@ export function Shared() {
 
 // ---------- Home videos ----------
 
-type HomeView = { channel?: number; problem?: string; folders?: { path: string; files?: number; error?: string }[]; files?: { name: string; kind?: string; status: string; note?: string }[] }
+type HomeView = { channel?: number; title?: string; problem?: string; folders?: { path: string; files?: number; error?: string }[]; files?: { name: string; kind?: string; status: string; note?: string }[] }
 
 const homeTone = (st: string): Tone => /error|fail|problem/i.test(st) ? "bad" : /sent|synced|done|in telegram/i.test(st) ? "ok" : "warn"
 
 export function HomeVideos() {
   const q = useQuery({ queryKey: ["home"], queryFn: () => api<HomeView>("/panel/home"), refetchInterval: () => (pollingPaused() ? false : 8000) })
   const h = q.data
-  const channel = useDirty(h?.channel ? "-100" + h.channel : "")
+  const channel = useDirty("")
   const [folder, setFolder] = useState("")
   const { busy, run } = useBusy()
   if (!h) return <Page title="Home videos" text="Personal videos and photos.">{q.isError && <Alert tone="bad">{(q.error as Error).message}</Alert>}</Page>
@@ -437,6 +446,7 @@ export function HomeVideos() {
     <Page title="Home videos" text="Personal videos and photos. They get their own Telegram channel, and a Jellyfin library called Home Videos and Photos.">
       {h.problem && <Alert tone="bad">{h.problem}</Alert>}
       <Section title="Channel" text="A private channel only for these files. Saving it needs a restart.">
+        {!!h.channel && <ChannelName name={h.title} id={h.channel} className="text-sm font-medium" />}
         <div className="flex gap-2">
           <Input value={channel.value} onChange={(e) => channel.set(e.target.value)} placeholder="https://t.me/c/1234567890/5 or -100…" />
           <Button size="sm" disabled={!channel.dirty || busy === "ch"} onClick={() => void run("ch", async () => { await api("/panel/home/channel", { channel: channel.value }); channel.saved(); toast("Saved. Restart to use it.") })}>Save</Button>
@@ -706,7 +716,11 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
   const list = (news ? v.news?.channels : v.sources) ?? []
   const recent = (news ? v.news?.recent : v.recent) ?? []
   const names: Record<number, string> = {}
-  for (const s of list) names[s.id] = s.title || s.username || String(s.channel_id)
+  const tips: Record<number, string> = {}
+  for (const s of list) {
+    names[s.id] = s.title?.trim() || (s.username ? "@" + s.username : channelID(s.channel_id))
+    tips[s.id] = channelID(s.channel_id)
+  }
   const meta: string[] = []
   if (enabled) meta.push(running ? "Checking now" : "Next check within " + (remote.every_minutes ?? 0) + " minutes")
   if (!news) meta.push((v.today ?? 0) + " copied today" + (remote.max_per_day ? " of " + remote.max_per_day : ""))
@@ -751,9 +765,9 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
             return (
               <TR key={src.id}>
                 <TD className="pl-4">
-                  <div className="font-medium">{src.title || "Channel " + src.channel_id}</div>
+                  <ChannelName name={src.title || (src.username ? "@" + src.username : "")} id={src.channel_id} className="font-medium" />
                   <div className="flex flex-wrap items-center gap-1.5 pt-0.5 text-xs text-muted-foreground">
-                    <span>{src.username ? "@" + src.username : "-100" + src.channel_id}</span>
+                    {src.title && src.username ? <span>@{src.username}</span> : null}
                     <StatusBadge tone={tone}>{label}</StatusBadge>
                     <span>{(src.copied ?? 0) + (news ? " forwarded" : " copied")}</span>
                     {src.last_scan ? <span>checked {ago(src.last_scan)}</span> : null}
@@ -813,7 +827,7 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
             const extra = [r.source_id !== undefined ? names[r.source_id] : "", !news && r.size ? bytes(r.size) : "", r.updated ? ago(r.updated) : "", r.error || r.detail || ""].filter(Boolean).join(" · ")
             return (
               <TR key={i}>
-                <TD className="pl-4"><div className="max-w-xl truncate">{news ? r.url : r.name}</div><div className="text-xs text-muted-foreground">{extra}</div></TD>
+                <TD className="pl-4"><div className="max-w-xl truncate">{news ? r.url : r.name}</div><div className="text-xs text-muted-foreground" title={r.source_id !== undefined ? tips[r.source_id] : undefined}>{extra}</div></TD>
                 <TD className="pr-4 text-right"><StatusBadge tone={tone}>{label}</StatusBadge></TD>
               </TR>
             )

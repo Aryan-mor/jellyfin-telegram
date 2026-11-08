@@ -538,6 +538,7 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 				}
 				out = append(out, panel.LiveBot{
 					ID: st.ID, Name: st.Username, OK: st.Ready && st.IsAdmin, Admin: st.IsAdmin, Error: msg,
+					ChannelTitle: st.ChannelTitle,
 				})
 			}
 			return out
