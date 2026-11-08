@@ -12,6 +12,19 @@ import (
 // Parts a mirror channel can receive. The order is the order they are stored and shown.
 var MirrorKinds = []string{"movie", "series", "music", "video"}
 
+// ensureMirrorUsername adds the public name to a database created before that column existed.
+func ensureMirrorUsername(db *sql.DB) error {
+	var n int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('mirrors') WHERE name='username'`).Scan(&n); err != nil {
+		return err
+	}
+	if n > 0 {
+		return nil
+	}
+	_, err := db.Exec(`ALTER TABLE mirrors ADD COLUMN username TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
 const mirrorSchema = `
 CREATE TABLE IF NOT EXISTS mirrors (
 	id         INTEGER PRIMARY KEY,
@@ -19,7 +32,8 @@ CREATE TABLE IF NOT EXISTS mirrors (
 	title      TEXT NOT NULL DEFAULT '',
 	bot_id     INTEGER NOT NULL,
 	kinds      TEXT NOT NULL,
-	error      TEXT NOT NULL DEFAULT ''
+	error      TEXT NOT NULL DEFAULT '',
+	username   TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS mirror_sent (
 	mirror_id  INTEGER NOT NULL,
@@ -37,6 +51,8 @@ type Mirror struct {
 	BotID     int64
 	Kinds     []string
 	Error     string
+	// Username is the public name, empty when the channel is private.
+	Username string
 }
 
 // Wants reports whether this mirror should receive a file of that section.
@@ -86,7 +102,7 @@ func NormalizeKinds(in []string) ([]string, error) {
 
 // Mirrors returns every mirror channel.
 func (c *Catalog) Mirrors(ctx context.Context) ([]Mirror, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT id, channel_id, title, bot_id, kinds, error FROM mirrors ORDER BY id`)
+	rows, err := c.db.QueryContext(ctx, `SELECT id, channel_id, title, bot_id, kinds, error, username FROM mirrors ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -112,7 +128,7 @@ type mirrorScanner interface {
 func scanMirror(s mirrorScanner) (Mirror, error) {
 	var m Mirror
 	var kinds string
-	if err := s.Scan(&m.ID, &m.ChannelID, &m.Title, &m.BotID, &kinds, &m.Error); err != nil {
+	if err := s.Scan(&m.ID, &m.ChannelID, &m.Title, &m.BotID, &kinds, &m.Error, &m.Username); err != nil {
 		return Mirror{}, err
 	}
 	if kinds != "" {
@@ -165,8 +181,24 @@ func (c *Catalog) UpdateMirror(ctx context.Context, id, botID int64, title strin
 	return c.mirror(ctx, id)
 }
 
+// SetMirrorUsername stores the public name of a mirror. An empty name means the channel is private.
+func (c *Catalog) SetMirrorUsername(ctx context.Context, id int64, username string) error {
+	res, err := c.db.ExecContext(ctx, `UPDATE mirrors SET username=? WHERE id=?`, strings.TrimPrefix(username, "@"), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("that mirror is not listed")
+	}
+	return nil
+}
+
 func (c *Catalog) mirror(ctx context.Context, id int64) (Mirror, error) {
-	row := c.db.QueryRowContext(ctx, `SELECT id, channel_id, title, bot_id, kinds, error FROM mirrors WHERE id=?`, id)
+	row := c.db.QueryRowContext(ctx, `SELECT id, channel_id, title, bot_id, kinds, error, username FROM mirrors WHERE id=?`, id)
 	m, err := scanMirror(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Mirror{}, errors.New("that mirror is not listed")

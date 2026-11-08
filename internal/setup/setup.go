@@ -6,7 +6,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
-	_ "embed"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -19,10 +18,8 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 )
-
-//go:embed page.html
-var page string
 
 // Values is what the form submits.
 type Values struct {
@@ -42,6 +39,11 @@ type Values struct {
 	Group bool `json:"group"`
 	// TelegramSearch looks up a requested title on Telegram and copies a file it finds.
 	TelegramSearch bool `json:"telegram_search"`
+	// Mirror asks the first start to create a public channel for films and series.
+	// The title and username are optional; empty ones are chosen at random.
+	Mirror         bool   `json:"mirror"`
+	MirrorTitle    string `json:"mirror_title"`
+	MirrorUsername string `json:"mirror_username"`
 	// Auto means the Telegram details come from the automatic setup held on the server: the
 	// api_id, the channel and the bot tokens never pass through the browser.
 	Auto bool `json:"auto"`
@@ -123,7 +125,7 @@ func (w *Wizard) Handler() http.Handler {
 	mux.HandleFunc("GET /setup", w.guard(func(rw http.ResponseWriter, _ *http.Request) {
 		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
 		rw.Header().Set("Cache-Control", "no-store")
-		_, _ = rw.Write([]byte(page))
+		_, _ = rw.Write(webui.Page("setup.html", ""))
 	}))
 	w.autoRoutes(mux)
 	mux.HandleFunc("POST /setup/verify", w.guard(w.handleVerify))
@@ -143,6 +145,10 @@ func (w *Wizard) Waiting() http.Handler {
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/setup" || strings.HasPrefix(r.URL.Path, "/setup/") {
 			setup.ServeHTTP(rw, r)
+			return
+		}
+		if strings.HasPrefix(r.URL.Path, "/ui/") {
+			webui.Assets().ServeHTTP(rw, r)
 			return
 		}
 		http.Error(rw, "jellyfin-telegram is starting. The address to set it up is on its console.", http.StatusServiceUnavailable)
@@ -267,6 +273,9 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		"SIGNED_LIBRARY":         fmt.Sprint(v.Group),
 		"TELEGRAM_SEARCH":        fmt.Sprint(v.TelegramSearch),
 		"INBOX_DELETE_ORIGINALS": "false",
+		"MIRROR_SETUP":           fmt.Sprint(v.Mirror),
+		"MIRROR_TITLE":           strings.TrimSpace(v.MirrorTitle),
+		"MIRROR_USERNAME":        strings.TrimPrefix(strings.TrimSpace(v.MirrorUsername), "@"),
 	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, "cannot write the settings file: "+err.Error())

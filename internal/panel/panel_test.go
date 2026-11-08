@@ -13,6 +13,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 )
 
 const envFile = `TELEGRAM_API_ID=12345
@@ -89,10 +90,11 @@ func TestStateHidesTokensAndMarksTailscale(t *testing.T) {
 	defer page.Body.Close()
 	html, _ := io.ReadAll(page.Body)
 	text := string(html)
-	for _, want := range []string{"Tailscale", "Add a bot", "/newbot", "does not offer a public ID", "You're using the default. Replace it here if you want your own.", `href="/"`, "https://github.com/DonutWare/Fladder/releases"} {
-		if !strings.Contains(text, want) {
-			t.Fatalf("page is missing %q", want)
-		}
+	if !strings.Contains(text, "secret") || strings.Contains(text, "__PANEL_CODE__") {
+		t.Fatalf("the access code was not injected: %s", text)
+	}
+	if !strings.Contains(text, "/ui/") {
+		t.Fatalf("page does not load the built UI: %s", text)
 	}
 }
 
@@ -298,13 +300,11 @@ func TestATunnelOnThisMachineIsNotTrusted(t *testing.T) {
 }
 
 func TestPageHasTheThreeStepSignInModal(t *testing.T) {
-	for _, want := range []string{`id="login-modal"`, `data-step="phone"`, `data-step="code"`, `data-step="password"`, `id="acct-add"`} {
-		if !strings.Contains(page, want) {
+	text := webui.Source()
+	for _, want := range []string{"Your Telegram phone number", "Enter the code", "Two-step verification", "Add account"} {
+		if !strings.Contains(text, want) {
 			t.Errorf("the page lacks %s", want)
 		}
-	}
-	if strings.Contains(page, `id="dl-code"`) || strings.Contains(page, `id="dl-password"`) {
-		t.Error("the old single form is still there")
 	}
 }
 
@@ -327,8 +327,8 @@ func TestStateListsHowToSignInToEachApp(t *testing.T) {
 	if len(got.Accounts) != 2 || got.Accounts[0].User != "admin" || got.Accounts[0].Password != "pw" || got.Accounts[1].User != "" {
 		t.Fatalf("accounts %+v", got.Accounts)
 	}
-	if !strings.Contains(page, `data-tab="accounts"`) || !strings.Contains(page, `id="accounts"`) {
-		t.Error("the page has no Sign in tab")
+	if !strings.Contains(webui.Source(), "Sign in details") {
+		t.Error("the page has no Sign in details page")
 	}
 }
 
@@ -393,8 +393,9 @@ func TestLocalFilesTab(t *testing.T) {
 }
 
 func TestPageHasTheLocalFilesTab(t *testing.T) {
-	for _, want := range []string{`data-tab="local"`, `id="tab-local"`, `id="local-files"`, `id="local-delete-synced"`, `id="local-upload-all"`, `id="confirm-modal"`, "/panel/local/"} {
-		if !strings.Contains(page, want) {
+	text := webui.Source()
+	for _, want := range []string{"Local files", "Upload everything that is only here", "Delete every local copy that is in Telegram", "/panel/local/"} {
+		if !strings.Contains(text, want) {
 			t.Errorf("the page lacks %s", want)
 		}
 	}
@@ -444,15 +445,110 @@ func TestChannelsTab(t *testing.T) {
 	if rec := call(http.MethodPost, "/panel/sources/wipe?code=secret", `{}`); rec.Code != http.StatusNotFound {
 		t.Fatalf("unknown action: %d", rec.Code)
 	}
+	if rec := call(http.MethodPost, "/panel/sources/news_phone?code=secret", `{}`); rec.Code != http.StatusNotFound {
+		t.Fatalf("dead news login: %d", rec.Code)
+	}
 	if rec := call(http.MethodPost, "/panel/sources/add", `{}`); rec.Code != http.StatusForbidden {
 		t.Fatalf("post without the code: %d", rec.Code)
 	}
 }
 
 func TestPageHasTheChannelsAndProviderTabs(t *testing.T) {
-	for _, want := range []string{`id="tab-sources"`, `data-tab="sources"`, `id="tab-news"`, `data-tab="news"`, `id="src-list"`, `id="news-list"`, `id="news-recent"`, `id="src-back"`, `id="nw-back"`, "@id_bot", "@getidsbot", "/panel/sources/", `id="tab-provider"`, "Coming soon", `id="tab-telegram"`, `id="acct-sessions"`, `<select id="language"`, `id="mirror-list"`, `General video`, `id="main-current"`, `id="replace-channel"`} {
-		if !strings.Contains(page, want) {
+	text := webui.Source()
+	for _, want := range []string{"Direct files", "News channels", "@id_bot", "@getidsbot", "/panel/sources/", "Telegram account", "General video", "Create mirror", "Subtitles", "Tailscale", "Add a bot", "/newbot", "does not offer a public ID", "You're using the default. Replace it here if you want your own.", "https://github.com/DonutWare/Fladder/releases"} {
+		if !strings.Contains(text, want) {
 			t.Errorf("the page lacks %s", want)
 		}
+	}
+	if strings.Contains(text, "Coming soon") || strings.Contains(text, "Bot provider") {
+		t.Error("the bot provider tab is still in the page")
+	}
+}
+
+func TestCreateJobsNeedThisComputer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var title string
+	h := New(Options{
+		Code: "secret", EnvPath: path,
+		MirrorCreate: func(r *http.Request, body map[string]any) (any, error) {
+			title, _ = body["title"].(string)
+			return map[string]any{"ok": true}, nil
+		},
+		BotCreate: func(_ *http.Request, action string, body map[string]any) (any, error) {
+			if action == "reuse" {
+				return nil, ErrBusy
+			}
+			if int(body["count"].(float64)) != 2 {
+				t.Fatalf("count = %v", body["count"])
+			}
+			return map[string]any{"ok": true, "restart": true}, nil
+		},
+		Job: func() JobView {
+			return JobView{Running: true, Progress: []JobLine{{Text: "Starting", State: "wait"}}}
+		},
+	})
+	call := func(method, target, addr, body string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, target, strings.NewReader(body))
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := call(http.MethodPost, "/panel/mirrors/create?code=secret", "192.168.1.9:1", `{"title":"Films"}`); rec.Code != http.StatusForbidden {
+		t.Fatalf("create from the LAN: %d", rec.Code)
+	}
+	if rec := call(http.MethodPost, "/panel/mirrors/create?code=secret", "127.0.0.1:9", `{"title":"Films"}`); rec.Code != http.StatusOK {
+		t.Fatalf("create here: %d %s", rec.Code, rec.Body.String())
+	}
+	if title != "Films" {
+		t.Fatalf("title = %q", title)
+	}
+	if rec := call(http.MethodPost, "/panel/bots/create?code=secret", "127.0.0.1:9", `{"count":2}`); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"restart":true`) {
+		t.Fatalf("bot create: %d %s", rec.Code, rec.Body.String())
+	}
+	if rec := call(http.MethodPost, "/panel/bots/reuse?code=secret", "127.0.0.1:9", `{"usernames":["a_bot"]}`); rec.Code != http.StatusConflict {
+		t.Fatalf("reuse while busy: %d", rec.Code)
+	}
+	if rec := call(http.MethodGet, "/panel/jobs?code=secret", "192.168.1.9:1", ""); rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), `"running":true`) {
+		t.Fatalf("job: %d %s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestRestartNeedsThisComputer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	h := New(Options{
+		Code: "secret", EnvPath: path,
+		Restart: func() error {
+			calls++
+			return nil
+		},
+	})
+	call := func(addr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/panel/restart?code=secret", strings.NewReader(`{}`))
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := call("192.168.1.9:1"); rec.Code != http.StatusForbidden {
+		t.Fatalf("restart from the LAN: %d", rec.Code)
+	}
+	if rec := call("127.0.0.1:9"); rec.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("restart here: %d calls=%d %s", rec.Code, calls, rec.Body.String())
+	}
+	gone := New(Options{Code: "secret", EnvPath: path})
+	req := httptest.NewRequest(http.MethodPost, "/panel/restart?code=secret", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:9"
+	rec := httptest.NewRecorder()
+	gone.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("restart without a hook: %d", rec.Code)
 	}
 }

@@ -161,7 +161,7 @@ func (r *Runner) Create(ctx context.Context, o CreateOptions, progress Step) (Fo
 		}
 		making := fmt.Sprintf("Creating bot %d of %d", i, o.Bots)
 		progress(making, "wait")
-		bot, err := r.newBot(ctx, fmt.Sprintf("%s %d", title, i), slug(title), progress)
+		bot, err := r.newBot(ctx, botName(), progress)
 		if errors.Is(err, ErrTooManyBots) {
 			progress(making, "bad")
 			progress("Listing the bots you already have", "wait")
@@ -203,6 +203,44 @@ func (r *Runner) Create(ctx context.Context, o CreateOptions, progress Step) (Fo
 		progress(fmt.Sprintf("@%s is an admin", bot.Username), "ok")
 	}
 	return found, nil
+}
+
+// NewBotFor makes one bot and makes it an admin of every channel. The token is returned even when a
+// later channel refuses the admin step, so the caller can still keep it.
+func (r *Runner) NewBotFor(ctx context.Context, channels []Created, progress Step) (Bot, error) {
+	if progress == nil {
+		progress = func(string, string) {}
+	}
+	if len(channels) == 0 {
+		return Bot{}, errors.New("no channel to add the bot to")
+	}
+	making := "Creating a bot"
+	progress(making, "wait")
+	bot, err := r.newBot(ctx, botName(), progress)
+	if err != nil {
+		progress(making, "bad")
+		return Bot{}, err
+	}
+	progress(fmt.Sprintf("Bot @%s created", bot.Username), "ok")
+	for _, ch := range channels {
+		admin := fmt.Sprintf("Making @%s an admin of %s", bot.Username, ch.Title)
+		if strings.TrimSpace(ch.Title) == "" {
+			admin = fmt.Sprintf("Making @%s an admin", bot.Username)
+		}
+		progress(admin, "wait")
+		if _, err := r.S.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+			u, err := ResolveBot(ctx, api, bot.Username)
+			if err != nil {
+				return nil, err
+			}
+			return nil, PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
+		}); err != nil {
+			progress(admin, "bad")
+			return bot, err
+		}
+		progress(fmt.Sprintf("@%s is an admin", bot.Username), "ok")
+	}
+	return bot, nil
 }
 
 // ReuseOptions says which existing bots replace their token and join the channel. Tokens and Bots
@@ -308,13 +346,13 @@ func (r *Runner) mute(ctx context.Context, id, hash int64) error {
 	return err
 }
 
-func (r *Runner) newBot(ctx context.Context, name, base string, progress Step) (Bot, error) {
+func (r *Runner) newBot(ctx context.Context, name string, progress Step) (Bot, error) {
 	val, err := r.once(ctx, progress, func(ctx context.Context, api *tg.Client) (any, error) {
 		chat, err := newBotFatherChat(ctx, api)
 		if err != nil {
 			return nil, err
 		}
-		return NewBot(ctx, chat, name, func(int) string { return username(base) })
+		return NewBot(ctx, chat, name, func(int) string { return username() })
 	})
 	if err != nil {
 		return Bot{}, err
@@ -395,7 +433,7 @@ func sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// slug keeps the letters and digits of a title for use inside a bot username.
+// slug keeps the letters and digits of a title for use inside a channel username.
 func slug(title string) string {
 	var b strings.Builder
 	for _, r := range strings.ToLower(title) {
@@ -415,14 +453,34 @@ func slug(title string) string {
 	return b.String()
 }
 
-// username builds a bot username that ends in "_bot" with a random middle, so two tries differ.
-func username(base string) string {
-	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
-	var raw [5]byte
+// botName is the name shown on the bot. It shares nothing with the channel title.
+func botName() string {
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+	var raw [12]byte
 	_, _ = rand.Read(raw[:])
-	suffix := make([]byte, len(raw))
-	for i, b := range raw {
-		suffix[i] = letters[int(b)%len(letters)]
+	n := 6 + int(raw[0])%5
+	out := make([]byte, n)
+	out[0] = letters[int(raw[1])%len(letters)] - ('a' - 'A')
+	for i := 1; i < n; i++ {
+		out[i] = letters[int(raw[i+1])%len(letters)]
 	}
-	return base + "_" + string(suffix) + "_bot"
+	return string(out)
+}
+
+// username builds a bot username that is random from the first character and ends in "bot".
+// The channel title is not used, so the bots share no prefix.
+func username() string {
+	const letters = "abcdefghijklmnopqrstuvwxyz"
+	const rest = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var raw [16]byte
+	_, _ = rand.Read(raw[:])
+	// 8–12 characters, then the "bot" ending Telegram requires.
+	n := 8 + int(raw[0])%5
+	out := make([]byte, n+3)
+	out[0] = letters[int(raw[1])%len(letters)]
+	for i := 1; i < n; i++ {
+		out[i] = rest[int(raw[i+1])%len(rest)]
+	}
+	copy(out[n:], "bot")
+	return string(out)
 }

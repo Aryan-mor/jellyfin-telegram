@@ -204,6 +204,8 @@ func setNews(ctx context.Context, svc *tgsource.Service, news *newsfeed.Service,
 		if err := mustHaveAccount(svc); err != nil {
 			return err
 		}
+		// News uses whichever signed-in account is free. The page no longer picks one.
+		cur.UserID = 0
 	}
 	cur.Enabled = on
 	return news.Save(ctx, cur)

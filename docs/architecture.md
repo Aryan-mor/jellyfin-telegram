@@ -17,8 +17,11 @@
 | `internal/managed` | Downloads a pinned Jellyfin build, runs it on loopback, completes its first-run wizard |
 | `internal/seerr` | Runs a pinned Seerr image and finishes its setup with that Jellyfin as the media server |
 | `internal/fladder` | Runs the Fladder web client with this Jellyfin and Seerr already filled in |
-| `internal/front` | One port for streams, the setup page, Seerr under `/seerr/`, Fladder under `/fladder/`, and a reverse proxy to Jellyfin |
+| `internal/front` | One port for streams, the setup page, the panel, Seerr under `/seerr/`, Fladder under `/fladder/`, and a reverse proxy to Jellyfin |
 | `internal/setup` | Browser wizard that writes `.env` after checking the bots against the channel |
+| `internal/panel` | Settings pages: channel, mirrors, bots, sources, local files, downloads |
+| `internal/webui` | Embedded built panel and setup pages. Scripts and CSS are served at `/ui/` |
+| `web/` | Vite and React source for those pages. `pnpm build` writes `internal/webui/dist`, which is committed so a Go build needs no Node |
 | `internal/tguser` | User-account sessions that post a finished download into the channel. Separate from the bot pool |
 | `internal/stack` | qBittorrent, Radarr, Sonarr, Bitmagnet and Postgres, started on demand and configured over their APIs |
 | `internal/autoupload` | Polls Radarr and Sonarr, uploads one file per session, and deletes the disk copy after a probe |

@@ -2,19 +2,40 @@ package tgsetup
 
 import (
 	"regexp"
+	"strings"
 	"testing"
 )
 
 func TestUsernameShape(t *testing.T) {
-	re := regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{4,31}$`)
-	for _, title := range []string{"Jellyfin library", "ختم", "123 films", "A very long channel title indeed"} {
-		got := username(slug(title))
-		if !re.MatchString(got) || got[len(got)-3:] != "bot" {
-			t.Errorf("%q gave %q", title, got)
+	re := regexp.MustCompile(`^[a-z][a-z0-9]{7,11}bot$`)
+	seen := map[string]bool{}
+	for i := 0; i < 30; i++ {
+		got := username()
+		if !re.MatchString(got) {
+			t.Fatalf("got %q", got)
 		}
+		if strings.Contains(got, "jelly") || strings.Contains(got, "_") {
+			t.Fatalf("signature in %q", got)
+		}
+		if seen[got] {
+			t.Fatalf("duplicate %q", got)
+		}
+		seen[got] = true
 	}
-	if a, b := username("x"), username("x"); a == b {
-		t.Error("two usernames were equal")
+}
+
+func TestBotNameHasNoFixedWord(t *testing.T) {
+	re := regexp.MustCompile(`^[A-Z][a-z]{5,9}$`)
+	seen := map[string]bool{}
+	for i := 0; i < 30; i++ {
+		got := botName()
+		if !re.MatchString(got) || strings.Contains(strings.ToLower(got), "jelly") {
+			t.Fatalf("got %q", got)
+		}
+		seen[got] = true
+	}
+	if len(seen) < 2 {
+		t.Fatal("names did not vary")
 	}
 }
 

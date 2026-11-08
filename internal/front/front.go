@@ -40,6 +40,8 @@ type Options struct {
 	Setup http.Handler
 	// Panel serves the settings page. It may be nil.
 	Panel http.Handler
+	// UI serves the built panel and setup scripts. It may be nil.
+	UI http.Handler
 	// Jellyfin is the server behind this one. Nil serves streams only.
 	Jellyfin *url.URL
 	// Seerr is the request app, served under /seerr/. Nil leaves that path to Jellyfin.
@@ -73,6 +75,9 @@ func Handler(o Options) http.Handler {
 	if o.Panel != nil {
 		mux.Handle("/panel", o.Panel)
 		mux.Handle("/panel/", o.Panel)
+	}
+	if o.UI != nil {
+		mux.Handle("/ui/", o.UI)
 	}
 	if o.Seerr != nil {
 		proxy := seerrProxy(o.Seerr)

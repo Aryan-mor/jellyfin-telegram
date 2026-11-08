@@ -45,6 +45,8 @@ func main() {
 		cmd, args = flag.Arg(0), flag.Args()[1:]
 	}
 
+	waitForPredecessor()
+
 	cfg, err := config.Load(*env)
 	// A first run has no settings at all. The setup page asks for them.
 	if err != nil && !(cmd == "serve" && cfg.NeedsSetup()) {

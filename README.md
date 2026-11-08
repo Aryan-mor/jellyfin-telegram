@@ -259,20 +259,31 @@ Upload a video to the channel and within about a minute it is in your library.
 Open `http://127.0.0.1:8097/panel` on the machine that runs the service. The panel is plain HTTP,
 so it accepts sign-in from this computer or over Tailscale.
 
-| Tab | Use it to |
-|---|---|
-| Overview | See the addresses to use, the connected bots and recent files |
-| Sign in | Sign in the Telegram user accounts used by Torrents, Channels and Local files |
-| Local files | Add folders of videos on this computer and upload what you choose |
-| Bots | Add or remove bots. New bots connect on the next start |
-| Telegram API | Change `api_id` and `api_hash` |
-| Channel | Change the channel link and the subtitle language |
-| Away from home | Follow the steps to reach Jellyfin from another network |
-| Torrents | Turn on the download chain (Radarr, Sonarr, qBittorrent, Bitmagnet) |
-| Channels | Pick other Telegram channels to copy films and series from |
-| Bot provider | Placeholder, not functional yet |
+The pages are a React app in `web/`. `pnpm build` (from `web/`) writes `internal/webui/dist`,
+and that folder is embedded in the Go binary, so `go build` does not need Node. Commit the
+built files with the source change.
 
-Some tabs stay hidden until the feature they belong to is available.
+| Page | Use it to |
+|---|---|
+| Overview | See the addresses, the apps, and whether a restart is waiting |
+| Sign in details | Copy the Jellyfin, Seerr and Fladder passwords |
+| Main channel | Change the library channel |
+| Mirrors | Create a channel, or add one you already have, and choose what is copied there |
+| Shared library | Share the library with another group |
+| Home videos | Send videos from a folder on this computer |
+| Subtitles | Choose subtitle languages, in the order you want them |
+| Accounts | Sign in the Telegram user accounts used by Torrents, Channels and Local files |
+| Bots | Create a bot here, or paste a token. A new bot connects on the next start |
+| API | Change `api_id` and `api_hash` |
+| Direct files | Copy films and series from other Telegram channels |
+| News | Watch channels that post a bot link instead of the film |
+| Local files | Add folders of videos on this computer and upload what you choose |
+| Torrents | Turn on the download chain (Radarr, Sonarr, qBittorrent, Bitmagnet) |
+| Away from home | Follow the steps to reach Jellyfin from another network |
+
+Local files stays hidden until that feature is on. Direct files, News and Torrents stay hidden
+until a Telegram account is signed in. Creating a mirror or a bot, and making a mirror public
+or private, only work from this computer or over Tailscale.
 
 ## Using your own Jellyfin
 

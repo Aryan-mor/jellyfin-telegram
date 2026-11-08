@@ -400,3 +400,94 @@ func BotAdmins(ctx context.Context, api *tg.Client, channelID, accessHash int64)
 	}
 	return out, nil
 }
+
+// errUsernameTaken means Telegram already gave that public name to someone else.
+var errUsernameTaken = errors.New("that username is taken")
+
+// channelUsername builds a public channel username: a short slug, then six random characters.
+func channelUsername(title string) string {
+	const letters = "abcdefghijklmnopqrstuvwxyz0123456789"
+	var raw [6]byte
+	_, _ = rand.Read(raw[:])
+	suffix := make([]byte, len(raw))
+	for i, b := range raw {
+		suffix[i] = letters[int(b)%len(letters)]
+	}
+	return slug(title) + "_" + string(suffix)
+}
+
+func usernameTaken(err error) bool {
+	if errors.Is(err, errUsernameTaken) {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	msg := strings.ToUpper(err.Error())
+	return strings.Contains(msg, "USERNAME_OCCUPIED") || strings.Contains(msg, "USERNAME_INVALID")
+}
+
+func applyUsername(ctx context.Context, api *tg.Client, channelID, accessHash int64, name string) error {
+	ch := &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash}
+	ok, err := api.ChannelsCheckUsername(ctx, &tg.ChannelsCheckUsernameRequest{Channel: ch, Username: name})
+	if err != nil {
+		if usernameTaken(err) {
+			return errUsernameTaken
+		}
+		return fmt.Errorf("check @%s: %w", name, err)
+	}
+	if !ok {
+		return errUsernameTaken
+	}
+	ok, err = api.ChannelsUpdateUsername(ctx, &tg.ChannelsUpdateUsernameRequest{Channel: ch, Username: name})
+	if err != nil {
+		if usernameTaken(err) {
+			return errUsernameTaken
+		}
+		return fmt.Errorf("set @%s: %w", name, err)
+	}
+	if !ok {
+		return errUsernameTaken
+	}
+	return nil
+}
+
+// SetPublicUsername makes a channel public. An empty preferred name is replaced with a random one,
+// and a taken random name is tried again. A name the caller chose is tried once.
+func SetPublicUsername(ctx context.Context, api *tg.Client, channelID, accessHash int64, preferred, title string) (string, error) {
+	name := strings.TrimPrefix(strings.TrimSpace(preferred), "@")
+	if name != "" {
+		if err := applyUsername(ctx, api, channelID, accessHash, name); err != nil {
+			return "", err
+		}
+		return name, nil
+	}
+	var last error
+	for range 8 {
+		name = channelUsername(title)
+		err := applyUsername(ctx, api, channelID, accessHash, name)
+		if err == nil {
+			return name, nil
+		}
+		if !usernameTaken(err) {
+			return "", err
+		}
+		last = err
+	}
+	if last == nil {
+		last = errors.New("could not find a free username")
+	}
+	return "", last
+}
+
+// ClearUsername makes a channel private by dropping its public name.
+func ClearUsername(ctx context.Context, api *tg.Client, channelID, accessHash int64) error {
+	_, err := api.ChannelsUpdateUsername(ctx, &tg.ChannelsUpdateUsernameRequest{
+		Channel:  &tg.InputChannel{ChannelID: channelID, AccessHash: accessHash},
+		Username: "",
+	})
+	if err != nil {
+		return fmt.Errorf("make the channel private: %w", err)
+	}
+	return nil
+}

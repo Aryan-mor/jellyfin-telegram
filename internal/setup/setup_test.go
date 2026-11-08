@@ -105,6 +105,26 @@ func TestSaveWritesWhatTheServiceReads(t *testing.T) {
 	}
 }
 
+func TestSaveRecordsThePublicMirror(t *testing.T) {
+	w, srv, env := rig(t, nil)
+	v := good
+	v.Mirror = true
+	v.MirrorTitle = " Films ab12cd "
+	v.MirrorUsername = "@films_ab12cd"
+	res := post(t, srv.URL+"/setup/save?code="+w.Code(), v)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	got, err := godotenv.Read(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["MIRROR_SETUP"] != "true" || got["MIRROR_TITLE"] != "Films ab12cd" || got["MIRROR_USERNAME"] != "films_ab12cd" {
+		t.Fatalf("mirror settings = %q %q %q", got["MIRROR_SETUP"], got["MIRROR_TITLE"], got["MIRROR_USERNAME"])
+	}
+}
+
 func TestBadValuesGetAUsefulMessageAndSaveNothing(t *testing.T) {
 	w, srv, env := rig(t, nil)
 	bad := []func(*Values){

@@ -49,6 +49,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 	"github.com/gotd/td/tg"
 )
 
@@ -64,6 +65,9 @@ const (
 // serve is the whole program: one port that first shows the setup page if there are no settings,
 // then prepares everything, then serves Jellyfin and the streams.
 func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Logger) error {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	restartStop = stop
 	wizard, err := setup.New(envPath, verifyTelegram(cfg.DataDir, log))
 	if err != nil {
 		return err
@@ -283,6 +287,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		Fladder:    fladderTarget,
 		Radarr:     radarrURL,
 		Sonarr:     sonarrURL,
+		UI:         webui.Assets(),
 	}
 	if cfg.JellyfinURL != "" {
 		target, err := url.Parse(cfg.JellyfinURL)
@@ -330,6 +335,8 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	} else {
 		log.Warn("no Jellyfin is configured, so new files are not probed automatically")
 	}
+
+	setupMirror(ctx, cfg, envPath, cat, pool, users, wizard, log)
 
 	addresses := reachableAddresses(cfg.GatewayListen)
 	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password, Seerr: seerrTarget != nil, Fladder: fladderTarget != nil})
@@ -488,6 +495,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 }
 
 func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, accounts func() []panel.Account) http.Handler {
+	jobs := &panelJobs{}
 	return panel.New(panel.Options{
 		Accounts: accounts,
 		Code:     code,
@@ -508,15 +516,19 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		Home: func(ctx context.Context) (any, error) {
 			return personal.State(ctx)
 		},
-		HomeDo:   homeActions(personal),
-		Sessions: sessionsView(users),
-		Sources:  sourcesView(sources, news, users),
-		SourceDo: sourcesDo(sources, news),
-		Mirrors:  mirrorsView(cat),
-		MirrorDo: mirrorsDo(cat, pool, users, channel),
-		Forum:    forumView(cat, hub),
-		ForumDo:  forumDo(envPath, cat, hub, pool),
-		Verify:   verifyTelegram(dataDir, log),
+		HomeDo:       homeActions(personal),
+		Sessions:     sessionsView(users),
+		Sources:      sourcesView(sources, news, users),
+		SourceDo:     sourcesDo(sources, news),
+		Mirrors:      mirrorsView(cat),
+		MirrorDo:     mirrorsDo(cat, pool, users, channel),
+		MirrorCreate: jobs.mirrorCreate(cat, pool, users, envPath, channel),
+		BotCreate:    jobs.botCreate(users, envPath, channel),
+		Job:          jobs.view,
+		Forum:        forumView(cat, hub),
+		ForumDo:      forumDo(envPath, cat, hub, pool),
+		Verify:       verifyTelegram(dataDir, log),
+		Restart:      func() error { return scheduleRestart(restartStop) },
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
 			for _, st := range pool.Statuses() {
@@ -552,6 +564,7 @@ func mirrorsView(cat *catalog.Catalog) func(context.Context) (any, error) {
 			out = append(out, map[string]any{
 				"id": m.ID, "channel_id": m.ChannelID, "title": m.Title,
 				"bot_id": m.BotID, "kinds": m.Kinds, "error": m.Error, "sent": n,
+				"username": m.Username,
 			})
 		}
 		return out, nil
@@ -631,6 +644,10 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 				return nil, err
 			}
 			return map[string]any{"ok": true}, nil
+		case "visibility":
+			return mirrorVisibility(r, cat, users, body)
+		case "admin":
+			return mirrorAdmin(r, pool, users, body)
 		default:
 			return nil, errors.New("unknown action")
 		}

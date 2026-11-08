@@ -6,7 +6,6 @@ package panel
 import (
 	"context"
 	"crypto/subtle"
-	_ "embed"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -22,10 +21,8 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 )
-
-//go:embed page.html
-var page string
 
 // LiveBot is one bot the running service already connected.
 type LiveBot struct {
@@ -82,6 +79,36 @@ type Options struct {
 	Forum func(context.Context) (any, error)
 	// ForumDo runs group, originals, trust_add or trust_remove.
 	ForumDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// MirrorCreate starts a background job that makes a mirror channel. Nil hides that action.
+	MirrorCreate func(r *http.Request, body map[string]any) (any, error)
+	// BotCreate starts a background job. action is "create" or "reuse".
+	BotCreate func(r *http.Request, action string, body map[string]any) (any, error)
+	// Job is the latest create job. Nil means none has been wired.
+	Job func() JobView
+	// Restart starts the program again so new settings apply. Nil means the button is not available.
+	Restart func() error
+}
+
+// ErrBusy means a create job is already running.
+var ErrBusy = errors.New("this is already running")
+
+// Step records one line of a background job. state is "wait", "ok" or "bad".
+type Step func(text, state string)
+
+// JobLine is one line the page shows while a channel or a bot is being created.
+type JobLine struct {
+	Text  string `json:"text"`
+	State string `json:"state"`
+}
+
+// JobView is the latest create job.
+type JobView struct {
+	Running  bool      `json:"running"`
+	Progress []JobLine `json:"progress"`
+	Error    string    `json:"error,omitempty"`
+	Restart  bool      `json:"restart,omitempty"`
+	Result   any       `json:"result,omitempty"`
+	Owned    any       `json:"owned,omitempty"`
 }
 
 // New serves /panel and /panel/.
@@ -103,9 +130,14 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/home/{action}", p.guard(p.handleHomeAction))
 	mux.HandleFunc("GET /panel/sources", p.guard(p.handleSources))
 	mux.HandleFunc("POST /panel/sources/{action}", p.guard(p.handleSourceAction))
+	mux.HandleFunc("POST /panel/mirrors/create", p.guard(p.handleMirrorCreate))
 	mux.HandleFunc("POST /panel/mirrors/{action}", p.guard(p.handleMirrorAction))
+	mux.HandleFunc("POST /panel/bots/create", p.guard(p.handleBotJob("create")))
+	mux.HandleFunc("POST /panel/bots/reuse", p.guard(p.handleBotJob("reuse")))
+	mux.HandleFunc("GET /panel/jobs", p.guard(p.handleJobs))
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
+	mux.HandleFunc("POST /panel/restart", p.guard(p.handleRestart))
 	return mux
 }
 
@@ -131,7 +163,7 @@ func (p *panel) guard(next http.HandlerFunc) http.HandlerFunc {
 func (p *panel) handlePage(w http.ResponseWriter, _ *http.Request) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
-	_, _ = w.Write([]byte(strings.Replace(page, "__PANEL_CODE__", p.o.Code, 1)))
+	_, _ = w.Write(webui.Page("panel.html", p.o.Code))
 }
 
 func fromThisMachine(r *http.Request) bool {
@@ -445,7 +477,6 @@ func (p *panel) handleSources(w http.ResponseWriter, r *http.Request) {
 var sourceActions = map[string]bool{
 	"add": true, "remove": true, "pause": true, "strict": true, "settings": true, "check": true, "rescan": true,
 	"news": true, "news_add": true, "news_remove": true, "news_pause": true,
-	"news_phone": true, "news_code": true, "news_password": true, "news_update": true,
 	"news_account": true, "news_settings": true,
 }
 
@@ -470,10 +501,109 @@ func (p *panel) handleSourceAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-var mirrorActions = map[string]bool{"add": true, "save": true, "remove": true}
+var mirrorActions = map[string]bool{
+	"add": true, "save": true, "remove": true, "visibility": true, "admin": true,
+}
+
+func (p *panel) handleMirrorCreate(w http.ResponseWriter, r *http.Request) {
+	if !setup.TrustedClient(r) {
+		writeError(w, http.StatusForbidden, "Create a channel from this computer or over Tailscale. The panel is plain HTTP.")
+		return
+	}
+	p.runJob(w, r, p.o.MirrorCreate)
+}
+
+func (p *panel) handleBotJob(action string) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if !setup.TrustedClient(r) {
+			writeError(w, http.StatusForbidden, "Create a bot from this computer or over Tailscale. The panel is plain HTTP.")
+			return
+		}
+		if p.o.BotCreate == nil {
+			writeError(w, http.StatusNotFound, "creating a bot is not available")
+			return
+		}
+		body := readBody(w, r)
+		if body == nil {
+			return
+		}
+		out, err := p.o.BotCreate(r, action, body)
+		writeJob(w, out, err)
+	}
+}
+
+func (p *panel) handleRestart(w http.ResponseWriter, r *http.Request) {
+	if !setup.TrustedClient(r) {
+		writeError(w, http.StatusForbidden, "Restart from this computer or over Tailscale. The panel is plain HTTP.")
+		return
+	}
+	if p.o.Restart == nil {
+		writeError(w, http.StatusNotFound, "restart is not available")
+		return
+	}
+	if err := p.o.Restart(); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+}
+
+func (p *panel) handleJobs(w http.ResponseWriter, _ *http.Request) {
+	if p.o.Job == nil {
+		writeJSON(w, http.StatusOK, JobView{Progress: []JobLine{}})
+		return
+	}
+	writeJSON(w, http.StatusOK, p.o.Job())
+}
+
+func (p *panel) runJob(w http.ResponseWriter, r *http.Request, fn func(*http.Request, map[string]any) (any, error)) {
+	if fn == nil {
+		writeError(w, http.StatusNotFound, "that action is not available")
+		return
+	}
+	body := readBody(w, r)
+	if body == nil {
+		return
+	}
+	out, err := fn(r, body)
+	writeJob(w, out, err)
+}
+
+func readBody(w http.ResponseWriter, r *http.Request) map[string]any {
+	var body map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return nil
+	}
+	if body == nil {
+		body = map[string]any{}
+	}
+	return body
+}
+
+func writeJob(w http.ResponseWriter, out any, err error) {
+	if err != nil {
+		code := http.StatusBadRequest
+		if errors.Is(err, ErrBusy) {
+			code = http.StatusConflict
+		}
+		writeError(w, code, err.Error())
+		return
+	}
+	if out == nil {
+		out = map[string]any{"ok": true}
+	}
+	writeJSON(w, http.StatusOK, out)
+}
 
 func (p *panel) handleMirrorAction(w http.ResponseWriter, r *http.Request) {
 	action := r.PathValue("action")
+	if action == "visibility" || action == "admin" {
+		if !setup.TrustedClient(r) {
+			writeError(w, http.StatusForbidden, "Change a channel from this computer or over Tailscale. The panel is plain HTTP.")
+			return
+		}
+	}
 	if p.o.MirrorDo == nil || !mirrorActions[action] {
 		writeError(w, http.StatusNotFound, "unknown action")
 		return
