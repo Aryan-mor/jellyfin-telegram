@@ -36,7 +36,8 @@ export function nextVersion(channel, tags) {
   const n = parsed
     .filter((p) => p.nightly !== null && p.major === stable.major && p.minor === stable.minor && p.patch === stable.patch)
     .reduce((max, p) => Math.max(max, p.nightly), 0)
-  return `${base}-nightly.${n + 1}`
+  // Two digits so GitHub's same-day tag sort (lexicographic) keeps .10 above .09.
+  return `${base}-nightly.${String(n + 1).padStart(2, "0")}`
 }
 
 function run(cmd, args, opts = {}) {
