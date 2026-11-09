@@ -85,6 +85,15 @@ export function Shell() {
   }, [])
   useEffect(() => { if (job.data?.restart) setRestart(true) }, [job.data?.restart])
   useEffect(() => { adoptServerLanguage(state.data?.ui_language) }, [state.data?.ui_language])
+  useEffect(() => {
+    const q = new URLSearchParams(window.location.search)
+    const notice = q.get("notice")
+    if (notice !== "updated" && notice !== "installed") return
+    toast(notice === "updated" ? t("Updated successfully") : t("Installed successfully"))
+    q.delete("notice")
+    const next = q.toString()
+    window.history.replaceState(null, "", window.location.pathname + (next ? "?" + next : "") + window.location.hash)
+  }, [])
   const s = state.data
   const signed = (s?.telegram?.sessions?.length ?? 0) > 0
   const botBad = (s?.bots ?? []).some((b) => b.connected && (!b.ok || !b.admin || b.error))

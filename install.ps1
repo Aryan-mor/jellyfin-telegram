@@ -47,6 +47,9 @@ $repo = 'Aryan-mor/jellyfin-telegram'
 $dir = Join-Path $env:LOCALAPPDATA 'jellyfin-telegram'
 $exe = Join-Path $dir 'jellyfin-telegram.exe'
 New-Item -ItemType Directory -Force $dir | Out-Null
+# An existing settings file means this run is an update. A first install has none,
+# stays in this window, and opens the setup page itself.
+$updating = Test-Path (Join-Path $dir '.env')
 
 # A later run with no channel set stays on the channel already installed.
 $channelFile = Join-Path $dir 'channel'
@@ -88,14 +91,32 @@ foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::Ge
 }
 
 Write-Host ''
-Write-Host 'Leave this window open. Setup runs here and shows its progress.'
-Write-Host 'The setup page also opens in your browser; sign in with your phone number there.'
+if ($updating) {
+  Write-Host 'Update installed. Opening the panel...'
+} else {
+  Write-Host 'Leave this window open. Setup runs here and shows its progress.'
+  Write-Host 'The setup page also opens in your browser; sign in with your phone number there.'
+}
 # Same window, so the log stays here. A scheduled task would open another console.
+# An update detaches and this call returns at once. A first install stays here.
 Push-Location $dir
 try {
   & $exe serve
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 } finally {
   Pop-Location
+}
+if ($updating) {
+  $panel = 'http://127.0.0.1:8097/panel?notice=updated'
+  $up = $false
+  foreach ($i in 1..40) {
+    try {
+      $res = Invoke-WebRequest -Uri 'http://127.0.0.1:8097/panel' -UseBasicParsing -TimeoutSec 2
+      if ($res.StatusCode -eq 200) { $up = $true; break }
+    } catch {}
+    Start-Sleep -Milliseconds 500
+  }
+  if (-not $up) { throw 'Updated, but the panel did not start.' }
+  Start-Process $panel
 }
 
