@@ -191,7 +191,11 @@ func TestTagIn(t *testing.T) {
 		"talks about #tm_m_1 then\n#tm_m_2":    "#tm_m_2",
 		"no tag here":                          "",
 		"#tm_tv_5 only the series id":          "",
-		"#tm_m_603_en_fa":                      "",
+		"#tm_m_603_en_fa":                      "#tm_m_603_en_fa",
+		"#tm_tv_322280_1_6_en_fa":              "#tm_tv_322280_1_6_en_fa",
+		"#tm_tv_322280_1_6_en":                 "#tm_tv_322280_1_6_en",
+		"#tm_tv_322280_1_6_none_fa":            "#tm_tv_322280_1_6_none_fa",
+		"older #tm_m_1\n#tm_m_2_en":            "#tm_m_2_en",
 	} {
 		if got := tagIn(in); got != want {
 			t.Errorf("tagIn(%q) = %q, want %q", in, got, want)

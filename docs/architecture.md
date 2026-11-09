@@ -334,7 +334,7 @@ The Hardacres
 🔊 Audio: fa (dubbed) · en (original)
 💬 Soft: fa (srt) · Hard: unknown
 jftg:2;k=e;t=231751;i=tt28489780;q=480p;se=1;ep=6;fu=<file_unique_id>;h=<content hash>;oh=<OpenSubtitles hash>;du=2760;ss=fa.srt@3;au=fa.dub@1,en.orig@2;hs=unknown;sa=yes;st=ready;ah=<archive hash>;d=<doc>;z=<size>;pk=<public key>;s=<signature>
-#tm_tv_231751_1_6
+#tm_tv_231751_1_6_fa_fa
 ```
 
 The line says what a reader can check for itself, and where to look:
@@ -353,7 +353,13 @@ The line says what a reader can check for itself, and where to look:
 - `pk` is the key that signed the line. It travels with the line, so a post that is only forwarded, with no sender and
   no reply link, still verifies anywhere.
 
-The hashtag ends the caption: `#tm_m_<tmdb>` for a film, `#tm_tv_<tmdb>_<season>_<episode>` for an episode. The signature
+The hashtag ends the caption: `#tm_m_<tmdb>` for a film, `#tm_tv_<tmdb>_<season>_<episode>` for an episode.
+When the tracks are known, a language suffix follows: audio, then subtitle, as lower-case ISO 639-1
+codes where a two-letter code exists (`#tm_tv_231751_1_6_fa_fa` is Persian audio and Persian subtitles).
+Audio with no subtitles stops after the audio code (`…_en`). Subtitles with an unknown audio language
+write `none` in the audio slot (`…_none_fa`). Neither known leaves the original hashtag, with no suffix.
+The audio code is the first audio track. The subtitle code is the preferred subtitle language when that
+track is present, otherwise the first subtitle track. The signature
 covers every field, including the document id, the size and the status, so a caption copied onto another file fails, and a post cannot be
 marked ready without the key. Forwards and copies keep the document id, so a mirror copy still verifies.
 
@@ -375,7 +381,7 @@ The archive is posted as a reply to the signed post, and its caption says what i
 ```
 💬 Subtitles: The Hardacres
 jftg-subs:1;vd=<video document id>;vh=<video content hash>;ah=<archive hash>;ss=fa.srt@3;pk=<public key>;s=<signature>
-#tm_tv_231751_1_6
+#tm_tv_231751_1_6_fa_fa
 ```
 
 `vd` and `vh` tie it to its video, so it still finds the video after a forward, a copy or a new upload. `ah` names its

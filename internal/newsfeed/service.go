@@ -311,7 +311,7 @@ func (s *Service) one(ctx context.Context, src catalog.Source, hit tguser.StartH
 		if same {
 			continue
 		}
-		if tag := naming.LookupTag(naming.Parse(p.Name, p.Caption)); tag != "" && s.InReady != nil {
+		if tag := naming.BaseTag(naming.LookupTag(naming.Parse(p.Name, p.Caption))); tag != "" && s.InReady != nil {
 			yes, err := s.InReady(ctx, tag)
 			if err != nil {
 				return err

@@ -319,3 +319,82 @@ func TestParseIgnoresTheHeaderAboveACaption(t *testing.T) {
 		}
 	}
 }
+
+func TestTagStaysTheBaseHashtag(t *testing.T) {
+	if Tag(false, 603, 0, 0) != "#tm_m_603" || Tag(true, 322280, 1, 6) != "#tm_tv_322280_1_6" || Tag(false, 0, 0, 0) != "" {
+		t.Fatal(Tag(false, 603, 0, 0), Tag(true, 322280, 1, 6))
+	}
+}
+
+func TestTagWithAndSplit(t *testing.T) {
+	cases := []struct{ audio, sub, want string }{
+		{"en", "fa", "#tm_tv_322280_1_6_en_fa"},
+		{"en", "", "#tm_tv_322280_1_6_en"},
+		{"", "fa", "#tm_tv_322280_1_6_none_fa"},
+		{"", "", "#tm_tv_322280_1_6"},
+		{"eng", "fas", "#tm_tv_322280_1_6_en_fa"},
+		{"und", "fa", "#tm_tv_322280_1_6_none_fa"},
+	}
+	for _, c := range cases {
+		got := TagWith(true, 322280, 1, 6, c.audio, c.sub)
+		base, audio, sub := SplitTag(got)
+		if got != c.want || base != "#tm_tv_322280_1_6" || BaseTag(got) != base {
+			t.Errorf("TagWith(%q, %q) = %q, split %q %q %q", c.audio, c.sub, got, base, audio, sub)
+		}
+		switch {
+		case c.want == "#tm_tv_322280_1_6" && (audio != "" || sub != ""):
+			t.Errorf("bare tag split into %q %q", audio, sub)
+		case strings.HasSuffix(c.want, "_en_fa") && (audio != "en" || sub != "fa"):
+			t.Errorf("split audio=%q sub=%q", audio, sub)
+		case strings.HasSuffix(c.want, "_none_fa") && (audio != "none" || sub != "fa"):
+			t.Errorf("split audio=%q sub=%q", audio, sub)
+		case c.want == "#tm_tv_322280_1_6_en" && (audio != "en" || sub != ""):
+			t.Errorf("split audio=%q sub=%q", audio, sub)
+		}
+	}
+	if got := TagWith(false, 603, 0, 0, "en", "fa"); got != "#tm_m_603_en_fa" || BaseTag(got) != "#tm_m_603" {
+		t.Fatal(got, BaseTag(got))
+	}
+	if BaseTag("#tm_tv_5") != "" || BaseTag("nope") != "" || BaseTag("#tm_m_6030") != "#tm_m_6030" {
+		t.Fatal("base of a non-tag or a longer id")
+	}
+	head := Head{Episode: true, TMDB: 322280, Season: 1, Number: 6, AudioLang: "en", SubLang: "fa"}
+	if head.Tag() != "#tm_tv_322280_1_6" || head.LookupTag() != "#tm_tv_322280_1_6_en_fa" {
+		t.Fatal(head.Tag(), head.LookupTag())
+	}
+	p := Parsed{Episode: true, TMDBID: 322280, Season: 1, Number: 6, AudioLang: "en", SubLang: "fa"}
+	if LookupTag(p) != "#tm_tv_322280_1_6_en_fa" {
+		t.Fatal(LookupTag(p))
+	}
+	bare := Parsed{TMDBID: 603}
+	if LookupTag(bare) != "#tm_m_603" {
+		t.Fatal(LookupTag(bare))
+	}
+}
+
+func TestTrackLangs(t *testing.T) {
+	audio := []sign.AudioTrack{{Lang: "fa"}, {Lang: "en"}}
+	soft := []sign.Track{{Lang: "en"}, {Lang: "fa"}}
+	if a, s := TrackLangs(audio, soft, "fa"); a != "fa" || s != "fa" {
+		t.Fatalf("preferred subtitle: %s %s", a, s)
+	}
+	if a, s := TrackLangs(audio, soft, ""); a != "fa" || s != "en" {
+		t.Fatalf("first tracks: %s %s", a, s)
+	}
+	if a, s := TrackLangs(audio, soft, "de"); a != "fa" || s != "en" {
+		t.Fatalf("missing preference falls back to the first subtitle: %s %s", a, s)
+	}
+	if a, s := TrackLangs([]sign.AudioTrack{{Lang: "und"}}, []sign.Track{{Lang: "fa"}}, ""); a != "" || s != "fa" {
+		t.Fatalf("unknown audio: %s %s", a, s)
+	}
+	if a, s := TrackLangs(nil, nil, "fa"); a != "" || s != "" {
+		t.Fatalf("no tracks: %s %s", a, s)
+	}
+	// A later subtitle does not stand in for an unknown first track, unless it is the preferred one.
+	if _, s := TrackLangs(nil, []sign.Track{{Lang: "und"}, {Lang: "fa"}}, ""); s != "" {
+		t.Fatal(s)
+	}
+	if _, s := TrackLangs(nil, []sign.Track{{Lang: "und"}, {Lang: "fa"}}, "fa"); s != "fa" {
+		t.Fatal(s)
+	}
+}

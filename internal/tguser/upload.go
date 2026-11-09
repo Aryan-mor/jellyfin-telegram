@@ -15,6 +15,8 @@ import (
 
 	"github.com/gotd/td/telegram/uploader"
 	"github.com/gotd/td/tg"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 )
 
 // ErrBusy means the account is already sending another file. The caller tries again later.
@@ -155,33 +157,92 @@ func (m *Manager) FindMessage(ctx context.Context, name string, size int64) (int
 	return 0, false, nil
 }
 
-// InReady reports that the channel already has a post with this lookup hashtag.
+// InReady reports that the channel already has this title. A language suffix does not make a
+// different title: the bare tag and every language version of it all count. An unsuffixed tag
+// that the channel search returns is present, the same as before.
 func (m *Manager) InReady(ctx context.Context, tag string) (bool, error) {
-	if m == nil || strings.TrimSpace(tag) == "" {
+	tag = strings.TrimSpace(tag)
+	if m == nil || tag == "" {
 		return false, nil
 	}
+	query := tag
+	if base := naming.BaseTag(tag); base != "" {
+		query = base
+	}
+	n, texts, err := m.searchReady(ctx, query, 5)
+	if err != nil {
+		return false, err
+	}
+	if query == tag && n > 0 {
+		return true, nil
+	}
+	if captionsHold(query, texts) {
+		return true, nil
+	}
+	if naming.BaseTag(query) == "" {
+		return false, nil
+	}
+	// The bare hashtag was not in the channel. A copy with a language suffix is a different
+	// hashtag, so ask for the base plus the mark that starts that suffix.
+	_, more, err := m.searchReady(ctx, strings.TrimPrefix(query, "#")+"_", 20)
+	if err != nil {
+		return false, err
+	}
+	return captionsHold(query, more), nil
+}
+
+// readyHit is how many messages a channel search returned, and the text of the real ones.
+type readyHit struct {
+	n     int
+	texts []string
+}
+
+func (m *Manager) searchReady(ctx context.Context, query string, limit int) (int, []string, error) {
 	lv, err := m.pick(ctx)
 	if err != nil {
-		return false, err
+		return 0, nil, err
 	}
 	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
-		req := &tg.MessagesSearchRequest{
+		res, err := api.MessagesSearch(ctx, &tg.MessagesSearchRequest{
 			Peer:   &tg.InputPeerChannel{ChannelID: m.channelID, AccessHash: lv.meta.AccessHash},
-			Q:      tag,
+			Q:      query,
 			Filter: &tg.InputMessagesFilterEmpty{},
-			Limit:  5,
-		}
-		res, err := api.MessagesSearch(ctx, req)
+			Limit:  limit,
+		})
 		if err != nil {
-			return false, err
+			return nil, err
 		}
-		return len(searchMessages(res)) > 0, nil
+		msgs := searchMessages(res)
+		hit := readyHit{n: len(msgs)}
+		for _, raw := range msgs {
+			msg, ok := raw.(*tg.Message)
+			if ok {
+				hit.texts = append(hit.texts, msg.Message)
+			}
+		}
+		return hit, nil
 	})
 	if err != nil {
-		return false, err
+		return 0, nil, err
 	}
-	found, _ := val.(bool)
-	return found, nil
+	hit, _ := val.(readyHit)
+	return hit.n, hit.texts, nil
+}
+
+// captionsHold reports whether one of the captions is this title in any language.
+func captionsHold(tag string, captions []string) bool {
+	want := naming.BaseTag(tag)
+	if want == "" {
+		return false
+	}
+	for _, caption := range captions {
+		for _, got := range naming.TagsIn(caption) {
+			if naming.BaseTag(got) == want {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func sendFile(ctx context.Context, api *tg.Client, channelID, accessHash int64, filePath, name, caption string, size, bps int64, progress func(done, total int64)) (int, error) {

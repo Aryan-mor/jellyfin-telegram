@@ -23,6 +23,25 @@ func TestChoosePrefersASignedVideoAndSkipsTheLibrary(t *testing.T) {
 	}
 }
 
+func TestChooseAcceptsALanguageSuffixAndNotAnIdPrefix(t *testing.T) {
+	hit := tguser.SearchHit{ChannelID: 2, MessageID: 6, Caption: "ep\n#tm_tv_231751_1_6_en_fa", Video: true, Size: 10}
+	_, tag, ok := Choose(Query{TMDB: 231751}, []tguser.SearchHit{hit}, nil, 0)
+	if !ok || tag != "#tm_tv_231751_1_6_en_fa" {
+		t.Fatalf("got %q %v", tag, ok)
+	}
+	if _, _, ok := Choose(Query{TMDB: 2317}, []tguser.SearchHit{hit}, nil, 0); ok {
+		t.Fatal("a shorter series id matched")
+	}
+	movie := tguser.SearchHit{ChannelID: 2, MessageID: 1, Caption: "film\n#tm_m_603_en", Video: true, Size: 10}
+	_, tag, ok = Choose(Query{TMDB: 603, Movie: true}, []tguser.SearchHit{movie}, nil, 0)
+	if !ok || tag != "#tm_m_603_en" {
+		t.Fatalf("movie %q %v", tag, ok)
+	}
+	if _, _, ok := Choose(Query{TMDB: 603, Movie: true}, []tguser.SearchHit{{ChannelID: 2, MessageID: 2, Caption: "#tm_m_6030_en", Video: true}}, nil, 0); ok {
+		t.Fatal("a longer film id matched")
+	}
+}
+
 func TestChooseTakesEachEpisodeOnce(t *testing.T) {
 	q := Query{TMDB: 1396}
 	hits := []tguser.SearchHit{

@@ -482,7 +482,7 @@ func (s *Service) caption(ctx context.Context, file *media.File, meta sign.Meta)
 	if h.Source == "" {
 		h.Source = s.originLine(ctx, file.DocID)
 	}
-	return s.compose(meta.Status, naming.Caption(h), h.Tag(), "", meta)
+	return s.compose(meta.Status, naming.Caption(h), h.LookupTag(), "", meta)
 }
 
 // originLine is the source line for a document copied from another channel, or empty when this
@@ -519,11 +519,12 @@ func (s *Service) compose(status, head, tag, claimLine string, meta sign.Meta) s
 
 func (s *Service) headOf(file *media.File, m sign.Meta) naming.Head {
 	p := naming.Parse(file.FileName, file.Caption)
+	audio, sub := naming.TrackLangs(m.Audio, m.Soft, s.Lang)
 	return naming.Head{
 		Title: p.Title, Year: p.Year, Episode: m.Kind == "e",
 		Season: m.Season, Number: m.Episode, TMDB: m.TMDB, IMDb: m.IMDb,
 		Label: m.Quality, Soft: naming.ShowTracks(m.Soft, s.Lang), Audio: naming.ShowAudio(m.Audio), Hard: m.Hard,
-		Source: naming.SourceIn(file.Caption),
+		Source: naming.SourceIn(file.Caption), AudioLang: audio, SubLang: sub,
 	}
 }
 
@@ -651,7 +652,7 @@ func (s *Service) ArchiveCaption(ctx context.Context, f media.File, archiveHash 
 	}
 	line := s.Key.SignSubs(sign.Subs{DocID: f.DocID, VideoHash: meta.Hash, ArchiveHash: archiveHash, Tracks: tracks})
 	out := "\U0001F4AC Subtitles: " + title + "\n" + line
-	if tag := h.Tag(); tag != "" {
+	if tag := h.LookupTag(); tag != "" {
 		out += "\n" + tag
 	}
 	return out
@@ -693,7 +694,7 @@ func (s *Service) edit(ctx context.Context, messageID int, anyKey bool, change f
 	if next.Status == sign.StatusReady {
 		status, claimLine = sign.StatusReady, ""
 	}
-	room := sign.WithHeader(status, "", claimLine, naming.Caption(hd)) + "\n" + hd.Tag()
+	room := sign.WithHeader(status, "", claimLine, naming.Caption(hd)) + "\n" + hd.LookupTag()
 	line := s.Key.Post(room, next)
 	return s.write(ctx, messageID, sign.WithHeader(status, "", claimLine, sign.ReplaceLine(body, line)))
 }

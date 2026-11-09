@@ -263,7 +263,7 @@ func (w *Worker) dispatch(ctx context.Context, rows []catalog.Upload) {
 		if search, ok := w.Sessions.(interface {
 			InReady(context.Context, string) (bool, error)
 		}); ok {
-			if tag := naming.LookupTag(naming.Parse(row.FileName, row.Caption)); tag != "" {
+			if tag := naming.BaseTag(naming.LookupTag(naming.Parse(row.FileName, row.Caption))); tag != "" {
 				yes, err := search.InReady(ctx, tag)
 				if err != nil {
 					w.warn("cannot search the library", err)

@@ -27,7 +27,8 @@ type Publisher struct {
 	Every time.Duration
 }
 
-var reTag = regexp.MustCompile(`#tm_(?:m_\d+|tv_\d+_\d+_\d+)\b`)
+// A language suffix may follow the title: _<audio> or _<audio>_<sub>. "none" may fill the audio slot.
+var reTag = regexp.MustCompile(`#tm_(?:m_\d+|tv_\d+_\d+_\d+)(?:_(?:none|[a-z]{2,3})(?:_[a-z]{2,3})?)?\b`)
 
 // tagIn finds the lookup hashtag of a caption. The last one wins, as the tag ends the caption.
 func tagIn(caption string) string {

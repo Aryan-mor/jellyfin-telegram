@@ -274,7 +274,7 @@ func TestPublishedCaptionNamesAPublicSourceAndHidesAPrivateOne(t *testing.T) {
 	if strings.Contains(byDoc[3000], "📡 Source:") {
 		t.Fatalf("a file posted here has a source line:\n%s", byDoc[3000])
 	}
-	if !strings.HasSuffix(byDoc[1000], "\n#tm_m_603") || len(byDoc[1000]) > sign.CaptionLimit {
+	if !strings.HasSuffix(byDoc[1000], "\n#tm_m_603_none_en") || len(byDoc[1000]) > sign.CaptionLimit {
 		t.Fatalf("caption shape: %d\n%s", len(byDoc[1000]), byDoc[1000])
 	}
 }
@@ -315,7 +315,7 @@ func TestTwoInstallationsClaimOnceAndWriteTheStatusInTheCaption(t *testing.T) {
 	if !strings.HasPrefix(post, sign.StatusLine(sign.StatusReady, "")+"\n") {
 		t.Fatalf("the first line is not the status: %q", post)
 	}
-	if !strings.HasSuffix(post, "\n#tm_m_603") {
+	if !strings.HasSuffix(post, "\n#tm_m_603_none_en") {
 		t.Fatalf("the caption does not end with the film hashtag: %q", post)
 	}
 	if len(post) > sign.CaptionLimit {
@@ -643,7 +643,7 @@ func TestSubtitlesStatusAndClaim(t *testing.T) {
 	if h.Status != sign.StatusReady || h.Claim != nil || !sign.IsReady(done) {
 		t.Fatalf("after the subtitles the post says %q", done)
 	}
-	if !strings.HasSuffix(done, "\n#tm_m_603") {
+	if !strings.HasSuffix(done, "\n#tm_m_603_none_en") {
 		t.Fatalf("the hashtag moved: %q", done)
 	}
 	if ok, err := a.Check.Allow(ctx, media.File{MessageID: id, DocID: 1000, Size: 1000, Caption: done}); err != nil || !ok {
@@ -677,7 +677,7 @@ func TestEpisodeKeepsItsSeriesImdbAndItsStatus(t *testing.T) {
 	if !ok || meta.Kind != "e" || meta.IMDb == "tt9999999" {
 		t.Fatalf("meta %+v %v", meta, ok)
 	}
-	if !strings.HasSuffix(after, "\n#tm_tv_77_1_2") {
+	if !strings.HasSuffix(after, "\n#tm_tv_77_1_2_none_en") {
 		t.Fatalf("the caption does not end with the episode hashtag: %q", after)
 	}
 }
@@ -804,7 +804,7 @@ func TestArchiveCaptionNamesTheVideoAndTheArchive(t *testing.T) {
 	if len(subs.Tracks) != 1 || subs.Tracks[0].Index != 3 {
 		t.Fatalf("tracks %+v", subs.Tracks)
 	}
-	if !strings.HasSuffix(caption, "\n#tm_m_603") || !strings.Contains(caption, "The Matrix") {
+	if !strings.HasSuffix(caption, "\n#tm_m_603_none_en") || !strings.Contains(caption, "The Matrix") {
 		t.Fatalf("title or hashtag missing: %q", caption)
 	}
 	if len(caption) > sign.CaptionLimit {

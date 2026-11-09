@@ -539,7 +539,19 @@ With a signed-in account the program looks up wanted titles by their hashtag (`#
 film, `#tm_tv_<tmdb>_<s>_<e>` for an episode) and copies a matching file into the library. There is
 no approval queue. A file is copied only if it passes verification, and sources earn trust.
 
-**Verification.** The hashtag must match the wanted title exactly. The file must not be a sample or
+The hashtag may end with the languages of that copy. The audio language comes first, then the
+subtitle language, both lower-case ISO 639-1 codes where a two-letter code exists:
+
+- `#tm_tv_322280_1_6_en_fa` — English audio, Persian subtitles
+- `#tm_tv_322280_1_6_en` — audio known, no subtitles
+- `#tm_tv_322280_1_6_none_fa` — subtitles known, audio language unknown (`none` fills the audio slot)
+- `#tm_tv_322280_1_6` — neither known (the original form)
+
+A film uses the same tail on `#tm_m_<tmdb>`. Any of these is the same title. A search for
+`#tm_tv_231751` accepts `#tm_tv_231751_1_6_en_fa` and does not accept a series whose id only starts
+with those digits, such as `#tm_tv_2317`.
+
+**Verification.** The hashtag's title, ignoring the language suffix, must be the wanted one. The file must not be a sample or
 trailer (shortest running time and smallest size). A film must run about as long as TMDB says. A
 `jftg:` signature, when present, must be valid and agree with the title; a bad signature rejects
 the file. A forged line never counts against the key it names.
@@ -559,7 +571,7 @@ username and, with a signed-in account:
 - every post this library copies into a **public mirror** is handed to the index with its
   hashtag (a durable queue, 25 links a minute, nothing is sent twice);
 - every title search, from Seerr requests and from trending, also asks the index
-  (`#tm_m_<tmdb>`, `#tm_m_<tmdb>_*` or `#tm_tv_<tmdb>_*`), reads the posts it names and sends them
+  (`#tm_m_<tmdb>`, `#tm_m_<tmdb>_*` or `#tm_tv_<tmdb>_*`, which also cover a language suffix), reads the posts it names and sends them
   through the same verification as any other hit. Posts in this library's own mirrors are skipped.
 
 **Trending (off by default).** With `TRENDING_SEARCH=true` and a `TMDB_API_KEY`, the top of TMDB's

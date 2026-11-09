@@ -96,7 +96,7 @@ func metaMismatch(q Query, m sign.Meta, hit tguser.SearchHit, tag string) string
 	if q.Movie != (m.Kind == "m") || m.TMDB != q.TMDB {
 		return "the signed title is a different one"
 	}
-	if naming.Tag(m.Kind == "e", m.TMDB, m.Season, m.Episode) != tag {
+	if naming.BaseTag(tag) != naming.Tag(m.Kind == "e", m.TMDB, m.Season, m.Episode) {
 		return "the signed episode differs from the hashtag"
 	}
 	if m.Size > 0 && hit.Size > 0 && m.Size != hit.Size {

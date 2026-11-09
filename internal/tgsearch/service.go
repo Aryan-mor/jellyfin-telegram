@@ -12,6 +12,7 @@ import (
 	"github.com/gotd/td/tgerr"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
@@ -327,7 +328,7 @@ func (s *Service) handle(ctx context.Context, q Query, hits []tguser.SearchHit, 
 			skip[tag] = true
 			continue
 		}
-		ready, err := s.TG.InReady(ctx, tag)
+		ready, err := s.TG.InReady(ctx, naming.BaseTag(tag))
 		if err != nil {
 			s.warn("telegram search", err)
 			return false
@@ -483,8 +484,9 @@ func (s *Service) warn(what string, err error) {
 }
 
 var (
-	reMovie = regexp.MustCompile(`#tm_m_(\d+)\b`)
-	reTV    = regexp.MustCompile(`#tm_tv_(\d+)_(\d+)_(\d+)\b`)
+	// A language suffix may follow the title: _<audio> or _<audio>_<sub>, and "none" may fill the audio slot.
+	reMovie = regexp.MustCompile(`#tm_m_(\d+)(?:_(?:none|[a-z]{2,3})(?:_[a-z]{2,3})?)?\b`)
+	reTV    = regexp.MustCompile(`#tm_tv_(\d+)_(\d+)_(\d+)(?:_(?:none|[a-z]{2,3})(?:_[a-z]{2,3})?)?\b`)
 )
 
 // Choose picks the best file for one query. The returned tag is the exact hashtag of that file.
@@ -532,15 +534,16 @@ func better(a, b tguser.SearchHit, score func(tguser.SearchHit) int) bool {
 func tagOf(q Query, caption string) string {
 	if q.Movie {
 		for _, m := range reMovie.FindAllStringSubmatch(caption, -1) {
-			if m[0] == q.Text() {
+			id, _ := strconv.Atoi(m[1])
+			if id == q.TMDB {
 				return m[0]
 			}
 		}
 		return ""
 	}
-	prefix := q.Text() + "_"
 	for _, m := range reTV.FindAllStringSubmatch(caption, -1) {
-		if strings.HasPrefix(m[0], prefix) {
+		id, _ := strconv.Atoi(m[1])
+		if id == q.TMDB {
 			return m[0]
 		}
 	}

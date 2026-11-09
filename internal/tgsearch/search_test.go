@@ -80,6 +80,33 @@ func TestVerifyThresholds(t *testing.T) {
 	}
 }
 
+func TestVerifyLanguageSuffixUsesTheBaseTag(t *testing.T) {
+	th := Thresholds{}
+	hit := tguser.SearchHit{ChannelID: 4, MessageID: 1, Caption: "ep\n#tm_tv_231751_1_6_en_fa", Video: true, Size: 900 * mb, Duration: 40 * 60}
+	if v := Verify(Query{TMDB: 231751}, hit, "#tm_tv_231751_1_6_en_fa", th); !v.OK {
+		t.Fatal(v.Reason)
+	}
+	if v := Verify(Query{TMDB: 2317}, hit, "#tm_tv_231751_1_6_en_fa", th); v.OK {
+		t.Fatal("accepted a shorter series id")
+	}
+	bare := tguser.SearchHit{ChannelID: 4, MessageID: 2, Caption: "ep\n#tm_tv_231751_1_6", Video: true, Size: 900 * mb, Duration: 40 * 60}
+	if v := Verify(Query{TMDB: 231751}, bare, "#tm_tv_231751_1_6", th); !v.OK {
+		t.Fatal(v.Reason)
+	}
+
+	k := newKey(t)
+	meta := sign.Meta{Kind: "e", TMDB: 231751, Season: 1, Episode: 6, Hard: "none", Subs: "no", DocID: 42, Size: 900 * mb}
+	signed := tguser.SearchHit{ChannelID: 4, MessageID: 3, Caption: "ep\n" + k.Sign(meta) + "\n#tm_tv_231751_1_6_en_fa", Size: 900 * mb, Video: true, Duration: 40 * 60}
+	if v := Verify(Query{TMDB: 231751}, signed, "#tm_tv_231751_1_6_en_fa", th); !v.OK {
+		t.Fatal(v.Reason)
+	}
+	other := sign.Meta{Kind: "e", TMDB: 231751, Season: 1, Episode: 7, Hard: "none", Subs: "no", DocID: 42, Size: 900 * mb}
+	signed.Caption = "ep\n" + k.Sign(other) + "\n#tm_tv_231751_1_6_en_fa"
+	if v := Verify(Query{TMDB: 231751}, signed, "#tm_tv_231751_1_6_en_fa", th); v.OK || !v.BlameKey {
+		t.Fatalf("different episode: %+v", v)
+	}
+}
+
 func TestVerifySignature(t *testing.T) {
 	k := newKey(t)
 	q := Query{TMDB: 603, Movie: true}

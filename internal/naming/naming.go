@@ -10,6 +10,7 @@ import (
 	"unicode"
 	"unicode/utf8"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
 
@@ -23,6 +24,10 @@ type Parsed struct {
 	Number  int
 	// Label is a version label such as 1080p, used to separate versions of one title.
 	Label string
+	// AudioLang and SubLang are set when the tracks are known. LookupTag adds them to the hashtag.
+	// Empty means that language is not known, and the hashtag stays without it.
+	AudioLang string
+	SubLang   string
 }
 
 // Matchable reports whether Jellyfin can be expected to find online metadata.
@@ -190,6 +195,10 @@ type Head struct {
 	Hard  string
 	// Source is already a caption line, such as "📡 Source: Movies (@movies)". Empty leaves it out.
 	Source string
+	// AudioLang is the first audio track's language. Empty means it is not known.
+	AudioLang string
+	// SubLang is the subtitle language for the lookup tag. Empty means it is not known.
+	SubLang string
 }
 
 // Caption builds the readable head. The signed line is added by the caller.
@@ -267,7 +276,14 @@ func SourceIn(caption string) string {
 // Tag is the hashtag that ends a library caption: #tm_m_<tmdb> for a film and
 // #tm_tv_<tmdb>_<season>_<episode> for an episode. Telegram search finds every post of one title
 // from it. The id is the film's or the series' TMDB id. An empty string means there is no id yet.
+// Tag has no language suffix. LookupTag adds one when this head knows the languages.
 func (h Head) Tag() string { return Tag(h.Episode, h.TMDB, h.Season, h.Number) }
+
+// LookupTag is the hashtag that ends the caption, including a language suffix when the languages
+// are known. With none known it is the same as Tag.
+func (h Head) LookupTag() string {
+	return TagWith(h.Episode, h.TMDB, h.Season, h.Number, h.AudioLang, h.SubLang)
+}
 
 // Tag builds the hashtag for one film or episode.
 func Tag(episode bool, tmdb, season, number int) string {
@@ -278,6 +294,94 @@ func Tag(episode bool, tmdb, season, number int) string {
 		return fmt.Sprintf("#tm_tv_%d_%d_%d", tmdb, season, number)
 	}
 	return fmt.Sprintf("#tm_m_%d", tmdb)
+}
+
+// TagWith builds the hashtag and, when a language is known, a suffix.
+// audio is the first audio track. sub is the subtitle language. Either may be empty.
+// Both empty keeps Tag's form. A known subtitle with an unknown audio writes "none" in the audio slot.
+// A known audio with no subtitle writes nothing after the audio code.
+func TagWith(episode bool, tmdb, season, number int, audio, sub string) string {
+	base := Tag(episode, tmdb, season, number)
+	if base == "" {
+		return ""
+	}
+	audio, sub = langCode(audio), langCode(sub)
+	switch {
+	case audio == "" && sub == "":
+		return base
+	case audio == "":
+		return base + "_none_" + sub
+	case sub == "":
+		return base + "_" + audio
+	default:
+		return base + "_" + audio + "_" + sub
+	}
+}
+
+// langCode is a lower-case ISO 639 code of two or three letters, or "" when code is not one.
+func langCode(code string) string {
+	code = lang.Normalize(code)
+	if len(code) < 2 || len(code) > 3 {
+		return ""
+	}
+	for _, r := range code {
+		if r < 'a' || r > 'z' {
+			return ""
+		}
+	}
+	return code
+}
+
+// langSuffix is the optional _<audio> or _<audio>_<sub> tail. "none" fills the audio slot.
+const langSuffix = `(?:_(?:none|[a-z]{2,3})(?:_[a-z]{2,3})?)?`
+
+var (
+	reSplitTag = regexp.MustCompile(`^(#tm_m_\d+|#tm_tv_\d+_\d+_\d+)(?:_(none|[a-z]{2,3})(?:_([a-z]{2,3}))?)?$`)
+	reAnyTag   = regexp.MustCompile(`#tm_m_\d+` + langSuffix + `\b|#tm_tv_\d+_\d+_\d+` + langSuffix + `\b`)
+)
+
+// SplitTag reads a lookup hashtag. base is the film or episode tag, audio and sub are the suffix.
+// audio is "none" when the tag says the audio language is unknown and a subtitle language is present.
+// A string that is not one of these hashtags returns three empty strings.
+func SplitTag(tag string) (base, audio, sub string) {
+	m := reSplitTag.FindStringSubmatch(strings.TrimSpace(tag))
+	if m == nil {
+		return "", "", ""
+	}
+	return m[1], m[2], m[3]
+}
+
+// BaseTag returns the hashtag without a language suffix.
+// A string that is not a film or episode hashtag returns "".
+func BaseTag(tag string) string {
+	base, _, _ := SplitTag(tag)
+	return base
+}
+
+// TagsIn lists lookup hashtags in caption, in the order they appear. A language suffix stays on the tag.
+func TagsIn(caption string) []string {
+	return reAnyTag.FindAllString(caption, -1)
+}
+
+// TrackLangs picks the languages a lookup tag records.
+// Audio is the first audio track. The subtitle is prefer when that language is one of the tracks,
+// otherwise the first subtitle track. An unknown language is an empty string.
+func TrackLangs(audio []sign.AudioTrack, soft []sign.Track, prefer string) (audioLang, subLang string) {
+	if len(audio) > 0 {
+		audioLang = langCode(audio[0].Lang)
+	}
+	prefer = langCode(prefer)
+	if prefer != "" {
+		for _, t := range soft {
+			if langCode(t.Lang) == prefer {
+				return audioLang, prefer
+			}
+		}
+	}
+	if len(soft) > 0 {
+		subLang = langCode(soft[0].Lang)
+	}
+	return audioLang, subLang
 }
 
 // ShowTracks formats soft tracks for the readable caption.
@@ -313,8 +417,9 @@ func ShowTracks(tracks []sign.Track, prefer string) []string {
 
 // LookupTag is the hashtag Telegram search uses for one title.
 // An empty string means the file has no TMDB id yet.
+// AudioLang and SubLang add the language suffix when the caller knows the tracks.
 func LookupTag(p Parsed) string {
-	return Tag(p.Episode, p.TMDBID, p.Season, p.Number)
+	return TagWith(p.Episode, p.TMDBID, p.Season, p.Number, p.AudioLang, p.SubLang)
 }
 
 var (
