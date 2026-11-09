@@ -53,4 +53,10 @@ jobs:
         working-directory: web
         run: pnpm build
       - name: dist is committed
-        run: git diff --exit-code internal/webui/dist
+        run: |
+          if ! git diff --quiet -- internal/webui/dist || [ -n "$(git status --porcelain -- internal/webui/dist)" ]; then
+            echo "internal/webui/dist does not match this commit."
+            echo "Committing from this repo rebuilds the panel and adds that folder to the commit."
+            git diff --stat -- internal/webui/dist
+            exit 1
+          fi

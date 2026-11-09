@@ -3,7 +3,7 @@
   "private": true,
   "description": "Shortcuts for building and running jellyfin-telegram. The program itself is Go; the panel UI lives in web/.",
   "scripts": {
-    "setup": "pnpm --dir web install",
+    "setup": "pnpm --dir web install && node scripts/install-git-hooks.mjs",
     "ui:dev": "pnpm --dir web dev",
     "ui:build": "pnpm --dir web build",
     "ui:check": "pnpm --dir web exec tsc -p tsconfig.app.json --noEmit && pnpm --dir web exec oxlint",

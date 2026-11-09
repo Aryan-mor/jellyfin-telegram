@@ -1,5 +1,5 @@
 # One-step installer for Windows.
-#   irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 | iex
+#   irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 -OutFile $env:TEMP\jellyfin-telegram-install.ps1; & $env:TEMP\jellyfin-telegram-install.ps1
 # It downloads the latest build into %LOCALAPPDATA%\jellyfin-telegram, makes it start at logon,
 # and opens the setup page. Run it again to update; your settings and library are kept.
 $ErrorActionPreference = 'Stop'

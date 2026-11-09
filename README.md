@@ -43,7 +43,7 @@ sends you. The channel, the bots and Jellyfin are created and configured for you
 and double-click it. That is the file to get. Or paste this in PowerShell:
 
 ```powershell
-irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 | iex
+irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 -OutFile $env:TEMP\jellyfin-telegram-install.ps1; & $env:TEMP\jellyfin-telegram-install.ps1
 ```
 
 To install it yourself, download [`jellyfin-telegram-windows-amd64.zip`](https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/jellyfin-telegram-windows-amd64.zip)
@@ -323,8 +323,8 @@ Open `http://127.0.0.1:8097/panel` on the machine that runs the service. The pan
 so it accepts sign-in from this computer or over Tailscale.
 
 The pages are a React app in `web/`. Building it writes `internal/webui/dist`, and that folder is
-embedded in the Go binary, so `go build` does not need Node. Commit the built files with the
-source change. From the project folder:
+embedded in the Go binary, so `go build` does not need Node. A commit rebuilds that folder when
+`web/` changed and adds it to the same commit. From the project folder:
 
 | Command | What it does |
 |---|---|

@@ -20,8 +20,12 @@ The program is new and not signed, so Windows warns. Click **More info**, then *
 
 **PowerShell says "running scripts is disabled".**
 Use the `install-windows.cmd` file instead (double-click it). It runs the installer with the
-right setting. Or run:
-`powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 | iex"`
+right setting. Or, in a PowerShell window:
+`irm https://github.com/Aryan-mor/jellyfin-telegram/releases/latest/download/install.ps1 -OutFile $env:TEMP\jellyfin-telegram-install.ps1; & $env:TEMP\jellyfin-telegram-install.ps1`
+
+**The installer window says only "Access is denied."**
+Defender blocks the old `irm | iex` command line (`Trojan:Win32/Commando.B!ml`). Download a fresh
+`install-windows.cmd` or `install-nightly-windows.cmd` from the latest release. Do not turn Defender off.
 
 **The download fails or says 404.**
 Check that you are online and that the [Releases page](https://github.com/Aryan-mor/jellyfin-telegram/releases)
