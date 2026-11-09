@@ -83,9 +83,12 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 		_ = srv.Shutdown(shutdownCtx)
 	}()
 
-	if cfg.NeedsSetup() {
+	firstSetup := cfg.NeedsSetup()
+	if firstSetup {
 		address := fmt.Sprintf("%s/setup?code=%s", cfg.LoopbackURL(), wizard.Code())
-		fmt.Printf("\nOpen this address to set up jellyfin-telegram:\n\n    %s\n\n", address)
+		fmt.Printf("\nLeave this window open until setup finishes.\n\n    %s\n\n", address)
+		watchSetup(wizard)
+		wizard.SetStatus(setup.Status{Stage: "Waiting for you in the browser", Percent: 0})
 		wizard.SetAuto(newAutoSetup(ctx, filepath.Join(cfg.DataDir, "users"), log))
 		openBrowser(address)
 		select {
@@ -102,14 +105,14 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 			return err
 		}
 	}
-	err = run(ctx, cfg, envPath, wizard, &entry, srvErr, log)
+	err = run(ctx, cfg, envPath, wizard, &entry, srvErr, log, firstSetup)
 	if err != nil {
 		wizard.SetStatus(setup.Status{Stage: "Could not start", Error: err.Error()})
 	}
 	return err
 }
 
-func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.Wizard, entry *front.Switch, srvErr <-chan error, log *slog.Logger) error {
+func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.Wizard, entry *front.Switch, srvErr <-chan error, log *slog.Logger, setupConsole bool) error {
 	// Cancelled on every return, including a failed start. Otherwise the process exits and the
 	// Jellyfin child keeps the port.
 	ctx, stopChildren := context.WithCancel(ctx)
@@ -368,6 +371,10 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		}
 	}
 	fmt.Printf("\nSettings panel:\n    %s/panel\n\n", cfg.LoopbackURL())
+	if setupConsole {
+		fmt.Fprintf(os.Stderr, "\nSetup finished. This window can be closed.\nThe server keeps running, and it starts again when you sign in.\n")
+		releaseConsole()
+	}
 
 	idx := indexer.New(pool, cat, lib, store, log)
 	hub.SetIndexer(idx)

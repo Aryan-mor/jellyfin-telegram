@@ -96,8 +96,9 @@ type Wizard struct {
 	saved  chan struct{}
 	once   sync.Once
 
-	auto Auto
-	st   autoState
+	auto   Auto
+	st     autoState
+	notify func(Status)
 }
 
 // New returns a Wizard that writes to the settings file at envPath.
@@ -115,11 +116,26 @@ func (w *Wizard) Code() string { return w.code }
 // Saved is closed once the user has saved working values.
 func (w *Wizard) Saved() <-chan struct{} { return w.saved }
 
+// Notify calls fn for every later status, and once with the status already stored.
+func (w *Wizard) Notify(fn func(Status)) {
+	w.mu.Lock()
+	w.notify = fn
+	s := w.status
+	w.mu.Unlock()
+	if fn != nil {
+		fn(s)
+	}
+}
+
 // SetStatus updates what the page shows.
 func (w *Wizard) SetStatus(s Status) {
 	w.mu.Lock()
-	defer w.mu.Unlock()
 	w.status = s
+	fn := w.notify
+	w.mu.Unlock()
+	if fn != nil {
+		fn(s)
+	}
 }
 
 // Handler serves the page and its API.

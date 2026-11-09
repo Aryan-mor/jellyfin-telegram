@@ -32,12 +32,6 @@ func main() {
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	flag.Parse()
 
-	// A console window is not the service. Closing it must not stop Jellyfin. serve moves itself
-	// into the background first; check and bench stay in the terminal so their result is visible.
-	if flag.NArg() == 0 || flag.Arg(0) == "serve" {
-		backgroundIfInteractive()
-	}
-
 	level := slog.LevelInfo
 	if *verbose {
 		level = slog.LevelDebug
@@ -59,6 +53,11 @@ func main() {
 	if err != nil && !(cmd == "serve" && cfg.NeedsSetup()) {
 		fmt.Fprintf(os.Stderr, "Configuration problems:\n%v\n", err)
 		os.Exit(2)
+	}
+	// First setup stays in this window so its log and progress stay visible. A server that is
+	// already set up does not need the window.
+	if cmd == "serve" && !cfg.NeedsSetup() {
+		backgroundIfInteractive()
 	}
 
 	switch cmd {

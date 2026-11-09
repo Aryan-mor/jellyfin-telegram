@@ -42,6 +42,15 @@ func backgroundIfInteractive() {
 	os.Exit(0)
 }
 
+// releaseConsole detaches from the window after setup has finished, so closing it leaves the
+// server running.
+func releaseConsole() {
+	if !hasConsoleWindow() {
+		return
+	}
+	_, _, _ = freeConsole.Call()
+}
+
 func spawnHidden() bool {
 	exe, err := os.Executable()
 	if err != nil {

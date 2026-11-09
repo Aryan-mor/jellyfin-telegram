@@ -6,6 +6,43 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
 
+# Save-Url downloads one file and draws a progress bar. Invoke-WebRequest's own bar
+# makes the download very slow, so this reads the stream itself.
+function Save-Url([string]$url, [string]$dest) {
+  $req = [System.Net.HttpWebRequest]::Create($url)
+  $req.UserAgent = 'jellyfin-telegram'
+  $req.AllowAutoRedirect = $true
+  $res = $req.GetResponse()
+  try {
+    $total = $res.ContentLength
+    $stream = $res.GetResponseStream()
+    $output = [System.IO.File]::Create($dest)
+    try {
+      $buf = New-Object byte[] 65536
+      $done = [int64]0
+      $shown = -1
+      while (($n = $stream.Read($buf, 0, $buf.Length)) -gt 0) {
+        $output.Write($buf, 0, $n)
+        $done += $n
+        if ($total -gt 0) {
+          $pct = [int](100 * $done / $total)
+          if ($pct -ne $shown -and ($pct % 5 -eq 0 -or $pct -eq 100)) {
+            $shown = $pct
+            $filled = [int](28 * $pct / 100)
+            $bar = ('#' * $filled).PadRight(28, '-')
+            Write-Host -NoNewline ("`r[{0}] {1,3}%  Downloading" -f $bar, $pct)
+          }
+        }
+      }
+    } finally {
+      $output.Close()
+      $stream.Close()
+    }
+  } finally {
+    $res.Close()
+  }
+}
+
 $repo = 'Aryan-mor/jellyfin-telegram'
 $dir = Join-Path $env:LOCALAPPDATA 'jellyfin-telegram'
 $exe = Join-Path $dir 'jellyfin-telegram.exe'
@@ -31,7 +68,8 @@ if ($channel -eq 'nightly') {
 } else {
   $url = "https://github.com/$repo/releases/latest/download/jellyfin-telegram-windows-amd64.zip"
 }
-Invoke-WebRequest $url -OutFile $zip
+Save-Url $url $zip
+Write-Host ''
 Expand-Archive $zip -DestinationPath $dir -Force
 Remove-Item $zip
 
@@ -49,7 +87,15 @@ foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::Ge
   if ($folder) { Set-Content -Path (Join-Path $folder 'jellyfin-telegram panel.url') -Value $url -Encoding ASCII }
 }
 
-Write-Host 'Starting in the background. This window can be closed. It also starts when you sign in to Windows.'
-Write-Host 'The setup page opens in your browser; sign in with your phone number there.'
-# The scheduled task is the process that stays up. A window started here would die when closed.
-Start-ScheduledTask -TaskName $task
+Write-Host ''
+Write-Host 'Leave this window open. Setup runs here and shows its progress.'
+Write-Host 'The setup page also opens in your browser; sign in with your phone number there.'
+# Same window, so the log stays here. A scheduled task would open another console.
+Push-Location $dir
+try {
+  & $exe serve
+  if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+} finally {
+  Pop-Location
+}
+

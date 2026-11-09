@@ -4,6 +4,7 @@ package managed
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"syscall"
@@ -23,3 +24,5 @@ func runsFile(pid int, exe string) bool {
 
 // stopGently asks the server to shut down, so it can close its database cleanly.
 func stopGently(p *os.Process) error { return p.Signal(syscall.SIGTERM) }
+
+func hideWindow(cmd *exec.Cmd) {}

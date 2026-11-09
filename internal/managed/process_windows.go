@@ -4,8 +4,10 @@ package managed
 
 import (
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"golang.org/x/sys/windows"
 )
@@ -30,3 +32,9 @@ func runsFile(pid int, exe string) bool {
 
 // stopGently ends the server. Windows offers no signal a console-less child can act on.
 func stopGently(p *os.Process) error { return p.Kill() }
+
+// hideWindow keeps Jellyfin from opening its own console. A console app started with no window
+// of its own would otherwise flash a terminal every time it starts.
+func hideWindow(cmd *exec.Cmd) {
+	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x08000000}
+}

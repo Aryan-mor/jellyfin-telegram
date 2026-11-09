@@ -104,6 +104,7 @@ func (s *Server) runOnce(ctx context.Context) error {
 	cmd.Dir = filepath.Dir(s.Paths.Server)
 	cmd.Stdout, cmd.Stderr = out, out
 	cmd.Env = os.Environ()
+	hideWindow(cmd)
 	if runtime.GOOS != "windows" {
 		// Small Linux systems often lack libicu, without which the server refuses to start.
 		cmd.Env = append(cmd.Env, "DOTNET_SYSTEM_GLOBALIZATION_INVARIANT=1")
