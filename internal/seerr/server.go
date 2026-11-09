@@ -11,18 +11,19 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
 )
 
-// Server runs the pinned Seerr image. Docker is the only build Seerr publishes.
+// Server runs the installed Seerr as an ordinary child process.
 type Server struct {
-	// Root holds the API key, the config directory and the log. The config directory is
-	// what the container writes.
+	// Root holds the API key, the config directory, the log and the installed bundle.
 	Root   string
 	APIKey string
+	Bundle Bundle
 	Log    *slog.Logger
 }
 
@@ -52,32 +53,15 @@ func EnsureAPIKey(root string) (string, error) {
 	return key, os.WriteFile(path, []byte(key+"\n"), 0o600)
 }
 
-// Pull downloads the pinned image when it is not already present.
-func Pull(ctx context.Context, log *slog.Logger) error {
-	if _, err := exec.LookPath("docker"); err != nil {
-		return errors.New("Seerr needs Docker. Install Docker, or set SEERR_MANAGED=false")
-	}
-	if exec.CommandContext(ctx, "docker", "image", "inspect", Image).Run() == nil {
-		return nil
-	}
-	if log != nil {
-		log.Info("downloading Seerr", "image", Image)
-	}
-	cmd := exec.CommandContext(ctx, "docker", "pull", Image)
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return fmt.Errorf("download Seerr: %w (%s)", err, tail(out))
-	}
-	return nil
+func (s *Server) pidFile() string { return filepath.Join(s.Root, "seerr.pid") }
+
+// Prepare ends a copy left running by an earlier crash. It must finish before WaitReady, or the
+// dying copy can pass for the new one.
+func (s *Server) Prepare() {
+	managed.StopStale(s.pidFile(), s.Bundle.Node, s.Log)
 }
 
-// Prepare removes a container left from the previous process. WaitReady must not run until
-// this returns, or it can treat the dying copy as ready.
-func (s *Server) Prepare(ctx context.Context) {
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", ContainerName).Run()
-}
-
-// Run keeps the container alive until ctx ends.
+// Run keeps Seerr alive until ctx ends.
 func (s *Server) Run(ctx context.Context) {
 	log := s.Log
 	if log == nil {
@@ -100,8 +84,7 @@ func (s *Server) Run(ctx context.Context) {
 
 func (s *Server) runOnce(ctx context.Context) error {
 	configDir := filepath.Join(s.Root, "config")
-	// The image runs as uid 1000. The parent directory stays private to this user.
-	if err := os.MkdirAll(configDir, 0o777); err != nil {
+	if err := os.MkdirAll(configDir, 0o755); err != nil {
 		return err
 	}
 	logDir := filepath.Join(s.Root, "log")
@@ -114,65 +97,48 @@ func (s *Server) runOnce(ctx context.Context) error {
 	}
 	defer console.Close()
 
-	// A container left behind still owns the name and the port.
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", ContainerName).Run()
-
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs(runtime.GOOS, configDir, s.APIKey)...)
+	cmd := exec.CommandContext(ctx, s.Bundle.Node, "dist/index.js")
+	cmd.Dir = s.Bundle.App
 	cmd.Stdout, cmd.Stderr = console, console
-	cmd.Cancel = func() error {
-		stop := exec.Command("docker", "stop", "-t", "10", ContainerName)
-		_ = stop.Run()
-		if cmd.Process != nil {
-			return cmd.Process.Kill()
-		}
-		return nil
-	}
+	cmd.Env = env(configDir, s.APIKey)
+	managed.HideWindow(cmd)
+	cmd.Cancel = func() error { return managed.StopGently(cmd.Process) }
 	cmd.WaitDelay = 20 * time.Second
 	if err := cmd.Start(); err != nil {
 		return err
 	}
-	return cmd.Wait()
+	if err := os.WriteFile(s.pidFile(), []byte(strconv.Itoa(cmd.Process.Pid)), 0o644); err != nil && s.Log != nil {
+		s.Log.Warn("cannot record the Seerr process id", "err", err)
+	}
+	err = cmd.Wait()
+	_ = os.Remove(s.pidFile())
+	return err
 }
 
-// dockerArgs builds the run command. Linux shares the host network so Seerr can call the
-// Jellyfin that listens on loopback. Other systems publish the port and use the host name
-// Docker gives for this machine.
-func dockerArgs(goos, configDir, apiKey string) []string {
-	args := []string{
-		"run", "--rm", "--name", ContainerName, "--init", "--pull", "never",
-		"-e", "API_KEY=" + apiKey,
-		"-e", "LOG_LEVEL=info",
-		// Node gives each connection attempt 250 ms. Reaching this machine through Docker Desktop is
-		// sometimes slower, and Seerr then failed at random with an empty error, even towards Jellyfin.
-		// Turning the attempt race off made all of 6 test runs connect, against 5 of 6 before.
-		"-e", "NODE_OPTIONS=--no-network-family-autoselection",
-		"-v", bindMount(configDir),
+// env is this program's environment with Seerr's settings added. HOST keeps it on loopback, so
+// only this program reaches it, and the panel serves it to others through its own port.
+func env(configDir, apiKey string) []string {
+	own := map[string]string{
+		"NODE_ENV":         "production",
+		"API_KEY":          apiKey,
+		"LOG_LEVEL":        "info",
+		"HOST":             "127.0.0.1",
+		"PORT":             strconv.Itoa(Port),
+		"CONFIG_DIRECTORY": configDir,
 	}
-	if goos == "linux" {
-		args = append(args,
-			"--network", "host",
-			"-e", "HOST=127.0.0.1",
-			"-e", "PORT="+strconv.Itoa(Port),
-		)
-	} else {
-		args = append(args,
-			"-p", "127.0.0.1:"+strconv.Itoa(Port)+":5055",
-			"--add-host", "host.docker.internal:host-gateway",
-		)
+	var out []string
+	for _, kv := range os.Environ() {
+		name, _, _ := strings.Cut(kv, "=")
+		// A setting of the user's own shell must not change how Seerr runs here.
+		if _, ours := own[strings.ToUpper(name)]; ours || strings.EqualFold(name, "NODE_OPTIONS") {
+			continue
+		}
+		out = append(out, kv)
 	}
-	return append(args, Image)
-}
-
-// JellyfinHost is the name Seerr, inside its container, uses to reach Jellyfin.
-func JellyfinHost(goos string) string {
-	if goos == "linux" {
-		return "127.0.0.1"
+	for k, v := range own {
+		out = append(out, k+"="+v)
 	}
-	return "host.docker.internal"
-}
-
-func bindMount(configDir string) string {
-	return filepath.Clean(configDir) + ":/app/config"
+	return out
 }
 
 // WaitReady blocks until Seerr answers.
@@ -196,13 +162,4 @@ func (s *Server) WaitReady(ctx context.Context, timeout time.Duration) error {
 			return fmt.Errorf("Seerr did not start in time, see %s", filepath.Join(s.Root, "log"))
 		}
 	}
-}
-
-func tail(b []byte) string {
-	s := strings.TrimSpace(string(b))
-	s = strings.ReplaceAll(s, "\n", " ")
-	if len(s) > 240 {
-		s = s[len(s)-240:]
-	}
-	return s
 }

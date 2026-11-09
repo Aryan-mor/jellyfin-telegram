@@ -7,10 +7,25 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
+func TestPausedDownloadsCannotBeTurnedOn(t *testing.T) {
+	if config.DownloadsAvailable {
+		t.Skip("downloads are available")
+	}
+	s := New(false)
+	err := s.SetEnabled(context.Background(), true)
+	if err == nil || !strings.Contains(err.Error(), "paused") {
+		t.Fatalf("%v", err)
+	}
+}
+
 func TestEnableWithoutSession(t *testing.T) {
+	if !config.DownloadsAvailable {
+		t.Skip("downloads are paused")
+	}
 	dir := t.TempDir()
 	users, err := tguser.New(filepath.Join(dir, "users"), 1, "hash", 2, tguser.Pace{}, nil)
 	if err != nil {

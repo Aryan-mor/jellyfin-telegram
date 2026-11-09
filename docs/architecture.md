@@ -15,7 +15,7 @@
 | `internal/subtitles` | Identifies tracks from the file head and finds online subtitles |
 | `internal/lang` | Language codes, names, scripts, encodings and text detection for any language |
 | `internal/managed` | Downloads a pinned Jellyfin build, runs it on loopback, completes its first-run wizard |
-| `internal/seerr` | Runs a pinned Seerr image and finishes its setup with that Jellyfin as the media server |
+| `internal/seerr` | Downloads a pinned Seerr bundle (Seerr and the Node it needs, built in the `seerr-bundles` repository), runs it as a child process and finishes its setup with that Jellyfin as the media server. No Docker |
 | `internal/fladder` | Runs the Fladder web client with this Jellyfin and Seerr already filled in |
 | `internal/front` | One port for streams, the setup page, the panel, Seerr under `/seerr/`, Fladder under `/fladder/`, and a reverse proxy to Jellyfin |
 | `internal/setup` | Browser wizard that writes `.env` after checking the bots against the channel |
@@ -266,6 +266,8 @@ Measured with 4 real files, on Jellyfin 10.11.8:
 | Playing in Web with an embedded track selected | No extraction |
 
 ## Downloads
+
+**Paused.** `config.DownloadsAvailable` is false, so the switch cannot be turned on and nothing in this section runs. The code stays for when it returns. Seerr no longer runs in Docker, so the stack's step that joins a Seerr container to its network would need rewriting first.
 
 Off by default. The panel turns it on only when at least one signed-in user is an admin who can post, Docker is installed, and the download folder is writable with enough free space. The stack runs in a goroutine after the player is already serving, and an error there is shown in the panel.
 

@@ -21,6 +21,11 @@ import (
 )
 
 // Config is the full service configuration.
+// DownloadsAvailable is false while the torrent download chain is paused. That chain runs in
+// Docker, and this program is meant to need nothing but itself. Its code stays, so turning this on
+// brings it back. Nothing starts and no Docker is looked for while it is false.
+const DownloadsAvailable = false
+
 type Config struct {
 	APIID     int
 	APIHash   string
@@ -309,8 +314,9 @@ func Load(envPath string) (Config, error) {
 			c.LocalMediaDirs = append(c.LocalMediaDirs, dir)
 		}
 	}
-	// Downloads are part of Seerr: it is what asks Radarr and Sonarr for a title.
-	c.DownloadsEnabled = c.SeerrManaged && strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")
+	// Downloads are part of Seerr: it is what asks Radarr and Sonarr for a title. They are paused
+	// for now, see DownloadsAvailable.
+	c.DownloadsEnabled = DownloadsAvailable && c.SeerrManaged && strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")
 	c.DownloadsDir = get("DOWNLOADS_DIR", "")
 	if c.DownloadsDir == "" {
 		c.DownloadsDir = filepath.Join(c.DataDir, "downloads")

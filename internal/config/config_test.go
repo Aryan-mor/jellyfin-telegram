@@ -199,7 +199,7 @@ func TestDownloadsNeedSeerr(t *testing.T) {
 		t.Fatalf("downloads without seerr: %+v, %v", c, err)
 	}
 	c, err = load(t, validEnv+"SEERR_MANAGED=true\nDOWNLOADS_ENABLED=true\n")
-	if err != nil || !c.DownloadsEnabled {
+	if err != nil || c.DownloadsEnabled != DownloadsAvailable {
 		t.Fatalf("downloads with seerr: %+v, %v", c, err)
 	}
 }

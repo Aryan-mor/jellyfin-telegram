@@ -171,8 +171,8 @@ A new language is a new `web/src/locales/<code>.json` file. The page only offers
 | Extra | What it does | Needs |
 |---|---|---|
 | Fladder | A nicer Jellyfin web client at `/fladder/` | Docker |
-| Seerr | Request films and shows from a web page, at `/seerr/` | Docker |
-| Downloads | Seerr request, then Radarr/Sonarr, Bitmagnet and qBittorrent fetch it, then a Telegram account uploads it to your channel and the disk copy is deleted | Docker, a Telegram user account |
+| Seerr | Request films and shows from a web page, at `/seerr/` | Nothing. It is downloaded once, about 150 MB, and runs as a normal process |
+| Downloads | **Paused for now.** Seerr request, then Radarr/Sonarr, Bitmagnet and qBittorrent fetch it, then a Telegram account uploads it to your channel and the disk copy is deleted | Docker, a Telegram user account |
 | Channels | Forward films and series from other Telegram channels into your library channel, server side, with nothing downloaded here | A Telegram user account |
 | Local media | List videos already on this computer, upload the ones you pick, optionally delete the local copy afterwards | Nothing extra |
 
@@ -187,7 +187,7 @@ The list below is what Manual setup needs, and the setup page creates all of it 
 - `api_id` and `api_hash` from [my.telegram.org](https://my.telegram.org) under *API development tools*
 - **Go 1.26 or newer**, only to build from source
 - Jellyfin **10.11.8** or **12.4** (the tested versions). The managed mode downloads 12.4 for you.
-- **Docker**, only for Fladder, Seerr and Downloads. Jellyfin alone does not need it.
+- **Docker**, only for Fladder (and Downloads, which are paused). Jellyfin and Seerr do not need it.
 - Optional: `ffprobe` for subtitle detection. The service looks in `PATH` and in the Jellyfin
   install folder, so the managed Jellyfin usually covers it.
 
@@ -224,8 +224,8 @@ already sets up start-at-login: a Task Scheduler task on Windows, a systemd user
 
 3. Windows may ask to allow the program through the firewall the first time another device
    connects. Allow it on private networks.
-4. Optional, for the extras: install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-   and leave it running.
+4. Optional, only for Fladder: install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
+   and leave it running. Seerr needs no Docker.
 
 To start it automatically at logon, create a Task Scheduler task that runs
 `jellyfin-telegram.exe serve` with the project folder as the start directory. The service does
@@ -443,8 +443,8 @@ Every setting is explained inside [.env.example](.env.example). The ones you wil
 | `SYNC_INTERVAL_SECONDS` | How often to look for new channel messages (default 60) |
 | `SUBTITLE_LANGUAGE` | Your language code: `en`, `de`, `fr`, `fa`, `ja`, ... Empty turns subtitles off |
 | `SUBTITLES_ONLINE` | Allow fetching from sub-plus.ir |
-| `SEERR_MANAGED`, `FLADDER_MANAGED` | Turn on Seerr or Fladder (needs Docker) |
-| `DOWNLOADS_ENABLED` | Turn on the download chain (needs Seerr) |
+| `SEERR_MANAGED`, `FLADDER_MANAGED` | Turn on Seerr or Fladder (Fladder needs Docker, Seerr does not) |
+| `DOWNLOADS_ENABLED` | The download chain. Paused: it has no effect in this version |
 | `LOCAL_MEDIA_DIRS` | Folders of local videos, separated by `\|` |
 
 ## How files are named
@@ -515,7 +515,7 @@ also deletes its archive. When Jellyfin runs in Docker or on another machine, se
 
 Tick them on the setup page, in the panel, or set `SEERR_MANAGED=true` and `FLADDER_MANAGED=true`.
 Seerr opens at `/seerr/` and is signed in to your Jellyfin (use the same user). Fladder opens at
-`/fladder/` with Seerr already filled in. Both need Docker.
+`/fladder/` with Seerr already filled in. Fladder needs Docker. Seerr does not.
 
 ### Downloads (Torrents tab)
 

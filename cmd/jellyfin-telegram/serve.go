@@ -859,7 +859,7 @@ func finishManaged(ctx context.Context, cfg config.Config, server *managed.Serve
 	return b.Run(ctx)
 }
 
-// startSeerr pulls the pinned image, runs it, and points it at the private Jellyfin.
+// startSeerr downloads the pinned Seerr, runs it, and points it at the private Jellyfin.
 func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credentials, wizard *setup.Wizard, log *slog.Logger, child *sync.WaitGroup, armDone func()) (string, error) {
 	root, err := filepath.Abs(filepath.Join(cfg.DataDir, "seerr"))
 	if err != nil {
@@ -870,11 +870,12 @@ func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credential
 		return "", err
 	}
 	wizard.SetStatus(setup.Status{Stage: "Downloading Seerr", Percent: 92})
-	if err := seerr.Pull(ctx, log); err != nil {
+	bundle, err := seerr.Install(ctx, root, http.DefaultClient, nil)
+	if err != nil {
 		return "", err
 	}
-	srv := &seerr.Server{Root: root, APIKey: key, Log: log}
-	srv.Prepare(ctx)
+	srv := &seerr.Server{Root: root, APIKey: key, Bundle: bundle, Log: log}
+	srv.Prepare()
 	child.Add(1)
 	go func() {
 		defer child.Done()
@@ -949,11 +950,11 @@ func startFladder(ctx context.Context, cfg config.Config, wizard *setup.Wizard, 
 	return srv.URL(), nil
 }
 
-// seerrJellyfin is the address Seerr's container uses to call Jellyfin. A loopback address in
-// the settings is this machine, which a container reaches under Docker's host name.
+// seerrJellyfin is the address Seerr uses to call Jellyfin. Seerr runs on this machine, so a
+// loopback address in the settings works as it is.
 func seerrJellyfin(cfg config.Config) (string, int, error) {
 	if cfg.JellyfinURL == "" {
-		return seerr.JellyfinHost(runtime.GOOS), managedPort, nil
+		return seerr.JellyfinHost, managedPort, nil
 	}
 	u, err := url.Parse(cfg.JellyfinURL)
 	if err != nil {
@@ -969,7 +970,7 @@ func seerrJellyfin(cfg config.Config) (string, int, error) {
 	}
 	host := u.Hostname()
 	if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-		host = seerr.JellyfinHost(runtime.GOOS)
+		host = seerr.JellyfinHost
 	}
 	return host, port, nil
 }

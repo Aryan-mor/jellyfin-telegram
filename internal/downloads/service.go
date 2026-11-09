@@ -12,6 +12,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autoupload"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/diskspace"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/stack"
@@ -202,6 +203,9 @@ func (s *Service) library(snap stack.Status) *autoupload.Source {
 // SetEnabled persists the switch. On requires a healthy admin session, Docker and a writable folder.
 func (s *Service) SetEnabled(ctx context.Context, on bool) error {
 	if on {
+		if !config.DownloadsAvailable {
+			return fmt.Errorf("torrent downloads are paused in this version")
+		}
 		if s.Users == nil || len(s.Users.Healthy()) == 0 {
 			// A signed-in account that cannot post stays on the panel with its reason. Say which.
 			if s.Users != nil {
