@@ -22,12 +22,11 @@ Write-Host "Downloading jellyfin-telegram ($channel)..."
 Get-Process -Name 'jellyfin-telegram' -ErrorAction SilentlyContinue | Stop-Process -Force
 $zip = Join-Path $env:TEMP 'jellyfin-telegram.zip'
 if ($channel -eq 'nightly') {
-  $rels = Invoke-RestMethod -Headers @{ 'User-Agent' = 'jellyfin-telegram'; Accept = 'application/vnd.github+json' } -Uri "https://api.github.com/repos/$repo/releases?per_page=30"
-  $tag = $null
-  foreach ($rel in $rels) {
-    if ($rel.prerelease -and $rel.tag_name -match '-nightly\.\d+$') { $tag = $rel.tag_name; break }
-  }
-  if (-not $tag) { throw 'No nightly release yet.' }
+  # The releases page, not the API. The API rate limit made this installer fail.
+  $atom = Invoke-WebRequest -Headers @{ 'User-Agent' = 'jellyfin-telegram' } -Uri "https://github.com/$repo/releases.atom" -UseBasicParsing
+  $found = [regex]::Match($atom.Content, 'v\d+\.\d+\.\d+-nightly\.\d+')
+  if (-not $found.Success) { throw 'No nightly release yet.' }
+  $tag = $found.Value
   $url = "https://github.com/$repo/releases/download/$tag/jellyfin-telegram-windows-amd64.zip"
 } else {
   $url = "https://github.com/$repo/releases/latest/download/jellyfin-telegram-windows-amd64.zip"

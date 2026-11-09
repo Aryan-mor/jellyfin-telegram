@@ -29,14 +29,12 @@ printf '%s\n' "$channel" > "$dir/channel"
 echo "Downloading jellyfin-telegram ($channel)..."
 tmp="$(mktemp)"
 if [ "$channel" = nightly ]; then
-  tag=$(curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: jellyfin-telegram" \
-    "https://api.github.com/repos/$repo/releases?per_page=30" | awk '
-      /"tag_name"/ {
-        tag = $0
-        sub(/.*"tag_name"[[:space:]]*:[[:space:]]*"/, "", tag)
-        sub(/".*/, "", tag)
+  # The releases page, not the API. The API rate limit made this installer fail.
+  tag=$(curl -fsSL -A jellyfin-telegram "https://github.com/$repo/releases.atom" | awk '
+      match($0, /v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]+/) {
+        print substr($0, RSTART, RLENGTH)
+        exit
       }
-      /"prerelease"[[:space:]]*:[[:space:]]*true/ && tag ~ /-nightly\.[0-9]+$/ { print tag; exit }
     ')
   if [ -z "$tag" ]; then
     echo "No nightly release yet." >&2
