@@ -28,6 +28,7 @@ type Values struct {
 	Channel     string `json:"channel"`
 	Bots        string `json:"bots"`
 	Language    string `json:"language"`
+	UILanguage  string `json:"ui_language"`
 	JellyfinURL string `json:"jellyfin_url"`
 	JellyfinKey string `json:"jellyfin_key"`
 	// Fladder, Seerr and Downloads are the optional parts. Downloads is part of Seerr, so asking
@@ -261,7 +262,7 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		writeError(rw, http.StatusBadRequest, err.Error())
 		return
 	}
-	err = UpdateEnv(w.env, map[string]string{
+	env := map[string]string{
 		"TELEGRAM_API_ID":        fmt.Sprint(d.apiID),
 		"TELEGRAM_API_HASH":      d.apiHash,
 		"TELEGRAM_CHANNEL_ID":    fmt.Sprint(d.channel),
@@ -279,8 +280,11 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		"MIRROR_TITLE":           strings.TrimSpace(v.MirrorTitle),
 		"MIRROR_USERNAME":        strings.TrimPrefix(strings.TrimSpace(v.MirrorUsername), "@"),
 		"MIRROR_CHANNEL":         strings.TrimSpace(v.MirrorChannel),
-	})
-	if err != nil {
+	}
+	if code, ok := config.NormalizeUILanguage(v.UILanguage); ok {
+		env["UI_LANGUAGE"] = code
+	}
+	if err = UpdateEnv(w.env, env); err != nil {
 		writeError(rw, http.StatusInternalServerError, "cannot write the settings file: "+err.Error())
 		return
 	}

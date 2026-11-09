@@ -97,9 +97,33 @@ message and what to do. Everything else in this file is optional detail.
 - Automatic Movies/Shows naming with TMDB matching
 - Subtitle detection, online fetching and one-time extraction of embedded tracks
 - Optional Seerr, Fladder, torrent download chain, channel forwarding and local media upload
+
+## Languages
+
+The setup page asks for a language first. The panel can change it later, at the bottom of the side menu. The choice is saved on this computer.
+
+| Code | Language |
+| --- | --- |
+| `en` | English |
+| `fa` | فارسی |
+| `de` | Deutsch |
+| `tr` | Türkçe |
+
+The strings live in [`web/src/locales/`](web/src/locales). English is the source file. Persian, German and Turkish are the translations. Edit them on [Hosted Weblate](https://hosted.weblate.org/) by adding this repository as a component:
+
+| Setting | Value |
+| --- | --- |
+| File format | i18next JSON file v3 |
+| File mask | `web/src/locales/*.json` |
+| Monolingual base language file | `web/src/locales/en.json` |
+| Template for new translations | Empty |
+
+A new language is a new `web/src/locales/<code>.json` file. The page only offers `en`, `fa`, `de` and `tr` until that code is added to the list in `web/src/lib/i18n.ts` and `NormalizeUILanguage` in `internal/config/config.go`.
+
 ## Contents
 
 - [Features](#features)
+- [Languages](#languages)
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
 - [Quick start](#quick-start-about-two-minutes)

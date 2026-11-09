@@ -5,16 +5,23 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster } from "sonner"
 import "@/index.css"
 import { ConfirmHost } from "@/components/widgets"
+import { I18nProvider, useUiLang } from "@/lib/i18n"
 import { Shell } from "@/panel/shell"
 import { Accounts, ApiPage, Away, Bots, Channel, Downloads, HomeVideos, Local, Mirrors, News, Overview, Shared, Sources, Subtitles, Telegram } from "@/panel/pages"
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } })
 
+function ToastHost() {
+  useUiLang()
+  return <Toaster position={document.documentElement.dir === "rtl" ? "bottom-left" : "bottom-right"} />
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
+      <I18nProvider>
       <HashRouter>
-        <Toaster position="bottom-right" />
+        <ToastHost />
         <ConfirmHost />
         <Routes>
           <Route element={<Shell />}>
@@ -36,6 +43,7 @@ createRoot(document.getElementById("root")!).render(
           </Route>
         </Routes>
       </HashRouter>
+      </I18nProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

@@ -11,6 +11,7 @@ import { Command as Cmd } from "cmdk"
 import { cva, type VariantProps } from "class-variance-authority"
 import { Check, ChevronDown, Info, Loader2, TriangleAlert, X } from "lucide-react"
 import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from "react"
+import { t } from "@/lib/i18n"
 import { cn } from "@/lib/utils"
 
 const buttonVariants = cva(
@@ -82,7 +83,7 @@ export function DialogContent({ title, children, className }: { title: string; c
       <Dialog.Content className={cn("fixed left-1/2 top-1/2 z-50 w-[min(32rem,calc(100%-2rem))] -translate-x-1/2 -translate-y-1/2 rounded-lg border bg-card p-4 shadow-lg", className)}>
         <div className="mb-3 flex items-start justify-between gap-3">
           <Dialog.Title className="text-base font-semibold">{title}</Dialog.Title>
-          <Dialog.Close className="rounded-md p-1 hover:bg-accent" aria-label="Close"><X className="size-4" /></Dialog.Close>
+          <Dialog.Close className="rounded-md p-1 hover:bg-accent" aria-label={t("Close")}><X className="size-4" /></Dialog.Close>
         </div>
         {children}
       </Dialog.Content>
@@ -96,7 +97,7 @@ export function Sheet({ open, onOpenChange, children }: { open: boolean; onOpenC
       <Dialog.Portal>
         <Dialog.Overlay className="fixed inset-0 z-40 bg-black/40 md:hidden" />
         <Dialog.Content className="fixed inset-y-0 left-0 z-50 w-64 border-r bg-card p-3 shadow-lg md:hidden">
-          <Dialog.Title className="sr-only">Menu</Dialog.Title>
+          <Dialog.Title className="sr-only">{t("Menu")}</Dialog.Title>
           {children}
         </Dialog.Content>
       </Dialog.Portal>

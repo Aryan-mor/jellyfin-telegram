@@ -120,6 +120,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /panel", p.guard(p.handlePage))
 	mux.HandleFunc("GET /panel/state", p.guard(p.handleState))
 	mux.HandleFunc("POST /panel/settings", p.guard(p.handleSettings))
+	mux.HandleFunc("POST /panel/ui-language", p.guard(p.handleUILanguage))
 	mux.HandleFunc("POST /panel/bots", p.guard(p.handleBots))
 	mux.HandleFunc("POST /panel/automation", p.guard(p.handleAutomation))
 	mux.HandleFunc("POST /panel/downloads/login", p.guard(p.handleDownloadLogin))
@@ -210,6 +211,7 @@ type state struct {
 	ChannelID      int64     `json:"channel_id"`
 	ChannelTitle   string    `json:"channel_title,omitempty"`
 	Language       string    `json:"language"`
+	UILanguage     string    `json:"ui_language,omitempty"`
 	Bots           []botView `json:"bots"`
 	Addresses      []address `json:"addresses"`
 	Seerr          bool      `json:"seerr"`
@@ -222,6 +224,26 @@ type state struct {
 	Telegram       any       `json:"telegram,omitempty"`
 	Accounts       []Account `json:"accounts"`
 	Forum          any       `json:"forum,omitempty"`
+}
+
+func (p *panel) handleUILanguage(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Language string `json:"language"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	code, ok := config.NormalizeUILanguage(body.Language)
+	if !ok {
+		writeError(w, http.StatusBadRequest, "pick a language from the list")
+		return
+	}
+	if err := setup.UpdateEnv(p.o.EnvPath, map[string]string{"UI_LANGUAGE": code}); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "language": code})
 }
 
 func (p *panel) handleSearch(w http.ResponseWriter, r *http.Request) {
@@ -812,6 +834,7 @@ type fileSettings struct {
 	hash           string
 	channel        int64
 	language       string
+	uiLanguage     string
 	tokens         []string
 	telegramSearch bool
 }
@@ -838,6 +861,9 @@ func readFile(path string) (fileSettings, error) {
 		return fileSettings{}, fmt.Errorf("TELEGRAM_BOT_TOKENS: %w", err)
 	}
 	s.language = m["SUBTITLE_LANGUAGE"]
+	if code, ok := config.NormalizeUILanguage(m["UI_LANGUAGE"]); ok {
+		s.uiLanguage = code
+	}
 	s.telegramSearch = true
 	if v, ok := m["TELEGRAM_SEARCH"]; ok && strings.EqualFold(strings.TrimSpace(v), "false") {
 		s.telegramSearch = false
@@ -856,7 +882,7 @@ func (p *panel) snapshot() (state, error) {
 			live[b.ID] = b
 		}
 	}
-	s := state{ChannelID: cur.channel, Language: cur.language, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
+	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
 	// The API this build ships with is not a value the person chose. The panel says "default"
 	// and never sends that id, even when only the hash was replaced.
 	if defID, defHash, ok := config.DefaultAPI(); ok && cur.apiID == defID && cur.hash == defHash {

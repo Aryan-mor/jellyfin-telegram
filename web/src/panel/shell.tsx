@@ -7,6 +7,7 @@ import {
 } from "lucide-react"
 import { toast } from "sonner"
 import { api, panelCode, pollingPaused } from "@/lib/api"
+import { adoptServerLanguage, t, UiLanguageSelect, useUiLang } from "@/lib/i18n"
 import { Button, Sheet } from "@/components/ui"
 import { confirmDialog } from "@/components/widgets"
 import { cn } from "@/lib/utils"
@@ -17,6 +18,7 @@ export type PanelState = {
   channel_id: number
   channel_title?: string
   language: string
+  ui_language?: string
   bots: { id: number; name: string; hint: string; ok: boolean; admin: boolean; connected: boolean; error?: string }[]
   addresses: { url: string; away: boolean }[]
   seerr: boolean
@@ -59,6 +61,7 @@ function themeNow() {
 }
 
 export function Shell() {
+  useUiLang()
   const state = usePanel()
   const job = useJob()
   const update = useQuery({
@@ -81,40 +84,44 @@ export function Shell() {
     return () => window.removeEventListener("panel-restart", on)
   }, [])
   useEffect(() => { if (job.data?.restart) setRestart(true) }, [job.data?.restart])
+  useEffect(() => { adoptServerLanguage(state.data?.ui_language) }, [state.data?.ui_language])
   const s = state.data
   const signed = (s?.telegram?.sessions?.length ?? 0) > 0
   const botBad = (s?.bots ?? []).some((b) => b.connected && (!b.ok || !b.admin || b.error))
   const nav = (
     <nav className="flex h-full flex-col gap-4 text-sm">
       <div className="flex items-center gap-2 px-2 text-sm font-semibold"><span className="flex size-7 items-center justify-center rounded-md bg-primary text-primary-foreground"><Send className="size-3.5" /></span>jellyfin-telegram</div>
-      <Nav to="/" label="Overview" icon={<Home className="size-4" />} />
-      <Nav to="/accounts" label="Sign in details" icon={<KeyRound className="size-4" />} />
-      <Group title="Library">
-        <Nav to="/channel" label="Main channel" icon={<Tv className="size-4" />} />
-        <Nav to="/channel/mirrors" label="Mirrors" icon={<Radio className="size-4" />} />
-        <Nav to="/channel/shared" label="Shared library" icon={<Share2 className="size-4" />} />
-        <Nav to="/channel/home" label="Home videos" icon={<Images className="size-4" />} />
-        <Nav to="/channel/subtitles" label="Subtitles" icon={<Languages className="size-4" />} />
+      <Nav to="/" label={t("Overview")} icon={<Home className="size-4" />} />
+      <Nav to="/accounts" label={t("Sign in details")} icon={<KeyRound className="size-4" />} />
+      <Group title={t("Library")}>
+        <Nav to="/channel" label={t("Main channel")} icon={<Tv className="size-4" />} />
+        <Nav to="/channel/mirrors" label={t("Mirrors")} icon={<Radio className="size-4" />} />
+        <Nav to="/channel/shared" label={t("Shared library")} icon={<Share2 className="size-4" />} />
+        <Nav to="/channel/home" label={t("Home videos")} icon={<Images className="size-4" />} />
+        <Nav to="/channel/subtitles" label={t("Subtitles")} icon={<Languages className="size-4" />} />
       </Group>
       <Group title="Telegram">
-        <Nav to="/telegram" label="Accounts" icon={<UserRound className="size-4" />} dot={!signed} />
-        <Nav to="/bots" label="Bots" icon={<Bot className="size-4" />} dot={botBad} />
-        <Nav to="/api" label="API" icon={<Cable className="size-4" />} />
+        <Nav to="/telegram" label={t("Accounts")} icon={<UserRound className="size-4" />} dot={!signed} />
+        <Nav to="/bots" label={t("Bots")} icon={<Bot className="size-4" />} dot={botBad} />
+        <Nav to="/api" label={t("API")} icon={<Cable className="size-4" />} />
       </Group>
-      <Group title="Sources">
-        {s?.sources && signed && <Nav to="/sources" label="Direct files" icon={<Film className="size-4" />} />}
-        {s?.sources && signed && <Nav to="/news" label="News channels" icon={<Newspaper className="size-4" />} />}
-        {s?.local && <Nav to="/local" label="Local files" icon={<HardDrive className="size-4" />} />}
-        {s?.downloads && signed && <Nav to="/downloads" label="Torrents" icon={<CloudDownload className="size-4" />} />}
+      <Group title={t("Sources")}>
+        {s?.sources && signed && <Nav to="/sources" label={t("Direct files")} icon={<Film className="size-4" />} />}
+        {s?.sources && signed && <Nav to="/news" label={t("News channels")} icon={<Newspaper className="size-4" />} />}
+        {s?.local && <Nav to="/local" label={t("Local files")} icon={<HardDrive className="size-4" />} />}
+        {s?.downloads && signed && <Nav to="/downloads" label={t("Torrents")} icon={<CloudDownload className="size-4" />} />}
       </Group>
-      <Group title="Access">
-        <Nav to="/away" label="Away from home" icon={<Globe className="size-4" />} />
+      <Group title={t("Access")}>
+        <Nav to="/away" label={t("Away from home")} icon={<Globe className="size-4" />} />
       </Group>
-      <div className="mt-auto flex items-center justify-between px-2">
-        <span className="text-xs text-muted-foreground">Appearance{update.data?.current ? ` · v${update.data.current}` : ""}</span>
-        <Button type="button" size="icon" variant="ghost" aria-label="Switch light or dark theme" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
+      <div className="mt-auto space-y-2 px-2">
+        <UiLanguageSelect />
+        <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{t("Appearance")}{update.data?.current ? ` · v${update.data.current}` : ""}</span>
+        <Button type="button" size="icon" variant="ghost" aria-label={t("Switch light or dark theme")} onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
           {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
         </Button>
+        </div>
       </div>
     </nav>
   )
@@ -124,21 +131,21 @@ export function Shell() {
       <Sheet open={open} onOpenChange={setOpen}><div onClick={() => setOpen(false)}>{nav}</div></Sheet>
       <div className="min-w-0">
         <div className="flex items-center gap-2 border-b p-2 md:hidden">
-          <Button type="button" size="icon" variant="ghost" aria-label="Open menu" onClick={() => setOpen(true)}><Menu className="size-4" /></Button>
-          <span className="text-sm font-medium">Panel</span>
+          <Button type="button" size="icon" variant="ghost" aria-label={t("Open menu")} onClick={() => setOpen(true)}><Menu className="size-4" /></Button>
+          <span className="text-sm font-medium">{t("Panel")}</span>
         </div>
         {update.data?.available && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-sky-500/15 px-4 py-2 text-sm">
             <span>
-              A new {update.data.channel === "nightly" ? "nightly" : "version"} is out: <b>{update.data.latest}</b> (you have {update.data.current}). Run the installer again. It stays on this channel, and your settings and library are kept.
+              {t("A new {{kind}} is out: {{latest}} (you have {{current}}). Run the installer again. It stays on this channel, and your settings and library are kept.", { kind: update.data.channel === "nightly" ? t("nightly") : t("version"), latest: update.data.latest ?? "", current: update.data.current ?? "" })}
             </span>
-            {update.data.url && <a className="font-medium underline" href={update.data.url} target="_blank" rel="noreferrer">What changed</a>}
+            {update.data.url && <a className="font-medium underline" href={update.data.url} target="_blank" rel="noreferrer">{t("What changed")}</a>}
           </div>
         )}
         {restart && (
           <div className="flex items-center justify-between gap-3 bg-amber-500/15 px-4 py-2 text-sm">
-            <span>Restart needed. New settings apply the next time the program starts.</span>
-            <Button size="sm" disabled={restarting} onClick={() => void restartProgram(setRestarting)}>{restarting ? "Restarting" : "Restart"}</Button>
+            <span>{t("Restart needed. New settings apply the next time the program starts.")}</span>
+            <Button size="sm" disabled={restarting} onClick={() => void restartProgram(setRestarting)}>{restarting ? t("Restarting") : t("Restart")}</Button>
           </div>
         )}
         <main className="mx-auto max-w-4xl space-y-4 p-4">
@@ -151,12 +158,12 @@ export function Shell() {
 }
 
 async function restartProgram(setBusy: (v: boolean) => void) {
-  const ok = await confirmDialog("Restart now?", "Playback stops until the program is back. This usually takes under a minute.", "Restart", false)
+  const ok = await confirmDialog(t("Restart now?"), t("Playback stops until the program is back. This usually takes under a minute."), t("Restart"), false)
   if (!ok) return
   setBusy(true)
   try {
     await api("/panel/restart", {})
-    toast("Restarting")
+    toast(t("Restarting"))
     let sawDown = false
     for (let i = 0; i < 60; i++) {
       await new Promise((r) => setTimeout(r, 1000))
@@ -173,10 +180,10 @@ async function restartProgram(setBusy: (v: boolean) => void) {
         return
       }
     }
-    toast.error("The program did not come back. Start it again from this computer.")
+    toast.error(t("The program did not come back. Start it again from this computer."))
     setBusy(false)
   } catch (e) {
-    toast.error(e instanceof Error ? e.message : "Restart failed")
+    toast.error(e instanceof Error ? e.message : t("Restart failed"))
     setBusy(false)
   }
 }

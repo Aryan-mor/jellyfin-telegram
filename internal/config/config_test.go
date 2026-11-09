@@ -22,7 +22,7 @@ func clearEnv(t *testing.T) {
 			strings.HasPrefix(key, "UPLOAD_") || strings.HasPrefix(key, "DOWNLOADS_") || strings.HasPrefix(key, "BITMAGNET_") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
 			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" ||
-			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" || key == "TELEGRAM_SEARCH" ||
+			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" || key == "TELEGRAM_SEARCH" || key == "UI_LANGUAGE" ||
 			key == "HASHTAG_INDEX_BOT" || key == "TMDB_API_KEY" {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
@@ -219,6 +219,17 @@ func TestSubtitleLanguage(t *testing.T) {
 	}
 	if _, err = load(t, validEnv+"SUBTITLE_LANGUAGE=klingon language\n"); err == nil || !strings.Contains(err.Error(), "SUBTITLE_LANGUAGE") {
 		t.Errorf("bad code gave %v", err)
+	}
+}
+
+func TestUILanguage(t *testing.T) {
+	c, err := load(t, validEnv+"UI_LANGUAGE=FA\n")
+	if err != nil || c.UILanguage != "fa" {
+		t.Errorf("got %q, %v", c.UILanguage, err)
+	}
+	c, err = load(t, validEnv+"UI_LANGUAGE=klingon\n")
+	if err != nil || c.UILanguage != "" {
+		t.Errorf("unknown language should be ignored: %q, %v", c.UILanguage, err)
 	}
 }
 

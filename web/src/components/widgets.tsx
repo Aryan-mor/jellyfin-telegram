@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Check, ChevronDown, Copy, GripVertical, Loader2, X } from "lucide-react"
 import { toast } from "sonner"
+import { t } from "@/lib/i18n"
 import { languageName, languages } from "@/lib/languages"
 import { api, pausePolling } from "@/lib/api"
 import { cn } from "@/lib/utils"
@@ -13,7 +14,7 @@ export function CopyField({ label, value }: { label: string; value: string }) {
         <div className="text-xs text-muted-foreground">{label}</div>
         <code className="block truncate text-sm">{value || "—"}</code>
       </div>
-      <Button type="button" size="sm" variant="outline" onClick={() => { void navigator.clipboard.writeText(value); toast("Copied") }}><Copy className="size-3.5" />Copy</Button>
+      <Button type="button" size="sm" variant="outline" onClick={() => { void navigator.clipboard.writeText(value); toast(t("Copied")) }}><Copy className="size-3.5" />{t("Copy")}</Button>
     </div>
   )
 }
@@ -61,7 +62,7 @@ export function ConfirmHost() {
         <DialogContent title={state.title}>
           <p className="text-sm text-muted-foreground">{state.text}</p>
           <div className="mt-4 flex justify-end gap-2">
-            <Button variant="ghost" size="sm" onClick={() => { state.resolve(false); setState(null) }}>Cancel</Button>
+            <Button variant="ghost" size="sm" onClick={() => { state.resolve(false); setState(null) }}>{t("Cancel")}</Button>
             <Button variant={state.danger ? "destructive" : "default"} size="sm" onClick={() => { state.resolve(true); setState(null) }}>{state.button}</Button>
           </div>
         </DialogContent>
@@ -90,15 +91,15 @@ export function MultiSelect({ value, onChange }: { value: string[]; onChange: (n
       <PopoverRoot open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button type="button" variant="outline" className="h-9 w-full justify-between font-normal">
-            <span className="truncate">{value.length ? value.map(languageName).join(", ") : "No subtitle languages"}</span>
+            <span className="truncate">{value.length ? value.map(languageName).join(", ") : t("No subtitle languages")}</span>
             <ChevronDown className="size-4 opacity-60" />
           </Button>
         </PopoverTrigger>
         <PopoverContent>
           <Command>
-            <CommandInput placeholder="Search languages" />
+            <CommandInput placeholder={t("Search languages")} />
             <CommandList>
-              <CommandEmpty>No language</CommandEmpty>
+              <CommandEmpty>{t("No language")}</CommandEmpty>
               {languages.map(([code, name]) => (
                 <CommandItem key={code} value={name} onSelect={() => toggle(code)}>
                   <Check className={cn("size-3.5", value.includes(code) ? "opacity-100" : "opacity-0")} />
@@ -119,10 +120,10 @@ export function MultiSelect({ value, onChange }: { value: string[]; onChange: (n
             setDrag(null)
           }} className="inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-xs">
             <GripVertical className="size-3 opacity-50" />
-            {i === 0 ? "Preferred · " : ""}{languageName(code)}
-            <button type="button" className="px-0.5" aria-label="Move up" onClick={() => move(code, -1)}>↑</button>
-            <button type="button" className="px-0.5" aria-label="Move down" onClick={() => move(code, 1)}>↓</button>
-            <button type="button" aria-label="Remove" onClick={() => toggle(code)}>×</button>
+            {i === 0 ? t("Preferred · ") : ""}{languageName(code)}
+            <button type="button" className="px-0.5" aria-label={t("Move up")} onClick={() => move(code, -1)}>↑</button>
+            <button type="button" className="px-0.5" aria-label={t("Move down")} onClick={() => move(code, 1)}>↓</button>
+            <button type="button" aria-label={t("Remove")} onClick={() => toggle(code)}>×</button>
           </span>
         ))}
       </div>
@@ -131,10 +132,13 @@ export function MultiSelect({ value, onChange }: { value: string[]; onChange: (n
 }
 
 type LoginStep = "phone" | "code" | "password"
-const loginCopy = {
-  phone: { title: "Your Telegram phone number", help: "Use the account that is an admin of the channel, with the country code. Telegram sends nothing until you press the button.", button: "Send code" },
-  code: { title: "Enter the code", help: "Telegram sent a code to the Telegram app on that account, or by text message. It stays valid for a few minutes.", button: "Confirm code" },
-  password: { title: "Two-step verification", help: "This account has a password. It goes to Telegram only and is not saved here.", button: "Sign in" },
+function loginCopy(step: LoginStep) {
+  const copy = {
+    phone: { title: t("Your Telegram phone number"), help: t("Use the account that is an admin of the channel, with the country code. Telegram sends nothing until you press the button."), button: t("Send code") },
+    code: { title: t("Enter the code"), help: t("Telegram sent a code to the Telegram app on that account, or by text message. It stays valid for a few minutes."), button: t("Confirm code") },
+    password: { title: t("Two-step verification"), help: t("This account has a password. It goes to Telegram only and is not saved here."), button: t("Sign in") },
+  }
+  return copy[step]
 }
 
 export function LoginForm({ path, extra, onDone, resend }: { path: string; extra?: Record<string, string>; onDone: () => void; resend?: boolean }) {
@@ -144,7 +148,7 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
   const [err, setErr] = useState("")
   const [busy, setBusy] = useState(false)
   const lock = useRef(false)
-  const copy = loginCopy[step]
+  const copy = loginCopy(step)
   async function next() {
     if (lock.current) return
     lock.current = true
@@ -155,7 +159,7 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
       if (res.note) setNote(res.note)
       if (res.step === "code" || res.step === "password") { setStep(res.step); setValue(""); if (res.warning) setErr(res.warning); return }
       onDone()
-    } catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong") }
+    } catch (e) { setErr(e instanceof Error ? e.message : t("Something went wrong")) }
     finally { lock.current = false; setBusy(false) }
   }
   return (
@@ -167,8 +171,8 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
       <Input disabled={busy} value={value} onChange={(e) => setValue(e.target.value)} type={step === "password" ? "password" : "text"} inputMode={step === "phone" ? "tel" : step === "code" ? "numeric" : undefined} autoComplete={step === "code" ? "one-time-code" : "off"} placeholder={step === "phone" ? "+15551212" : step === "code" ? "12345" : ""} onKeyDown={(e) => { if (e.key === "Enter") void next() }} />
       {err && <p className="text-sm text-destructive">{err}</p>}
       <div className="flex justify-end gap-2">
-        {resend && step === "code" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { if (lock.current) return; lock.current = true; setBusy(true); void api<{ note?: string }>(path, { resend: true }).then((r) => { if (r.note) setNote(r.note); toast("Asked Telegram to send it another way") }).catch((e) => setErr(e instanceof Error ? e.message : "Something went wrong")).finally(() => { lock.current = false; setBusy(false) }) }}>Send by text message</Button>}
-        {step !== "phone" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { if (lock.current) return; void api(path, { cancel: true }); setStep("phone"); setValue("") }}>Change number</Button>}
+        {resend && step === "code" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { if (lock.current) return; lock.current = true; setBusy(true); void api<{ note?: string }>(path, { resend: true }).then((r) => { if (r.note) setNote(r.note); toast(t("Asked Telegram to send it another way")) }).catch((e) => setErr(e instanceof Error ? e.message : t("Something went wrong"))).finally(() => { lock.current = false; setBusy(false) }) }}>{t("Send by text message")}</Button>}
+        {step !== "phone" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { if (lock.current) return; void api(path, { cancel: true }); setStep("phone"); setValue("") }}>{t("Change number")}</Button>}
         <Button type="button" size="sm" loading={busy} onClick={() => void next()}>{copy.button}</Button>
       </div>
     </div>
@@ -179,7 +183,7 @@ export function TelegramLoginDialog({ open, onOpenChange, onDone }: { open: bool
   useEffect(() => { pausePolling(open); return () => { if (open) pausePolling(false) } }, [open])
   return (
     <DialogRoot open={open} onOpenChange={(v) => { if (!v) void api("/panel/downloads/login", { cancel: true }).catch(() => {}); onOpenChange(v) }}>
-      {open && <DialogContent title="Add account"><LoginForm path="/panel/downloads/login" onDone={() => { onOpenChange(false); onDone() }} /></DialogContent>}
+      {open && <DialogContent title={t("Add account")}><LoginForm path="/panel/downloads/login" onDone={() => { onOpenChange(false); onDone() }} /></DialogContent>}
     </DialogRoot>
   )
 }

@@ -48,6 +48,9 @@ type Config struct {
 	// subtitle handling off.
 	SubtitleLanguage  string
 	SubtitleLanguages []string
+	// UILanguage is the language of the setup page and the panel: en, fa, de or tr.
+	// Empty leaves the choice to the browser.
+	UILanguage string
 	SubtitlesOnline   bool
 	FFprobePath       string
 
@@ -153,6 +156,16 @@ var (
 	DefaultAPIID   string
 	DefaultAPIHash string
 )
+
+// NormalizeUILanguage accepts the panel and setup languages.
+func NormalizeUILanguage(raw string) (string, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "en", "fa", "de", "tr":
+		return strings.ToLower(strings.TrimSpace(raw)), true
+	default:
+		return "", false
+	}
+}
 
 // DefaultAPI returns the built-in Telegram app, and false when this build has none.
 func DefaultAPI() (id int, hash string, ok bool) {
@@ -273,6 +286,9 @@ func Load(envPath string) (Config, error) {
 			c.SubtitleLanguages = codes
 			c.SubtitleLanguage = codes[0]
 		}
+	}
+	if code, ok := NormalizeUILanguage(get("UI_LANGUAGE", "")); ok {
+		c.UILanguage = code
 	}
 	c.JellyfinManaged = c.JellyfinURL == "" && !strings.EqualFold(get("JELLYFIN_MANAGED", "true"), "false")
 	withJellyfin := c.JellyfinManaged || c.JellyfinURL != ""

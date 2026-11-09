@@ -72,4 +72,11 @@
 * { border-color: var(--border); }
 html, body, #root { min-height: 100%; }
 body { margin: 0; background: var(--background); color: var(--foreground); font-family: "Inter", ui-sans-serif, system-ui, sans-serif; font-feature-settings: "cv11", "ss01"; -webkit-font-smoothing: antialiased; }
+html[lang="fa"] body { font-family: Tahoma, "Noto Naskh Arabic", "Segoe UI", sans-serif; font-feature-settings: normal; }
+html[dir="rtl"] .text-left { text-align: right; }
+html[dir="rtl"] .text-right { text-align: left; }
+html[dir="rtl"] .pl-4 { padding-left: 0; padding-right: 1rem; }
+html[dir="rtl"] .pl-5 { padding-left: 0; padding-right: 1.25rem; }
+html[dir="rtl"] .pr-4 { padding-right: 0; padding-left: 1rem; }
+html[dir="rtl"] .pr-9 { padding-right: 0; padding-left: 2.25rem; }
 code, kbd { font-family: "JetBrains Mono", ui-monospace, Consolas, monospace; font-size: 0.85em; }
