@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
-  Bot, Cable, CloudDownload, Film, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
+  Bot, Cable, CloudDownload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
   Radio, Send, Share2, Sun, Tv, UserRound,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -115,6 +115,7 @@ export function Shell() {
         <Nav to="/api" label={t("API")} icon={<Cable className="size-4" />} />
       </Group>
       <Group title={t("Sources")}>
+        <Nav to="/sources/filter" label={t("Auto-add filter")} icon={<Filter className="size-4" />} />
         {s?.sources && signed && <Nav to="/sources" label={t("Direct files")} icon={<Film className="size-4" />} />}
         {s?.sources && signed && <Nav to="/news" label={t("News channels")} icon={<Newspaper className="size-4" />} />}
         {s?.local && <Nav to="/local" label={t("Local files")} icon={<HardDrive className="size-4" />} />}

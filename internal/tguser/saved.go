@@ -107,6 +107,9 @@ func (m *Manager) ForwardSaved(ctx context.Context, ids []int) error {
 			DropAuthor: true,
 		}
 		_, err := api.MessagesForwardMessages(ctx, req)
+		if err == nil {
+			lv.clock.hold(forwardGap(len(ids)))
+		}
 		return nil, err
 	})
 	return err

@@ -2,13 +2,18 @@ package tgsearch
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/autofilter"
 )
 
 // Keys under which the trending source remembers its day.
@@ -16,60 +21,6 @@ const (
 	trendingDayKey  = "tgsearch.trending.day"
 	trendingListKey = "tgsearch.trending.list"
 )
-
-// DefaultGenres are the genres a trending title may have when no list is configured.
-var DefaultGenres = []string{
-	"Action", "Adventure", "Animation", "Comedy", "Crime", "Documentary", "Drama", "Family", "Fantasy",
-	"History", "Horror", "Music", "Mystery", "Romance", "Science Fiction", "Thriller", "War", "Western",
-	"Action & Adventure", "Sci-Fi & Fantasy", "War & Politics", "Kids",
-}
-
-// TrendingFilter decides which trending titles are searched for. It applies to trending only; a
-// Seerr request is always searched.
-type TrendingFilter struct {
-	// AllowAdult lets titles that TMDB flags as adult, or that carry an erotic genre, through.
-	AllowAdult bool
-	// Include lists the genres a title must share at least one of. Empty means DefaultGenres.
-	Include []string
-	// Exclude lists genres that reject a title, even when it is also in Include.
-	Exclude []string
-}
-
-// Allows reports whether a title with these properties passes. Genre names are compared without
-// regard to case.
-func (f TrendingFilter) Allows(adult bool, genres []string) bool {
-	erotic := false
-	for _, g := range genres {
-		if strings.Contains(strings.ToLower(g), "erotic") {
-			erotic = true
-		}
-	}
-	if (adult || erotic) && !f.AllowAdult {
-		return false
-	}
-	include := f.Include
-	if len(include) == 0 {
-		include = DefaultGenres
-	}
-	has := func(list []string, g string) bool {
-		for _, x := range list {
-			if strings.EqualFold(strings.TrimSpace(x), g) {
-				return true
-			}
-		}
-		return false
-	}
-	ok := false
-	for _, g := range genres {
-		if has(f.Exclude, g) {
-			return false
-		}
-		if has(include, g) {
-			ok = true
-		}
-	}
-	return ok
-}
 
 // Trending turns TMDB's daily trending list into search queries. It fetches once a day, keeps
 // the day's list so the repeated passes of that day search the same titles, and caps how many
@@ -79,8 +30,11 @@ type Trending struct {
 	// Key is the TMDB API key (v3 key or v4 read token).
 	Key string
 	// Base is the TMDB API root. Empty uses the public one.
-	Base   string
-	Filter TrendingFilter
+	Base string
+	// Filter decides which titles are searched. Settings, when set, is read on every fetch instead,
+	// so a saved change applies without a restart. A Seerr request never passes through either.
+	Filter   autofilter.Filter
+	Settings func() autofilter.Filter
 	// Top is how many trending titles are looked at. Default 20.
 	Top int
 	// MaxPerDay caps the titles searched per day. Default 10.
@@ -104,21 +58,32 @@ func (t *Trending) now() time.Time {
 	return time.Now()
 }
 
-// Queries returns the day's titles, fetching the list on the first call of each day.
+func (t *Trending) filter() autofilter.Filter {
+	if t.Settings != nil {
+		return t.Settings()
+	}
+	return t.Filter
+}
+
+// Queries returns the day's titles, fetching the list on the first call of each day and again
+// when the filter changes.
 func (t *Trending) Queries(ctx context.Context) ([]Query, error) {
 	if t == nil || strings.TrimSpace(t.Key) == "" {
 		return nil, nil
 	}
-	today := t.now().Format("2006-01-02")
-	if last, list, ok := t.load(ctx); ok && last == today {
+	f := t.filter()
+	raw, _ := json.Marshal(f)
+	sum := sha256.Sum256(raw)
+	stamp := t.now().Format("2006-01-02") + " " + hex.EncodeToString(sum[:8])
+	if last, list, ok := t.load(ctx); ok && last == stamp {
 		return list, nil
 	}
-	list, err := t.fetch(ctx)
+	list, err := t.fetch(ctx, f)
 	if err != nil {
 		// Not marked as run, so the next pass tries again.
 		return nil, err
 	}
-	t.save(ctx, today, list)
+	t.save(ctx, stamp, list)
 	return list, nil
 }
 
@@ -156,9 +121,12 @@ type trendItem struct {
 	GenreIDs     []int  `json:"genre_ids"`
 	ReleaseDate  string `json:"release_date"`
 	FirstAirDate string `json:"first_air_date"`
+	// Series carry their origin countries here; films do not, so details fill them in.
+	OriginCountry    []string `json:"origin_country"`
+	OriginalLanguage string   `json:"original_language"`
 }
 
-func (t *Trending) fetch(ctx context.Context) ([]Query, error) {
+func (t *Trending) fetch(ctx context.Context, filter autofilter.Filter) ([]Query, error) {
 	var page struct {
 		Results []trendItem `json:"results"`
 	}
@@ -203,12 +171,25 @@ func (t *Trending) fetch(ctx context.Context) ([]Query, error) {
 				genres = append(genres, n)
 			}
 		}
-		if !t.Filter.Allows(it.Adult, genres) {
+		title := autofilter.Title{Adult: it.Adult, Genres: genres, Countries: it.OriginCountry}
+		if it.OriginalLanguage != "" {
+			title.Languages = []string{it.OriginalLanguage}
+		}
+		var d details
+		fetched := false
+		more := func() autofilter.Title {
+			d, fetched = t.details(ctx, it.ID, movie), true
+			return autofilter.Title{Countries: d.countries, Networks: d.networks}
+		}
+		if !filter.Allows(title, more) {
 			continue
 		}
 		q := Query{TMDB: it.ID, Movie: movie}
 		if movie {
-			q.Runtime = t.runtime(ctx, it.ID)
+			if !fetched {
+				d = t.details(ctx, it.ID, true)
+			}
+			q.Runtime = d.runtime
 		}
 		out = append(out, q)
 	}
@@ -244,16 +225,79 @@ func (t *Trending) genreNames(ctx context.Context) (map[int]string, error) {
 	return out, nil
 }
 
-// runtime asks for a film's running time in minutes. A failure leaves it unknown, which only turns
-// the runtime check off.
-func (t *Trending) runtime(ctx context.Context, id int) int {
+// GenreNames lists TMDB's English genre names for films and series, sorted and without repeats.
+func GenreNames(ctx context.Context, key string) ([]string, error) {
+	ids, err := (&Trending{Key: key}).genreNames(ctx)
+	if err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var out []string
+	for _, n := range ids {
+		if !seen[n] {
+			seen[n] = true
+			out = append(out, n)
+		}
+	}
+	sort.Strings(out)
+	return out, nil
+}
+
+// details is what one more TMDB call tells about a title. Nil lists mean unknown.
+type details struct {
+	runtime   int
+	countries []string
+	networks  []string
+}
+
+// details asks for a film's running time, origin countries and streaming providers in one call, or
+// a series' networks and origin countries. A failure leaves everything unknown, which only turns
+// the runtime check off and keeps those filter parts from being positive.
+func (t *Trending) details(ctx context.Context, id int, movie bool) details {
 	var res struct {
-		Runtime int `json:"runtime"`
+		Runtime             int      `json:"runtime"`
+		OriginCountry       []string `json:"origin_country"`
+		ProductionCountries []struct {
+			Code string `json:"iso_3166_1"`
+		} `json:"production_countries"`
+		Networks []struct {
+			ID int `json:"id"`
+		} `json:"networks"`
+		Providers struct {
+			Results map[string]struct {
+				Flatrate []struct {
+					ID int `json:"provider_id"`
+				} `json:"flatrate"`
+			} `json:"results"`
+		} `json:"watch/providers"`
 	}
-	if err := t.get(ctx, fmt.Sprintf("/movie/%d", id), nil, &res); err != nil {
-		return 0
+	path, q := fmt.Sprintf("/tv/%d", id), url.Values(nil)
+	if movie {
+		path, q = fmt.Sprintf("/movie/%d", id), url.Values{"append_to_response": {"watch/providers"}}
 	}
-	return res.Runtime
+	if err := t.get(ctx, path, q, &res); err != nil {
+		return details{}
+	}
+	d := details{runtime: res.Runtime, countries: append([]string{}, res.OriginCountry...)}
+	if len(d.countries) == 0 {
+		for _, c := range res.ProductionCountries {
+			d.countries = append(d.countries, c.Code)
+		}
+	}
+	var ids []int
+	if movie {
+		for _, region := range res.Providers.Results {
+			for _, p := range region.Flatrate {
+				ids = append(ids, p.ID)
+			}
+		}
+	} else {
+		for _, n := range res.Networks {
+			ids = append(ids, n.ID)
+		}
+	}
+	d.networks = autofilter.NetworksOf(ids, !movie)
+	return d
 }
 
 func (t *Trending) get(ctx context.Context, path string, q url.Values, into any) error {

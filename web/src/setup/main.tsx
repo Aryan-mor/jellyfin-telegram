@@ -6,6 +6,7 @@ import "@/index.css"
 import { api, panelCode } from "@/lib/api"
 import { I18nProvider, setUiLang, t, uiLang, uiLanguages, useUiLang } from "@/lib/i18n"
 import { Button, Card, CardBody, Checkbox, FieldLabel, Input, SwitchBox, Textarea } from "@/components/ui"
+import { AutoFilterForm } from "@/components/autofilter"
 import { ConfirmHost, confirmDialog, LoginForm, MultiSelect, ProgressSteps } from "@/components/widgets"
 
 const client = new QueryClient()
@@ -22,7 +23,7 @@ function randomMirror() {
 type Found = { channel_id: number; title: string; bots: string[]; skipped?: string[] }
 type Job = { running: boolean; progress: { text: string; state: string }[]; error?: string; owned?: { username: string; name?: string }[]; kept?: string[]; found?: Found }
 type Status = { stage: string; percent: number; ready: boolean; error?: string; urls?: string[]; user?: string; password?: string; seerr?: boolean; fladder?: boolean }
-type Step = "language" | "login" | "channel" | "bots" | "prefs" | "done"
+type Step = "language" | "login" | "channel" | "bots" | "prefs" | "filter" | "done"
 
 function languagePicked() {
   return sessionStorage.getItem("jftg-ui-picked") === "1"
@@ -40,7 +41,7 @@ function Setup() {
   const [picked, setPicked] = useState<string[]>([])
   const [langs, setLangs] = useState<string[]>([])
   const [title, setTitle] = useState(() => (languagePicked() ? t("Jellyfin library") : ""))
-  const [bots, setBots] = useState(3)
+  const [bots, setBots] = useState(5)
   const [channel, setChannel] = useState("")
   const [manual, setManual] = useState({ api_id: "", api_hash: "", channel: "", bots: "" })
   const [prefs, setPrefs] = useState({ fladder: false, seerr: true, downloads: false, group: true, telegram_search: true, jellyfin_url: "", jellyfin_key: "" })
@@ -121,8 +122,8 @@ function Setup() {
         <div className="text-sm font-semibold">jellyfin-telegram <span className="font-normal text-muted-foreground">{t("First-time setup")}</span></div>
         {signedIn && step !== "done" && step !== "language" && <Button size="sm" variant="ghost" disabled={!!busy} loading={busy === "out"} onClick={() => void signOut()}>{t("Sign out")}</Button>}
       </div>
-      {step !== "language" && <ol className="flex gap-2 text-xs text-muted-foreground">
-        {(["Sign in", "Channel", "Bots", "Subtitles", "Done"] as const).map((label, i) => <li key={label} className={i <= ["login", "channel", "bots", "prefs", "done"].indexOf(step) ? "font-medium text-foreground" : ""}>{i + 1}. {t(label)}</li>)}
+      {step !== "language" && <ol className="flex flex-wrap gap-x-2 text-xs text-muted-foreground">
+        {(["Sign in", "Channel", "Bots", "Subtitles", "Filter", "Done"] as const).map((label, i) => <li key={label} className={i <= ["login", "channel", "bots", "prefs", "filter", "done"].indexOf(step) ? "font-medium text-foreground" : ""}>{i + 1}. {t(label)}</li>)}
       </ol>}
       <Card><CardBody className="space-y-3">
         {step === "language" && <>
@@ -174,8 +175,9 @@ function Setup() {
             <FieldLabel>{t("Channel name")}</FieldLabel>
             <Input value={title} onChange={(e) => setTitle(e.target.value)} />
             <FieldLabel>{t("Number of bots")}</FieldLabel>
-            <Input type="number" min={1} max={10} value={bots} onChange={(e) => setBots(Number(e.target.value))} />
-            <div className="flex justify-end"><Button size="sm" disabled={!!busy} loading={busy === "create"} onClick={() => run("create", () => api("/setup/auto/create", { title, channel, bots }))}>{t("Create channel and bots")}</Button></div>
+            <Input type="number" min={2} max={10} value={bots} onChange={(e) => setBots(Number(e.target.value))} />
+            <p className="text-sm text-muted-foreground">{t("Five is the usual number. Two or more is enough if Telegram will not make all of them.")}</p>
+            <div className="flex justify-end"><Button size="sm" disabled={!!busy || bots < 2 || bots > 10} loading={busy === "create"} onClick={() => run("create", () => api("/setup/auto/create", { title, channel, bots }))}>{t("Create channel and bots")}</Button></div>
           </>}
           <ProgressSteps lines={job?.progress ?? []} />
           {job?.error && <p className="text-sm text-destructive">{job.error}</p>}
@@ -256,7 +258,15 @@ function Setup() {
               <Input placeholder={t("API key")} value={prefs.jellyfin_key} onChange={(e) => setPrefs({ ...prefs, jellyfin_key: e.target.value })} />
             </>}
           </div>
-          <div className="flex justify-end"><Button size="sm" disabled={!!busy} loading={busy === "save"} onClick={() => run("save", () => save(mode === "auto"))}>{t("Save and install")}</Button></div>
+          <div className="flex justify-end"><Button size="sm" disabled={!!busy} onClick={() => setStep("filter")}>{t("Continue")}</Button></div>
+        </>}
+        {step === "filter" && <>
+          <h1 className="text-lg font-semibold">{t("Auto-add filter")}</h1>
+          <p className="text-sm text-muted-foreground">{t("Choose which trending titles are added to the library by themselves. Skip to set this later in the panel.")}</p>
+          <AutoFilterForm path="/setup/auto-filter" saveLabel={t("Save and install")} onSaved={() => save(mode === "auto")} extra={<>
+            <Button type="button" size="sm" variant="ghost" disabled={!!busy} onClick={() => setStep("prefs")}>{t("Back")}</Button>
+            <Button type="button" size="sm" variant="outline" disabled={!!busy} loading={busy === "save"} onClick={() => run("save", () => save(mode === "auto"))}>{t("Skip")}</Button>
+          </>} />
         </>}
         {step === "done" && status?.ready && !status.error && <>
           <h1 className="text-lg font-semibold">{t("Installed")}</h1>

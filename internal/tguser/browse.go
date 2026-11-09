@@ -246,6 +246,7 @@ func (m *Manager) History(ctx context.Context, ref SourceRef, offsetID, limit in
 			delete(lv.hashes, ref.ChannelID)
 			return nil, err
 		}
+		lv.clock.hold(historyGap)
 		msgs := searchMessages(res)
 		out := Page{More: len(msgs) >= limit}
 		see := func(id, date int) {
@@ -360,6 +361,9 @@ func (m *Manager) Copy(ctx context.Context, ref SourceRef, ids []int) error {
 			DropAuthor: true,
 		}
 		_, err = api.MessagesForwardMessages(ctx, req)
+		if err == nil {
+			lv.clock.hold(forwardGap(len(ids)))
+		}
 		return nil, err
 	})
 	return err

@@ -32,8 +32,8 @@ type Settings struct {
 	NeedTitle bool `json:"need_title"`
 	// MaxPerDay caps how many videos are copied per day across every channel.
 	MaxPerDay int `json:"max_per_day"`
-	// PauseSeconds is the longest rest between bursts of 20 to 50 videos. Each rest is a random
-	// time between 10 seconds and this. Zero means no rest.
+	// PauseSeconds is the longest rest between bursts of 4 to 8 videos. Each rest is a random
+	// time between 20 seconds and this. Zero means no extra rest; the account clock still waits.
 	PauseSeconds int `json:"pause_seconds"`
 }
 
@@ -41,7 +41,7 @@ type Settings struct {
 func Defaults() Settings {
 	return Settings{
 		LookBackDays: 7, EveryMinutes: 30, MinMinutes: 15, MinMB: 100,
-		SkipWords: "trailer,teaser,sample,promo", MaxPerDay: 500, PauseSeconds: 60,
+		SkipWords: "trailer,teaser,sample,promo", MaxPerDay: 500, PauseSeconds: 120,
 	}
 }
 

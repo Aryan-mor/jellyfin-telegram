@@ -99,6 +99,14 @@ type Wizard struct {
 	auto   Auto
 	st     autoState
 	notify func(Status)
+
+	// AutoFilter serves the auto-add filter under /setup. Set it before Handler or Waiting.
+	AutoFilter Mounter
+}
+
+// Mounter adds endpoints to a page, behind that page's code check.
+type Mounter interface {
+	Mount(mux *http.ServeMux, prefix string, guard func(http.HandlerFunc) http.HandlerFunc)
 }
 
 // New returns a Wizard that writes to the settings file at envPath.
@@ -155,6 +163,9 @@ func (w *Wizard) Handler() http.Handler {
 		w.mu.Unlock()
 		writeJSON(rw, http.StatusOK, s)
 	}))
+	if w.AutoFilter != nil {
+		w.AutoFilter.Mount(mux, "/setup", w.guard)
+	}
 	return mux
 }
 

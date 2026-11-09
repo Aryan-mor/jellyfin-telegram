@@ -184,7 +184,7 @@ func (s *Service) record(ctx context.Context, src catalog.Source, err error) boo
 		s.setNote("The daily limit is reached. News links continue tomorrow.")
 		return true
 	}
-	if _, ok := tgerr.AsFloodWait(err); ok {
+	if _, ok := tgerr.AsFloodWait(err); ok || errors.Is(err, ErrSlowDown) {
 		s.setNote("Telegram asked for a pause. News links continue on the next check.")
 		return true
 	}
@@ -283,6 +283,15 @@ func (s *Service) one(ctx context.Context, src catalog.Source, hit tguser.StartH
 	s.setNote("Opening " + hit.URL)
 	posts, err := s.Open.Open(ctx, hit.URL)
 	if err != nil {
+		if errors.Is(err, ErrSlowDown) {
+			// Leave the link pending and do not spend a try. The next posts wait
+			// on the same account clock instead of each recording their own error.
+			row.State, row.Detail = "pending", ""
+			if perr := s.Cat.PutNewsLink(ctx, row); perr != nil {
+				return perr
+			}
+			return err
+		}
 		row.Tries++
 		row.Detail = err.Error()
 		row.State = "pending"
@@ -357,6 +366,11 @@ func (s *Service) one(ctx context.Context, src catalog.Source, hit tguser.StartH
 
 func (s *Service) forward(ctx context.Context, src catalog.Source, row catalog.NewsLink, posts []tguser.Post) error {
 	if err := s.TG.ForwardSaved(ctx, row.SavedID); err != nil {
+		if _, ok := tgerr.AsFloodWait(err); ok || errors.Is(err, ErrSlowDown) {
+			row.Detail = ""
+			_ = s.Cat.PutNewsLink(ctx, row)
+			return err
+		}
 		row.Detail = err.Error()
 		_ = s.Cat.PutNewsLink(ctx, row)
 		return err

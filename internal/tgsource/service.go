@@ -23,7 +23,9 @@ const (
 	settingsKey = "tgsource_settings"
 	pageSize    = 100
 	// maxFloodWait is the longest Telegram wait that is slept out inside a pass.
-	maxFloodWait = 10 * time.Minute
+	// Shorter than this used to give up and try again within minutes, which only
+	// lengthened the wait. 3281 seconds is inside this limit.
+	maxFloodWait = 90 * time.Minute
 )
 
 // Telegram is what the service needs from the signed-in accounts.
@@ -387,8 +389,8 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 	sort.Slice(want, func(i, j int) bool { return want[i].ID < want[j].ID })
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
 	for len(want) > 0 {
-		// A random burst of 20 to 50 videos goes out, then a random rest of 10 seconds up to the
-		// pause setting, so the beat is never the same twice.
+		// A short random burst goes out, then a random rest, so the beat is never the same twice.
+		// The account clock in tguser spaces the request itself; this rest is on top of that.
 		n := min(pace.Burst(), len(want))
 		batch := want[:n]
 		want = want[n:]

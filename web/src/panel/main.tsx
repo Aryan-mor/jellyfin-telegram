@@ -7,7 +7,7 @@ import "@/index.css"
 import { ConfirmHost } from "@/components/widgets"
 import { I18nProvider, useUiLang } from "@/lib/i18n"
 import { Shell } from "@/panel/shell"
-import { Accounts, ApiPage, Away, Bots, Channel, Downloads, HomeVideos, Local, Mirrors, News, Overview, Shared, Sources, Subtitles, Telegram } from "@/panel/pages"
+import { Accounts, ApiPage, AutoFilter, Away, Bots, Channel, Downloads, HomeVideos, Local, Mirrors, News, Overview, Shared, Sources, Subtitles, Telegram } from "@/panel/pages"
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } })
 
@@ -35,6 +35,7 @@ createRoot(document.getElementById("root")!).render(
             <Route path="telegram" element={<Telegram />} />
             <Route path="bots" element={<Bots />} />
             <Route path="api" element={<ApiPage />} />
+            <Route path="sources/filter" element={<AutoFilter />} />
             <Route path="sources" element={<Sources />} />
             <Route path="news" element={<News />} />
             <Route path="local" element={<Local />} />

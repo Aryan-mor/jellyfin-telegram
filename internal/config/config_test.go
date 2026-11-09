@@ -64,7 +64,7 @@ func TestLoadValid(t *testing.T) {
 	if len(c.BotTokens) != 2 || c.BotTokens[1] != "222:bbb" {
 		t.Errorf("tokens = %v", c.BotTokens)
 	}
-	if c.BotConcurrency != 4 || c.ReadaheadBlocks != 8 || c.CacheBytes != 4<<30 {
+	if c.BotConcurrency != 1 || c.ReadaheadBlocks != 8 || c.CacheBytes != 4<<30 {
 		t.Errorf("defaults = %+v", c)
 	}
 	if c.JellyfinEnabled() {

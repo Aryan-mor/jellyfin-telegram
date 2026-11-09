@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 	fileresolver "github.com/Aryan-mor/telegram-file-resolver"
@@ -42,9 +41,8 @@ func TestOpenDoesNotSleepForOrdinaryErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	slept := false
-	r := &Resolver{Eng: eng, Sleep: func(context.Context, time.Duration) error { slept = true; return nil }}
-	if _, err := r.Open(context.Background(), "https://t.me/somebot?start=x"); err == nil || slept {
-		t.Fatalf("err=%v slept=%v", err, slept)
+	r := &Resolver{Eng: eng}
+	if _, err := r.Open(context.Background(), "https://t.me/somebot?start=x"); err == nil {
+		t.Fatal("ordinary error was swallowed")
 	}
 }

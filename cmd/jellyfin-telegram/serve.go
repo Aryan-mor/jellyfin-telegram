@@ -72,6 +72,7 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 	if err != nil {
 		return err
 	}
+	wizard.AutoFilter = autoFilter(envPath)
 	var entry front.Switch
 	entry.Set(wizard.Waiting())
 	srv := &http.Server{Addr: cfg.GatewayListen, Handler: &entry, ReadHeaderTimeout: 15 * time.Second}
@@ -546,6 +547,7 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		ForumDo:      forumDo(envPath, cat, hub, pool),
 		Verify:       verifyTelegram(dataDir, log),
 		Restart:      func() error { return scheduleRestart(restartStop) },
+		AutoFilter:   autoFilter(envPath),
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
 			for _, st := range pool.Statuses() {

@@ -77,3 +77,58 @@ func TestABotLinkIsReviewedThenForwardedOnce(t *testing.T) {
 		t.Fatalf("copied %v %v", same, err)
 	}
 }
+
+func TestAFloodStopsTheChannelInsteadOfOpeningEveryLink(t *testing.T) {
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cat.Close() })
+	ctx := context.Background()
+	src, err := cat.AddNews(ctx, catalog.Source{ChannelID: 50, Title: "Cinema Fans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	tg := &fakeTG{page: tguser.Page{
+		Highest: 3, Lowest: 1,
+		Links: []tguser.StartHit{
+			{ID: 3, Date: now, URL: "https://t.me/bot?start=a"},
+			{ID: 2, Date: now, URL: "https://t.me/bot?start=b"},
+			{ID: 1, Date: now, URL: "https://t.me/bot?start=c"},
+		},
+	}}
+	op := &failOpen{}
+	svc := New()
+	svc.Cat, svc.TG, svc.Open = cat, tg, op
+	set := Defaults()
+	set.Enabled = true
+	set.PauseSeconds = 0
+	if err := svc.Save(ctx, set); err != nil {
+		t.Fatal(err)
+	}
+	svc.Pass(ctx)
+	if op.calls != 1 {
+		t.Fatalf("opened %d links after a flood, want 1", op.calls)
+	}
+	row, ok, err := cat.GetNewsLink(ctx, "https://t.me/bot?start=a")
+	if err != nil || !ok || row.Tries != 0 || row.Detail != "" {
+		t.Fatalf("link %+v ok %v err %v", row, ok, err)
+	}
+	got, err := cat.NewsChannels(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, ch := range got {
+		if ch.ID == src.ID && ch.Error != "" {
+			t.Fatalf("flood was stored on the channel: %s", ch.Error)
+		}
+	}
+}
+
+type failOpen struct{ calls int }
+
+func (f *failOpen) Open(context.Context, string) ([]tguser.Post, error) {
+	f.calls++
+	return nil, ErrSlowDown
+}

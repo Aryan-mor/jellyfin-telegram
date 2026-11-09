@@ -1626,7 +1626,7 @@
       "file_type": "code",
       "norm_label": "adoptserverlanguage()",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L84"
+      "source_location": "L85"
     },
     {
       "id": "src_lib_i18n_applydom",
@@ -1650,7 +1650,7 @@
       "file_type": "code",
       "norm_label": "i18nprovider()",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L100"
+      "source_location": "L101"
     },
     {
       "id": "src_lib_i18n_isui",
@@ -1710,7 +1710,7 @@
       "file_type": "code",
       "norm_label": "uilanguageselect()",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L105"
+      "source_location": "L106"
     },
     {
       "id": "src_lib_i18n_useuilang",
@@ -1722,7 +1722,7 @@
       "file_type": "code",
       "norm_label": "useuilang()",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L90"
+      "source_location": "L91"
     },
     {
       "id": "src_panel_main_toasthost",
@@ -1770,7 +1770,7 @@
       "file_type": "code",
       "norm_label": "group()",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L191"
+      "source_location": "L200"
     },
     {
       "id": "src_panel_shell_nav",
@@ -1782,7 +1782,7 @@
       "file_type": "code",
       "norm_label": "nav()",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L195"
+      "source_location": "L204"
     },
     {
       "id": "src_panel_shell_restartprogram",
@@ -1794,7 +1794,7 @@
       "file_type": "code",
       "norm_label": "restartprogram()",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L160"
+      "source_location": "L169"
     },
     {
       "id": "src_panel_shell_shell",
@@ -4403,7 +4403,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L85",
+      "source_location": "L86",
       "weight": 1.0
     },
     {
@@ -4415,7 +4415,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L87",
+      "source_location": "L88",
       "weight": 1.0
     },
     {
@@ -4427,7 +4427,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L101",
+      "source_location": "L102",
       "weight": 1.0
     },
     {
@@ -4475,7 +4475,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L73",
+      "source_location": "L74",
       "weight": 1.0
     },
     {
@@ -4487,7 +4487,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L106",
+      "source_location": "L107",
       "weight": 1.0
     },
     {
@@ -4499,7 +4499,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L109",
+      "source_location": "L110",
       "weight": 1.0
     },
     {
@@ -4511,7 +4511,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L114",
+      "source_location": "L115",
       "weight": 1.0
     },
     {
@@ -8579,7 +8579,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L197",
+      "source_location": "L206",
       "weight": 1.0
     },
     {
@@ -8591,7 +8591,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L161",
+      "source_location": "L170",
       "weight": 1.0
     },
     {
@@ -8603,7 +8603,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L161",
+      "source_location": "L170",
       "weight": 1.0
     },
     {
@@ -8615,7 +8615,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L165",
+      "source_location": "L174",
       "weight": 1.0
     },
     {
@@ -8627,7 +8627,31 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L172",
+      "source_location": "L181",
+      "weight": 1.0
+    },
+    {
+      "source": "src_panel_shell_shell",
+      "target": "src_panel_shell_nav",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/panel/shell.tsx",
+      "source_location": "L103",
+      "weight": 1.0
+    },
+    {
+      "source": "src_panel_shell_shell",
+      "target": "src_panel_shell_group",
+      "relation": "calls",
+      "_origin": "ast",
+      "confidence": "EXTRACTED",
+      "confidence_score": 1.0,
+      "context": "call",
+      "source_file": "src/panel/shell.tsx",
+      "source_location": "L105",
       "weight": 1.0
     },
     {
@@ -8639,7 +8663,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L118",
+      "source_location": "L127",
       "weight": 1.0
     },
     {
@@ -8651,7 +8675,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L121",
+      "source_location": "L130",
       "weight": 1.0
     },
     {
@@ -8663,7 +8687,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L131",
+      "source_location": "L140",
       "weight": 1.0
     },
     {
@@ -8675,7 +8699,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L148",
+      "source_location": "L157",
       "weight": 1.0
     },
     {
@@ -8759,31 +8783,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L94",
-      "weight": 1.0
-    },
-    {
-      "source": "src_panel_shell_shell",
-      "target": "src_panel_shell_nav",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "src/panel/shell.tsx",
-      "source_location": "L94",
-      "weight": 1.0
-    },
-    {
-      "source": "src_panel_shell_shell",
-      "target": "src_panel_shell_group",
-      "relation": "calls",
-      "_origin": "ast",
-      "confidence": "EXTRACTED",
-      "confidence_score": 1.0,
-      "context": "call",
-      "source_file": "src/panel/shell.tsx",
-      "source_location": "L96",
+      "source_location": "L92",
       "weight": 1.0
     },
     {
@@ -8951,7 +8951,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/setup/main.tsx",
-      "source_location": "L180",
+      "source_location": "L181",
       "weight": 1.0
     },
     {
@@ -8963,7 +8963,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/setup/main.tsx",
-      "source_location": "L191",
+      "source_location": "L192",
       "weight": 1.0
     },
     {
@@ -8975,7 +8975,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/setup/main.tsx",
-      "source_location": "L197",
+      "source_location": "L198",
       "weight": 1.0
     },
     {
@@ -8987,7 +8987,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/setup/main.tsx",
-      "source_location": "L200",
+      "source_location": "L201",
       "weight": 1.0
     },
     {
@@ -8999,7 +8999,7 @@
       "confidence_score": 1.0,
       "context": "call",
       "source_file": "src/setup/main.tsx",
-      "source_location": "L265",
+      "source_location": "L266",
       "weight": 1.0
     },
     {
@@ -13181,7 +13181,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L100",
+      "source_location": "L101",
       "weight": 1.0
     },
     {
@@ -13192,7 +13192,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L105",
+      "source_location": "L106",
       "weight": 1.0
     },
     {
@@ -13335,7 +13335,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L84",
+      "source_location": "L85",
       "weight": 1.0
     },
     {
@@ -13346,7 +13346,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/lib/i18n.tsx",
-      "source_location": "L90",
+      "source_location": "L91",
       "weight": 1.0
     },
     {
@@ -14094,7 +14094,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L160",
+      "source_location": "L169",
       "weight": 1.0
     },
     {
@@ -14105,7 +14105,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L191",
+      "source_location": "L200",
       "weight": 1.0
     },
     {
@@ -14116,7 +14116,7 @@
       "confidence": "EXTRACTED",
       "confidence_score": 1.0,
       "source_file": "src/panel/shell.tsx",
-      "source_location": "L195",
+      "source_location": "L204",
       "weight": 1.0
     },
     {
@@ -14788,5 +14788,5 @@
     }
   ],
   "hyperedges": [],
-  "built_at_commit": "92342ff0b6998fb386bf02c78c0715f60d047531"
+  "built_at_commit": "96d16864630b42d1b35f9c515efc35613c99297a"
 }

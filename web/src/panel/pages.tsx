@@ -10,6 +10,7 @@ import {
   Alert, Button, Card, CardBody, Checkbox, Collapse, Disclosure, Empty, FieldLabel, Input, Progress, Select,
   SwitchBox, Table, TBody, TD, TH, THead, Toggles, TR,
 } from "@/components/ui"
+import { AutoFilterForm } from "@/components/autofilter"
 import { confirmDialog, CopyField, MultiSelect, ProgressSteps, StatusBadge, TelegramLoginDialog, type Tone } from "@/components/widgets"
 import { useJob, usePanel, type PanelState, type Session } from "@/panel/shell"
 
@@ -516,6 +517,16 @@ export function Subtitles() {
   )
 }
 
+// ---------- Auto-add filter ----------
+
+export function AutoFilter() {
+  return (
+    <Page title={t("Auto-add filter")} text={t("Choose which trending titles are added to the library by themselves.")}>
+      <Section><AutoFilterForm path="/panel/auto-filter" needsChange /></Section>
+    </Page>
+  )
+}
+
 // ---------- Telegram account ----------
 
 export function Telegram() {
@@ -817,7 +828,7 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
           <Num label={t("Smallest file, MB")} k="min_mb" draft={draft} />
           <Num label={t("Largest file, GB")} k="max_gb" draft={draft} />
           <Num label={t("Most videos per day")} k="max_per_day" draft={draft} />
-          <Num label={t("Longest rest between bursts of 20-50 files, seconds")} k="pause_seconds" draft={draft} />
+          <Num label={t("Longest rest between bursts of 4-8 files, seconds")} k="pause_seconds" draft={draft} />
         </div>
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5"><FieldLabel>{t("Skip words")}</FieldLabel><Input value={draft.value.skip_words || ""} placeholder={t("trailer, sample")} onChange={(e) => draft.set({ ...draft.value!, skip_words: e.target.value })} /></div>

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
+	"github.com/gotd/td/tgerr"
 )
 
 // View is one session as the panel shows it.
@@ -65,6 +66,9 @@ type live struct {
 	errText   atomic.Value // string
 	// hashes caches channel access hashes for this account. Only the session loop touches it.
 	hashes map[int64]int64
+	// clock is this account's only timer. Channel checks, forwards and bot-link
+	// opens all wait on it.
+	clock clock
 }
 
 type call struct {
@@ -239,7 +243,16 @@ func (m *Manager) serveOnce(ctx context.Context, lv *live) error {
 			case <-ctx.Done():
 				return ctx.Err()
 			case op := <-lv.ops:
+				if err := lv.clock.wait(ctx); err != nil {
+					op.resp <- result{nil, err}
+					continue
+				}
 				val, err := op.fn(ctx, api)
+				if wait, ok := tgerr.AsFloodWait(err); ok && wait > 0 {
+					// The wait belongs to the account, not to the job that tripped it.
+					lv.clock.hold(wait + 2*time.Second)
+					m.noteFlood(lv)
+				}
 				op.resp <- result{val, err}
 			}
 		}

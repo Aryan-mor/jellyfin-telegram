@@ -71,9 +71,19 @@ export function ConfirmHost() {
   )
 }
 
-export function MultiSelect({ value, onChange }: { value: string[]; onChange: (next: string[]) => void }) {
+export type Option = { id: string; name: string }
+
+// MultiSelect picks subtitle languages in order of preference. Given options, it picks from those
+// instead, without an order; omit hides options that are taken elsewhere.
+export function MultiSelect({ value, onChange, options, omit, placeholder, search, empty }: {
+  value: string[]; onChange: (next: string[]) => void
+  options?: Option[]; omit?: string[]; placeholder?: string; search?: string; empty?: string
+}) {
   const [open, setOpen] = useState(false)
   const [drag, setDrag] = useState<string | null>(null)
+  const ordered = !options
+  const list = options ?? languages.map(([id, name]) => ({ id, name }))
+  const nameOf = (code: string) => (options ? options.find((o) => o.id === code)?.name ?? code : languageName(code))
   function toggle(code: string) {
     onChange(value.includes(code) ? value.filter((c) => c !== code) : [...value, code])
   }
@@ -91,16 +101,16 @@ export function MultiSelect({ value, onChange }: { value: string[]; onChange: (n
       <PopoverRoot open={open} onOpenChange={setOpen}>
         <PopoverTrigger asChild>
           <Button type="button" variant="outline" className="h-9 w-full justify-between font-normal">
-            <span className="truncate">{value.length ? value.map(languageName).join(", ") : t("No subtitle languages")}</span>
+            <span className="truncate">{value.length ? value.map(nameOf).join(", ") : placeholder ?? t("No subtitle languages")}</span>
             <ChevronDown className="size-4 opacity-60" />
           </Button>
         </PopoverTrigger>
         <PopoverContent>
           <Command>
-            <CommandInput placeholder={t("Search languages")} />
+            <CommandInput placeholder={search ?? t("Search languages")} />
             <CommandList>
-              <CommandEmpty>{t("No language")}</CommandEmpty>
-              {languages.map(([code, name]) => (
+              <CommandEmpty>{empty ?? t("No language")}</CommandEmpty>
+              {list.filter((o) => !omit?.includes(o.id) || value.includes(o.id)).map(({ id: code, name }) => (
                 <CommandItem key={code} value={name} onSelect={() => toggle(code)}>
                   <Check className={cn("size-3.5", value.includes(code) ? "opacity-100" : "opacity-0")} />
                   {name}
@@ -112,17 +122,17 @@ export function MultiSelect({ value, onChange }: { value: string[]; onChange: (n
       </PopoverRoot>
       <div className="flex flex-wrap gap-1">
         {value.map((code, i) => (
-          <span key={code} draggable onDragStart={() => setDrag(code)} onDragOver={(e) => e.preventDefault()} onDrop={() => {
+          <span key={code} draggable={ordered} onDragStart={() => setDrag(code)} onDragOver={(e) => e.preventDefault()} onDrop={() => {
             if (!drag || drag === code) return
             const next = value.filter((c) => c !== drag)
             next.splice(next.indexOf(code), 0, drag)
             onChange(next)
             setDrag(null)
           }} className="inline-flex h-7 items-center gap-1 rounded-full border bg-card px-2 text-xs">
-            <GripVertical className="size-3 opacity-50" />
-            {i === 0 ? t("Preferred · ") : ""}{languageName(code)}
-            <button type="button" className="px-0.5" aria-label={t("Move up")} onClick={() => move(code, -1)}>↑</button>
-            <button type="button" className="px-0.5" aria-label={t("Move down")} onClick={() => move(code, 1)}>↓</button>
+            {ordered && <GripVertical className="size-3 opacity-50" />}
+            {ordered && i === 0 ? t("Preferred · ") : ""}{nameOf(code)}
+            {ordered && <button type="button" className="px-0.5" aria-label={t("Move up")} onClick={() => move(code, -1)}>↑</button>}
+            {ordered && <button type="button" className="px-0.5" aria-label={t("Move down")} onClick={() => move(code, 1)}>↓</button>}
             <button type="button" aria-label={t("Remove")} onClick={() => toggle(code)}>×</button>
           </span>
         ))}

@@ -62,6 +62,7 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 			}
 			hits = append(hits, hitFrom(peer.ChannelID, channels[peer.ChannelID], post))
 		}
+		lv.clock.hold(searchGap)
 		return hits, nil
 	})
 	if err != nil {

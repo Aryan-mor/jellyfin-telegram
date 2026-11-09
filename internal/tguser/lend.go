@@ -35,6 +35,8 @@ func lent[T any](ctx context.Context, l *Lent, fn func(context.Context, *tg.Clie
 	if err != nil {
 		return zero, err
 	}
+	// A link can take several calls. They share this account's clock.
+	l.lv.clock.hold(resolverGap)
 	out, _ := val.(T)
 	return out, nil
 }

@@ -247,7 +247,8 @@ func Load(envPath string) (Config, error) {
 		fail("TELEGRAM_BOT_TOKENS: %v", err)
 	}
 
-	c.BotConcurrency = getInt("TELEGRAM_BOT_CONCURRENCY", 4, fail)
+	// One call at a time per bot. Extra bots add capacity; one bot does not run a pile of timers.
+	c.BotConcurrency = getInt("TELEGRAM_BOT_CONCURRENCY", 1, fail)
 	if c.BotConcurrency < 1 {
 		fail("TELEGRAM_BOT_CONCURRENCY must be at least 1")
 	}

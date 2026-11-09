@@ -5,10 +5,14 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
 
+	"github.com/joho/godotenv"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/autofilter"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hashindex"
@@ -51,13 +55,10 @@ func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, source
 		want = append(want, &tgsearch.Seerr{Base: (&seerr.Server{}).URL(), Root: filepath.Join(cfg.DataDir, "seerr")})
 	}
 	if cfg.TrendingSearch && strings.TrimSpace(cfg.TMDBAPIKey) != "" {
+		// Only trending is filtered. Seerr requests above are always searched.
 		tr := &tgsearch.Trending{
 			Key: cfg.TMDBAPIKey, MaxPerDay: cfg.TrendingMaxPerDay,
-			Filter: tgsearch.TrendingFilter{
-				AllowAdult: cfg.TrendingAllowAdult,
-				Include:    tgsearch.ParseList(cfg.TrendingGenres),
-				Exclude:    tgsearch.ParseList(cfg.TrendingExcludeGenres),
-			},
+			Settings: func() autofilter.Filter { return autofilter.Load(envPath) },
 		}
 		if cat != nil {
 			tr.Store = cat
@@ -315,6 +316,23 @@ func sourcesDo(svc *tgsource.Service, news *newsfeed.Service) func(*http.Request
 		return nil
 	}
 	return sourceActions(svc, news)
+}
+
+// autoFilter serves the auto-add filter. Genres come from TMDB when a key is saved, so the setup
+// page can offer them as soon as one is entered.
+func autoFilter(envPath string) *autofilter.Server {
+	return &autofilter.Server{EnvPath: envPath, Genres: func(ctx context.Context) ([]string, error) {
+		key := os.Getenv("TMDB_API_KEY")
+		if m, err := godotenv.Read(envPath); err == nil {
+			if v, ok := m["TMDB_API_KEY"]; ok {
+				key = v
+			}
+		}
+		if strings.TrimSpace(key) == "" {
+			return nil, nil
+		}
+		return tgsearch.GenreNames(ctx, key)
+	}}
 }
 
 // sessionsView lists the signed-in accounts for the panel's account tab.

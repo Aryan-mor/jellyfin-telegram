@@ -89,6 +89,8 @@ type Options struct {
 	Job func() JobView
 	// Restart starts the program again so new settings apply. Nil means the button is not available.
 	Restart func() error
+	// AutoFilter serves the auto-add filter under /panel. It may be nil.
+	AutoFilter setup.Mounter
 }
 
 // ErrBusy means a create job is already running.
@@ -144,6 +146,9 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /panel/update", p.guard(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, version.Check(r.Context()))
 	}))
+	if o.AutoFilter != nil {
+		o.AutoFilter.Mount(mux, "/panel", p.guard)
+	}
 	return mux
 }
 

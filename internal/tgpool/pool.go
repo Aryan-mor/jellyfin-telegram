@@ -24,6 +24,9 @@ const (
 	acquirePollDelay = 25 * time.Millisecond
 	floodMargin      = time.Second
 	warmBytes        = 4096
+	// botGap is the rest after one call on a bot. The next call on that same bot
+	// waits, so several jobs do not each keep a timer.
+	botGap = 500 * time.Millisecond
 )
 
 // ErrMessageGone means the message no longer holds the expected document.
@@ -56,6 +59,7 @@ type slot struct {
 	inflight   int
 	floodUntil time.Time
 	benchUntil time.Time
+	gapUntil   time.Time
 	calls      int64
 	floods     int64
 }
@@ -513,7 +517,7 @@ func (p *Pool) tryAcquire(now time.Time) *slot {
 	for i := range p.slots {
 		idx := (p.next + i) % len(p.slots)
 		s := p.slots[idx]
-		if s.inflight >= p.concurrency || now.Before(s.floodUntil) || now.Before(s.benchUntil) || !s.w.status().Ready {
+		if s.inflight >= p.concurrency || now.Before(s.floodUntil) || now.Before(s.benchUntil) || now.Before(s.gapUntil) || !s.w.status().Ready {
 			continue
 		}
 		if best == nil || s.inflight < best.inflight {
@@ -534,6 +538,7 @@ func (p *Pool) release(s *slot, ok bool) {
 	s.inflight--
 	if ok {
 		s.calls++
+		s.gapUntil = time.Now().Add(botGap)
 	}
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strconv"
 	"strings"
@@ -352,7 +353,11 @@ func (w *Wizard) autoCreate(rw http.ResponseWriter, r *http.Request) {
 	}
 	rememberAPI(w)
 	if b.Bots == 0 {
-		b.Bots = 3
+		b.Bots = 5
+	}
+	if b.Bots < 2 || b.Bots > tgsetup.MaxBots {
+		writeError(rw, http.StatusBadRequest, "choose between 2 and 10 bots")
+		return
 	}
 	w.mu.Lock()
 	if w.st.job.running {
@@ -371,6 +376,12 @@ func (w *Wizard) autoCreate(rw http.ResponseWriter, r *http.Request) {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
 		defer cancel()
 		found, err := w.auto.Create(ctx, AutoCreate{Title: b.Title, Channel: b.Channel, Bots: b.Bots}, w.push)
+		// Two bots are enough to play. A later BotFather refusal must not throw away the ones that exist.
+		if err != nil && len(found.Tokens) >= 2 {
+			found.Owned = nil
+			w.push(fmt.Sprintf("%d bots are ready. That is enough to start.", len(found.Tokens)), "ok")
+			err = nil
+		}
 		w.mu.Lock()
 		defer w.mu.Unlock()
 		w.finish(found, err)

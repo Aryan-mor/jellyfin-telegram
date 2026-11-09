@@ -9,11 +9,12 @@ import (
 
 const (
 	// MinBurst and MaxBurst bound how many posts go out back to back.
-	MinBurst = 20
-	MaxBurst = 50
+	// A burst of dozens of forwards is what made Telegram answer FLOOD_WAIT of many minutes.
+	MinBurst = 4
+	MaxBurst = 8
 	// MinPause and MaxPause bound the wait after a burst.
-	MinPause = 10 * time.Second
-	MaxPause = time.Minute
+	MinPause = 20 * time.Second
+	MaxPause = 3 * time.Minute
 )
 
 // Burst returns a random number of posts to send before pausing.

@@ -13,6 +13,7 @@ import (
 
 	"github.com/gotd/td/tgerr"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/autofilter"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -333,34 +334,6 @@ func TestSearchesRunOneAtATime(t *testing.T) {
 	}
 }
 
-func TestTrendingFilter(t *testing.T) {
-	f := TrendingFilter{}
-	if !f.Allows(false, []string{"Action", "Drama"}) {
-		t.Error("action rejected")
-	}
-	if f.Allows(true, []string{"Action"}) {
-		t.Error("adult flag passed")
-	}
-	if f.Allows(false, []string{"Action", "Erotic"}) {
-		t.Error("erotic genre passed")
-	}
-	if f.Allows(false, nil) {
-		t.Error("title without genres passed")
-	}
-	if !(TrendingFilter{AllowAdult: true}).Allows(true, []string{"Drama"}) {
-		t.Error("allow-adult ignored")
-	}
-	if (TrendingFilter{Include: []string{"comedy"}}).Allows(false, []string{"Action"}) {
-		t.Error("include list ignored")
-	}
-	if !(TrendingFilter{Include: []string{"comedy"}}).Allows(false, []string{"Comedy"}) {
-		t.Error("include match is case sensitive")
-	}
-	if (TrendingFilter{Exclude: []string{"Horror"}}).Allows(false, []string{"Action", "Horror"}) {
-		t.Error("exclude beaten by include")
-	}
-}
-
 type memState map[string]string
 
 func (m memState) StateValue(_ context.Context, k string) (string, error) { return m[k], nil }
@@ -405,7 +378,7 @@ func TestTrendingQueriesOncePerDay(t *testing.T) {
 	state := memState{}
 	mk := func() *Trending {
 		return &Trending{Key: "k", Base: srv.URL, Store: state, Now: func() time.Time { return now },
-			Filter: TrendingFilter{Exclude: []string{"Horror"}}, MaxPerDay: 2}
+			Filter: autofilter.Filter{Genres: autofilter.Rule{Exclude: []string{"Horror"}}}, MaxPerDay: 2}
 	}
 	qs, err := mk().Queries(context.Background())
 	if err != nil {

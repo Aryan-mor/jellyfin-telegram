@@ -223,7 +223,7 @@ func (a *autoSetup) runner() (*tgsetup.Runner, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &tgsetup.Runner{S: users, Pause: 8 * time.Second}, nil
+	return &tgsetup.Runner{S: users, Pause: 20 * time.Second}, nil
 }
 
 func foundOf(f tgsetup.Found) setup.AutoFound {
