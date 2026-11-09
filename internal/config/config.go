@@ -50,9 +50,9 @@ type Config struct {
 	SubtitleLanguages []string
 	// UILanguage is the language of the setup page and the panel: en, fa, de or tr.
 	// Empty leaves the choice to the browser.
-	UILanguage string
-	SubtitlesOnline   bool
-	FFprobePath       string
+	UILanguage      string
+	SubtitlesOnline bool
+	FFprobePath     string
 
 	// ExtractBytesPerSecond limits background subtitle extraction. Zero turns it off.
 	ExtractBytesPerSecond int64
