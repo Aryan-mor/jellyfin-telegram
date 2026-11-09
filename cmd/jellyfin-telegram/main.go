@@ -32,6 +32,12 @@ func main() {
 	flag.Usage = func() { fmt.Fprint(os.Stderr, usage) }
 	flag.Parse()
 
+	// A console window is not the service. Closing it must not stop Jellyfin. serve moves itself
+	// into the background first; check and bench stay in the terminal so their result is visible.
+	if flag.NArg() == 0 || flag.Arg(0) == "serve" {
+		backgroundIfInteractive()
+	}
+
 	level := slog.LevelInfo
 	if *verbose {
 		level = slog.LevelDebug
@@ -104,5 +110,15 @@ func logOutput() io.Writer {
 	if err != nil {
 		return os.Stderr
 	}
-	return io.MultiWriter(os.Stderr, f)
+	// The terminal goes away once serve leaves the console. A failed stderr write must not drop
+	// the line that was going to the file.
+	return io.MultiWriter(stderrOrNothing{}, f)
+}
+
+// stderrOrNothing writes to the terminal and reports success even when there is no terminal.
+type stderrOrNothing struct{}
+
+func (stderrOrNothing) Write(p []byte) (int, error) {
+	_, _ = os.Stderr.Write(p)
+	return len(p), nil
 }

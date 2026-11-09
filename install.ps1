@@ -39,7 +39,8 @@ Remove-Item $zip
 $task = 'jellyfin-telegram'
 $action = New-ScheduledTaskAction -Execute $exe -Argument 'serve' -WorkingDirectory $dir
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -ExecutionTimeLimit ([TimeSpan]::Zero) -RestartCount 3 -RestartInterval (New-TimeSpan -Minutes 1)
+$settings.Hidden = $true
 Register-ScheduledTask -TaskName $task -Action $action -Trigger $trigger -Settings $settings -Force | Out-Null
 
 # A shortcut on the Desktop and in the Start menu that opens the panel in the browser.
@@ -48,5 +49,7 @@ foreach ($folder in @([Environment]::GetFolderPath('Desktop'), [Environment]::Ge
   if ($folder) { Set-Content -Path (Join-Path $folder 'jellyfin-telegram panel.url') -Value $url -Encoding ASCII }
 }
 
-Write-Host 'Starting. The setup page opens in your browser; sign in with your phone number there.'
-Start-Process -FilePath $exe -WorkingDirectory $dir
+Write-Host 'Starting in the background. This window can be closed. It also starts when you sign in to Windows.'
+Write-Host 'The setup page opens in your browser; sign in with your phone number there.'
+# The scheduled task is the process that stays up. A window started here would die when closed.
+Start-ScheduledTask -TaskName $task
