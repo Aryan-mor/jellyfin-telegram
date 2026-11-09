@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Check, ChevronDown, Copy, GripVertical, Loader2, X } from "lucide-react"
 import { toast } from "sonner"
 import { languageName, languages } from "@/lib/languages"
@@ -143,8 +143,11 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
   const [note, setNote] = useState("")
   const [err, setErr] = useState("")
   const [busy, setBusy] = useState(false)
+  const lock = useRef(false)
   const copy = loginCopy[step]
   async function next() {
+    if (lock.current) return
+    lock.current = true
     setBusy(true); setErr("")
     try {
       const body = step === "phone" ? { phone: value.trim(), ...extra } : step === "code" ? { code: value.trim() } : { password: value }
@@ -153,7 +156,7 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
       if (res.step === "code" || res.step === "password") { setStep(res.step); setValue(""); if (res.warning) setErr(res.warning); return }
       onDone()
     } catch (e) { setErr(e instanceof Error ? e.message : "Something went wrong") }
-    finally { setBusy(false) }
+    finally { lock.current = false; setBusy(false) }
   }
   return (
     <div className="space-y-3">
@@ -161,12 +164,12 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
         <h3 className="font-medium">{copy.title}</h3>
         <p className="text-sm text-muted-foreground">{note || copy.help}</p>
       </div>
-      <Input value={value} onChange={(e) => setValue(e.target.value)} type={step === "password" ? "password" : "text"} inputMode={step === "phone" ? "tel" : step === "code" ? "numeric" : undefined} autoComplete={step === "code" ? "one-time-code" : "off"} placeholder={step === "phone" ? "+15551212" : step === "code" ? "12345" : ""} onKeyDown={(e) => { if (e.key === "Enter") void next() }} />
+      <Input disabled={busy} value={value} onChange={(e) => setValue(e.target.value)} type={step === "password" ? "password" : "text"} inputMode={step === "phone" ? "tel" : step === "code" ? "numeric" : undefined} autoComplete={step === "code" ? "one-time-code" : "off"} placeholder={step === "phone" ? "+15551212" : step === "code" ? "12345" : ""} onKeyDown={(e) => { if (e.key === "Enter") void next() }} />
       {err && <p className="text-sm text-destructive">{err}</p>}
       <div className="flex justify-end gap-2">
-        {resend && step === "code" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { setBusy(true); void api<{ note?: string }>(path, { resend: true }).then((r) => { if (r.note) setNote(r.note); toast("Asked Telegram to send it another way") }).catch((e) => setErr(e instanceof Error ? e.message : "Something went wrong")).finally(() => setBusy(false)) }}>Send by text message</Button>}
-        {step !== "phone" && <Button type="button" variant="ghost" size="sm" onClick={() => { void api(path, { cancel: true }); setStep("phone"); setValue("") }}>Change number</Button>}
-        <Button type="button" size="sm" disabled={busy} onClick={() => void next()}>{copy.button}</Button>
+        {resend && step === "code" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { if (lock.current) return; lock.current = true; setBusy(true); void api<{ note?: string }>(path, { resend: true }).then((r) => { if (r.note) setNote(r.note); toast("Asked Telegram to send it another way") }).catch((e) => setErr(e instanceof Error ? e.message : "Something went wrong")).finally(() => { lock.current = false; setBusy(false) }) }}>Send by text message</Button>}
+        {step !== "phone" && <Button type="button" variant="ghost" size="sm" disabled={busy} onClick={() => { if (lock.current) return; void api(path, { cancel: true }); setStep("phone"); setValue("") }}>Change number</Button>}
+        <Button type="button" size="sm" loading={busy} onClick={() => void next()}>{copy.button}</Button>
       </div>
     </div>
   )

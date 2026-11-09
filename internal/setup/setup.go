@@ -39,11 +39,13 @@ type Values struct {
 	Group bool `json:"group"`
 	// TelegramSearch looks up a requested title on Telegram and copies a file it finds.
 	TelegramSearch bool `json:"telegram_search"`
-	// Mirror asks the first start to create a public channel for films and series.
+	// Mirror asks the first start to set up a public channel for films and series.
+	// MirrorChannel, when set, is a channel the user already has. Otherwise a new one is created.
 	// The title and username are optional; empty ones are chosen at random.
 	Mirror         bool   `json:"mirror"`
 	MirrorTitle    string `json:"mirror_title"`
 	MirrorUsername string `json:"mirror_username"`
+	MirrorChannel  string `json:"mirror_channel"`
 	// Auto means the Telegram details come from the automatic setup held on the server: the
 	// api_id, the channel and the bot tokens never pass through the browser.
 	Auto bool `json:"auto"`
@@ -276,6 +278,7 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		"MIRROR_SETUP":           fmt.Sprint(v.Mirror),
 		"MIRROR_TITLE":           strings.TrimSpace(v.MirrorTitle),
 		"MIRROR_USERNAME":        strings.TrimPrefix(strings.TrimSpace(v.MirrorUsername), "@"),
+		"MIRROR_CHANNEL":         strings.TrimSpace(v.MirrorChannel),
 	})
 	if err != nil {
 		writeError(rw, http.StatusInternalServerError, "cannot write the settings file: "+err.Error())

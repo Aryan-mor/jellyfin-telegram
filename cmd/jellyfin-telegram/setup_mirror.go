@@ -3,13 +3,17 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"log/slog"
 	"os"
 	"strings"
 	"time"
 
+	"github.com/gotd/td/tg"
+
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/mirror"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
@@ -24,11 +28,12 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 	}
 	clear := func() {
 		if err := setup.UpdateEnv(envPath, map[string]string{
-			"MIRROR_SETUP": "false", "MIRROR_TITLE": "", "MIRROR_USERNAME": "",
+			"MIRROR_SETUP": "false", "MIRROR_TITLE": "", "MIRROR_USERNAME": "", "MIRROR_CHANNEL": "",
 		}); err != nil {
 			log.Warn("cannot clear the mirror request", "err", err)
 		}
 		_ = os.Setenv("MIRROR_SETUP", "false")
+		_ = os.Setenv("MIRROR_CHANNEL", "")
 	}
 	list, err := cat.Mirrors(ctx)
 	if err != nil {
@@ -49,6 +54,17 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 	if err != nil {
 		log.Warn("public mirror was not created", "err", err)
 		clear()
+		return
+	}
+	if raw := strings.TrimSpace(os.Getenv("MIRROR_CHANNEL")); raw != "" {
+		wizard.SetStatus(setup.Status{Stage: "Adding the public mirror", Percent: 99})
+		mctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+		defer cancel()
+		err := attachExistingMirror(mctx, cat, pool, users, cfg.ChannelID, botID, raw)
+		clear()
+		if err != nil {
+			log.Warn("public mirror was not added", "err", err)
+		}
 		return
 	}
 	title := strings.TrimSpace(os.Getenv("MIRROR_TITLE"))
@@ -72,6 +88,55 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 	if err != nil {
 		log.Warn("public mirror was not created", "err", err)
 	}
+}
+
+func attachExistingMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, main, botID int64, raw string) error {
+	channelID, username, err := mirror.ParseTarget(raw)
+	if err != nil {
+		return err
+	}
+	if channelID != 0 && channelID == main {
+		return errors.New("that is the main channel")
+	}
+	name, err := poolBotName(pool, botID)
+	if err != nil {
+		return err
+	}
+	_, err = users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+		ch, err := tguser.ResolveChannelInput(ctx, api, raw)
+		if err != nil {
+			return nil, err
+		}
+		if ch.ID == main {
+			return nil, errors.New("that is the main channel")
+		}
+		u, err := tgsetup.ResolveBot(ctx, api, name)
+		if err != nil {
+			return nil, err
+		}
+		return nil, tgsetup.PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
+	})
+	if err != nil {
+		return err
+	}
+	id, title, err := pool.AcceptMirror(ctx, botID, channelID, username)
+	if err != nil {
+		return err
+	}
+	if id == main {
+		return errors.New("that is the main channel")
+	}
+	row, err := cat.AddMirror(ctx, id, botID, title, []string{"movie", "series"})
+	if err != nil {
+		return err
+	}
+	if username != "" {
+		if err := cat.SetMirrorUsername(ctx, row.ID, username); err != nil {
+			return err
+		}
+	}
+	_ = muteMirror(ctx, users, id)
+	return nil
 }
 
 func fallbackMirrorTitle() string {

@@ -120,8 +120,27 @@ func TestSaveRecordsThePublicMirror(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got["MIRROR_SETUP"] != "true" || got["MIRROR_TITLE"] != "Films ab12cd" || got["MIRROR_USERNAME"] != "films_ab12cd" {
-		t.Fatalf("mirror settings = %q %q %q", got["MIRROR_SETUP"], got["MIRROR_TITLE"], got["MIRROR_USERNAME"])
+	if got["MIRROR_SETUP"] != "true" || got["MIRROR_TITLE"] != "Films ab12cd" || got["MIRROR_USERNAME"] != "films_ab12cd" || got["MIRROR_CHANNEL"] != "" {
+		t.Fatalf("mirror settings = %q %q %q %q", got["MIRROR_SETUP"], got["MIRROR_TITLE"], got["MIRROR_USERNAME"], got["MIRROR_CHANNEL"])
+	}
+}
+
+func TestSaveRecordsAnExistingMirror(t *testing.T) {
+	w, srv, env := rig(t, nil)
+	v := good
+	v.Mirror = true
+	v.MirrorChannel = " https://t.me/films "
+	res := post(t, srv.URL+"/setup/save?code="+w.Code(), v)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("status %d", res.StatusCode)
+	}
+	got, err := godotenv.Read(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got["MIRROR_SETUP"] != "true" || got["MIRROR_CHANNEL"] != "https://t.me/films" || got["MIRROR_TITLE"] != "" || got["MIRROR_USERNAME"] != "" {
+		t.Fatalf("mirror settings = %q %q %q %q", got["MIRROR_SETUP"], got["MIRROR_CHANNEL"], got["MIRROR_TITLE"], got["MIRROR_USERNAME"])
 	}
 }
 

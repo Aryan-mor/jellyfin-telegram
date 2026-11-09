@@ -9,7 +9,7 @@ import * as SelectPrimitive from "@radix-ui/react-select"
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox"
 import { Command as Cmd } from "cmdk"
 import { cva, type VariantProps } from "class-variance-authority"
-import { Check, ChevronDown, Info, TriangleAlert, X } from "lucide-react"
+import { Check, ChevronDown, Info, Loader2, TriangleAlert, X } from "lucide-react"
 import { type ButtonHTMLAttributes, type ComponentProps, type ReactNode } from "react"
 import { cn } from "@/lib/utils"
 
@@ -34,9 +34,14 @@ const buttonVariants = cva(
   },
 )
 
-export function Button({ className, variant, size, asChild, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants> & { asChild?: boolean }) {
+export function Button({ className, variant, size, asChild, loading, children, disabled, ...props }: ButtonHTMLAttributes<HTMLButtonElement> & VariantProps<typeof buttonVariants> & { asChild?: boolean; loading?: boolean }) {
   const Comp = asChild ? Slot : "button"
-  return <Comp className={cn(buttonVariants({ variant, size }), className)} {...props} />
+  return (
+    <Comp className={cn(buttonVariants({ variant, size }), className)} disabled={disabled || loading} {...props}>
+      {!asChild && loading && <Loader2 className="size-3.5 animate-spin" />}
+      {children}
+    </Comp>
+  )
 }
 
 export function Input(props: ComponentProps<"input">) {
