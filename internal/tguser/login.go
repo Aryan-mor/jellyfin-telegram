@@ -366,6 +366,7 @@ func (m *Manager) runLogin(ctx context.Context, store *fileStore, p *pendingLogi
 		p.done <- err
 		return
 	}
+	m.didMeta(rec.Meta, "sign in", "", nil)
 	m.start(m.rootCtx(), store, rec.Meta)
 	p.done <- nil
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { Link } from "react-router"
+import { Link, useLocation } from "react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Eye, EyeOff, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
@@ -99,13 +99,15 @@ function ChannelName({ name, id, className }: { name?: string; id: number; class
 }
 
 function Stat({ label, value, sub, to, tip }: { label: string; value: string; sub: string; to?: string; tip?: string }) {
+  const { search } = useLocation()
   const body = <><div className="text-xs text-muted-foreground">{label}</div><div className="truncate text-lg font-semibold" title={tip}>{value}</div><div className="truncate text-xs text-muted-foreground">{sub}</div></>
-  if (to) return <Link to={to} className="rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50">{body}</Link>
+  if (to) return <Link to={{ pathname: to, search }} className="rounded-lg border bg-card p-3 transition-colors hover:bg-accent/50">{body}</Link>
   return <div className="rounded-lg border bg-card p-3">{body}</div>
 }
 
 function SignInFirst() {
-  return <Alert tone="warn" action={<Button size="sm" variant="outline" asChild><Link to="/telegram">{t("Accounts")}</Link></Button>}>{t("No Telegram account is signed in. Sign one in first.")}</Alert>
+  const { search } = useLocation()
+  return <Alert tone="warn" action={<Button size="sm" variant="outline" asChild><Link to={{ pathname: "/telegram", search }}>{t("Accounts")}</Link></Button>}>{t("No Telegram account is signed in. Sign one in first.")}</Alert>
 }
 
 // ---------- Overview ----------
@@ -885,6 +887,11 @@ function bucket(status: string) {
 
 const localChips: [string, string][] = [["all", "All"], ["local", "Only here"], ["busy", "On the way"], ["synced", "In Telegram"], ["problem", "Needs a look"]]
 
+function LocalProblem({ problem }: { problem: string }) {
+  const { search } = useLocation()
+  return <Alert tone="warn" action={<Button size="sm" variant="outline" asChild><Link to={{ pathname: "/telegram", search }}>{t("Add account")}</Link></Button>}>{problem}</Alert>
+}
+
 export function Local() {
   const q = useQuery({ queryKey: ["local"], queryFn: () => api<LocalView>("/panel/local"), refetchInterval: () => (pollingPaused() ? false : 4000) })
   const [path, setPath] = useState("")
@@ -925,7 +932,7 @@ export function Local() {
         <Stat label={t("In Telegram")} value={String(totals.synced?.count ?? 0)} sub={totals.synced?.count ? t("{{size}} can be deleted from here", { size: bytes(totals.synced.bytes ?? 0) }) : t("Nothing yet")} />
         {!!totals.problem?.count && <Stat label={t("Needs a look")} value={String(totals.problem.count)} sub={t("Open the list to see why")} />}
       </div>
-      {v.problem && <Alert tone="warn" action={<Button size="sm" variant="outline" asChild><Link to="/telegram">{t("Add account")}</Link></Button>}>{v.problem}</Alert>}
+      {v.problem && <LocalProblem problem={v.problem} />}
 
       <Section title={t("Folders")} text={v.scanning ? t("Scanning…") : v.scanned ? t("Scanned at {{time}}", { time: new Date(v.scanned * 1000).toLocaleTimeString() }) : undefined}
         actions={<Button size="sm" variant="outline" disabled={busy === "scan" || v.scanning} onClick={() => void run("scan", async () => { await api("/panel/local/scan", {}); toast(t("Scanned")); await q.refetch() })}><RefreshCw className="size-3.5" />{t("Scan now")}</Button>}>

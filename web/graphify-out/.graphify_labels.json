@@ -2,13 +2,15 @@
   "0": "pages.tsx",
   "1": "ui.tsx",
   "2": "RulesPage",
-  "3": "package.json",
-  "4": "shell.tsx",
+  "3": "devDependencies",
+  "4": "panel/main.tsx",
   "5": "dependencies",
   "6": "compilerOptions",
   "7": "compilerOptions",
   "8": "fill-missing.mjs",
   "9": ".oxlintrc.json",
   "10": "React + TypeScript + Vite",
-  "11": "tsconfig.json"
+  "11": "tsconfig.json",
+  "12": "setup/main.tsx",
+  "13": "scripts"
 }

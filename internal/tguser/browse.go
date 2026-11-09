@@ -366,5 +366,10 @@ func (m *Manager) Copy(ctx context.Context, ref SourceRef, ids []int) error {
 		}
 		return nil, err
 	})
+	where := ref.Username
+	if where == "" {
+		where = fmt.Sprintf("%d", ref.ChannelID)
+	}
+	m.did(lv, "copy", fmt.Sprintf("%d from %s", len(ids), where), err)
 	return err
 }

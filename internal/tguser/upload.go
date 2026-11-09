@@ -54,6 +54,7 @@ func (m *Manager) Upload(ctx context.Context, userID int64, filePath, name, capt
 		})
 	})
 	if err != nil {
+		m.did(lv, "upload", name, err)
 		if fatalAuth(err) {
 			lv.errText.Store(err.Error())
 			lv.meta.Error = err.Error()
@@ -64,8 +65,11 @@ func (m *Manager) Upload(ctx context.Context, userID int64, filePath, name, capt
 	}
 	id, _ := val.(int)
 	if id == 0 {
-		return 0, errors.New("telegram did not report the new message id")
+		err = errors.New("telegram did not report the new message id")
+		m.did(lv, "upload", name, err)
+		return 0, err
 	}
+	m.did(lv, "upload", name, nil)
 	return id, nil
 }
 
@@ -106,7 +110,9 @@ func (m *Manager) UploadTo(ctx context.Context, userID, channelID int64, filePat
 			}
 		})
 	})
+	detail := fmt.Sprintf("%s to %d", name, channelID)
 	if err != nil {
+		m.did(lv, "upload", detail, err)
 		if fatalAuth(err) {
 			lv.errText.Store(err.Error())
 			lv.meta.Error = err.Error()
@@ -117,8 +123,11 @@ func (m *Manager) UploadTo(ctx context.Context, userID, channelID int64, filePat
 	}
 	id, _ := val.(int)
 	if id == 0 {
-		return 0, errors.New("telegram did not report the new message id")
+		err = errors.New("telegram did not report the new message id")
+		m.did(lv, "upload", detail, err)
+		return 0, err
 	}
+	m.did(lv, "upload", detail, nil)
 	return id, nil
 }
 

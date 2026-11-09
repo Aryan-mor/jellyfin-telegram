@@ -1,9 +1,9 @@
 import { useEffect, useState, type ReactNode } from "react"
-import { NavLink, Outlet } from "react-router"
+import { NavLink, Outlet, useLocation } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
   Bot, Cable, CloudDownload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
-  Radio, Send, Share2, Sun, Tv, UserRound,
+  Radio, ScrollText, Send, Share2, Sun, Tv, UserRound,
 } from "lucide-react"
 import { toast } from "sonner"
 import { api, panelCode, pollingPaused } from "@/lib/api"
@@ -112,6 +112,7 @@ export function Shell() {
       <Group title="Telegram">
         <Nav to="/telegram" label={t("Accounts")} icon={<UserRound className="size-4" />} dot={!signed} />
         <Nav to="/bots" label={t("Bots")} icon={<Bot className="size-4" />} dot={botBad} />
+        <Nav to="/logs" label={t("Logs")} icon={<ScrollText className="size-4" />} />
         <Nav to="/api" label={t("API")} icon={<Cable className="size-4" />} />
       </Group>
       <Group title={t("Sources")}>
@@ -203,8 +204,9 @@ function Group({ title, children }: { title: string; children: ReactNode }) {
 }
 
 function Nav({ to, label, icon, dot }: { to: string; label: string; icon?: ReactNode; dot?: boolean }) {
+  const { search } = useLocation()
   return (
-    <NavLink to={to} end={to === "/" || to === "/channel"} className={({ isActive }) => cn("flex h-8 items-center gap-2 rounded-md px-2", isActive ? "bg-accent font-medium" : "hover:bg-accent/60")}>
+    <NavLink to={{ pathname: to, search }} end={to === "/" || to === "/channel"} className={({ isActive }) => cn("flex h-8 items-center gap-2 rounded-md px-2", isActive ? "bg-accent font-medium" : "hover:bg-accent/60")}>
       {icon ?? <span className="size-4" />}
       <span className="flex-1">{label}</span>
       {dot && <span className="size-2 rounded-full bg-amber-500" />}

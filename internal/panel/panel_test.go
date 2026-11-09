@@ -41,6 +41,53 @@ func serve(t *testing.T, verify setup.Verifier, same func(int64) error) (*httpte
 	return srv, path
 }
 
+func TestPageRoutesSurviveRefresh(t *testing.T) {
+	srv, _ := serve(t, nil, nil)
+	res, err := http.Get(srv.URL + "/panel/bots")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("this computer /panel/bots: %d", res.StatusCode)
+	}
+	body, _ := io.ReadAll(res.Body)
+	if !strings.Contains(string(body), "<div id=\"root\">") && !strings.Contains(string(body), "id=\"root\"") {
+		t.Fatalf("page was not HTML: %s", body)
+	}
+	away := httptest.NewRequest(http.MethodGet, "/panel/bots", nil)
+	away.RemoteAddr = "203.0.113.8:4000"
+	rec := httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, away)
+	if rec.Code != http.StatusForbidden {
+		t.Fatalf("other computer: %d", rec.Code)
+	}
+	with := httptest.NewRequest(http.MethodGet, "/panel/channel/mirrors?code=secret", nil)
+	with.RemoteAddr = "203.0.113.8:4000"
+	rec = httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, with)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Body.String(), "root") {
+		t.Fatalf("coded page: %d %s", rec.Code, rec.Body.String())
+	}
+	// Same path as a screen, but a fetch still gets JSON, not the page.
+	api := httptest.NewRequest(http.MethodGet, "/panel/local?code=secret", nil)
+	api.RemoteAddr = "203.0.113.8:4000"
+	api.Header.Set("Accept", "*/*")
+	rec = httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, api)
+	if rec.Code != http.StatusNotFound || !strings.Contains(rec.Header().Get("Content-Type"), "json") {
+		t.Fatalf("api list: %d %s %s", rec.Code, rec.Header().Get("Content-Type"), rec.Body.String())
+	}
+	doc := httptest.NewRequest(http.MethodGet, "/panel/local", nil)
+	doc.RemoteAddr = "127.0.0.1:9"
+	doc.Header.Set("Accept", "text/html,application/xhtml+xml")
+	rec = httptest.NewRecorder()
+	srv.Config.Handler.ServeHTTP(rec, doc)
+	if rec.Code != http.StatusOK || !strings.Contains(rec.Header().Get("Content-Type"), "text/html") {
+		t.Fatalf("document /panel/local: %d %s", rec.Code, rec.Header().Get("Content-Type"))
+	}
+}
+
 func TestPageRequiresTheConsoleCode(t *testing.T) {
 	srv, _ := serve(t, nil, nil)
 	res, err := http.Get(srv.URL + "/panel")

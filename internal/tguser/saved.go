@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/binary"
+	"fmt"
 
 	"github.com/gotd/td/tg"
 )
@@ -112,5 +113,6 @@ func (m *Manager) ForwardSaved(ctx context.Context, ids []int) error {
 		}
 		return nil, err
 	})
+	m.did(lv, "forward", fmt.Sprintf("%d saved", len(ids)), err)
 	return err
 }

@@ -15,6 +15,7 @@ import (
 
 	"github.com/gotd/td/tgerr"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/actlog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 )
 
@@ -78,7 +79,16 @@ type Pool struct {
 	concurrency int
 	next        int
 	log         *slog.Logger
+	journal     actlog.Journal
 	start       func(context.Context)
+}
+
+// SetJournal records what each bot does. Nil turns that off.
+func (p *Pool) SetJournal(j actlog.Journal) {
+	if p == nil {
+		return
+	}
+	p.journal = j
 }
 
 func newPool(workers []worker, concurrency int, log *slog.Logger) *Pool {
@@ -246,7 +256,7 @@ func (p *Pool) Download(ctx context.Context, messageID int, docID, size int64) (
 // SendDocument posts a file to the channel and returns the new message id.
 func (p *Pool) SendDocument(ctx context.Context, name, caption string, data []byte, replyTo int) (int, error) {
 	var id int
-	err := p.call(ctx, 0, func(w worker) error {
+	err := p.callDid(ctx, 0, "send file", name, func(w worker) error {
 		var err error
 		id, err = w.sendDocument(ctx, name, caption, data, replyTo)
 		return err
@@ -256,7 +266,9 @@ func (p *Pool) SendDocument(ctx context.Context, name, caption string, data []by
 
 // DeleteMessages removes messages from the channel.
 func (p *Pool) DeleteMessages(ctx context.Context, ids []int) error {
-	return p.call(ctx, 0, func(w worker) error { return w.deleteMessages(ctx, ids) })
+	return p.callDid(ctx, 0, "delete", fmt.Sprintf("%d messages", len(ids)), func(w worker) error {
+		return w.deleteMessages(ctx, ids)
+	})
 }
 
 // ReadyBot returns one connected bot. The caller signs with that bot's id, then sends as that bot.
@@ -346,6 +358,7 @@ func (p *Pool) SendText(ctx context.Context, botID int64, text string) (int, err
 		id, err = b.sendText(ctx, text)
 		return err
 	})
+	p.didID(botID, "send text", text, err)
 	return id, err
 }
 
@@ -367,12 +380,15 @@ func (p *Pool) Repost(ctx context.Context, botID int64, sourceID int, caption st
 		id, err = b.repostDocument(ctx, sourceID, caption)
 		return err
 	})
+	p.didID(botID, "repost", fmt.Sprintf("message %d", sourceID), err)
 	return id, err
 }
 
 // EditCaption replaces the caption of a post this bot sent.
 func (p *Pool) EditCaption(ctx context.Context, botID int64, messageID int, caption string) error {
-	return p.callOn(botID, func(b *bot) error { return b.editCaption(ctx, messageID, caption) })
+	err := p.callOn(botID, func(b *bot) error { return b.editCaption(ctx, messageID, caption) })
+	p.didID(botID, "edit caption", fmt.Sprintf("message %d", messageID), err)
+	return err
 }
 
 // AcceptMirror checks that botID can post in the named channel and is an admin of the main
@@ -402,9 +418,12 @@ func (p *Pool) CopyMessage(ctx context.Context, botID int64, messageID int, chan
 	}
 	ch, err := b.openChannel(ctx, channelID, "")
 	if err != nil {
+		p.didID(botID, "copy message", fmt.Sprintf("message %d", messageID), err)
 		return 0, err
 	}
-	return b.forwardTo(ctx, messageID, ch)
+	id, err := b.forwardTo(ctx, messageID, ch)
+	p.didID(botID, "copy message", fmt.Sprintf("message %d", messageID), err)
+	return id, err
 }
 
 func (p *Pool) findBot(id int64) (*bot, error) {
@@ -445,6 +464,38 @@ func (p *Pool) Thumbnail(ctx context.Context, messageID int) ([]byte, error) {
 		return err
 	})
 	return out, err
+}
+
+// callDid runs fn on a bot and records which bot did the work.
+func (p *Pool) callDid(ctx context.Context, messageID int, action, detail string, fn func(worker) error) error {
+	var who worker
+	err := p.call(ctx, messageID, func(w worker) error {
+		who = w
+		return fn(w)
+	})
+	if who != nil {
+		p.did(who, action, detail, err)
+	}
+	return err
+}
+
+func (p *Pool) did(w worker, action, detail string, err error) {
+	if p == nil || p.journal == nil || w == nil {
+		return
+	}
+	st := w.status()
+	p.journal.Note("bot", st.ID, st.Username, action, detail, err)
+}
+
+func (p *Pool) didID(id int64, action, detail string, err error) {
+	if p == nil || p.journal == nil || id == 0 {
+		return
+	}
+	name := ""
+	if b, findErr := p.findBot(id); findErr == nil {
+		name = b.status().Username
+	}
+	p.journal.Note("bot", id, name, action, detail, err)
 }
 
 // call runs fn on a free bot and retries on another bot when Telegram refuses.

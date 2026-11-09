@@ -91,6 +91,8 @@ type Options struct {
 	Restart func() error
 	// AutoFilter serves the auto-add filter under /panel. It may be nil.
 	AutoFilter setup.Mounter
+	// Logs lists one page of what an account or a bot did. kind is "account" or "bot".
+	Logs func(kind string, actorID int64, page, limit int) (any, int, error)
 }
 
 // ErrBusy means a create job is already running.
@@ -140,6 +142,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/bots/create", p.guard(p.handleBotJob("create")))
 	mux.HandleFunc("POST /panel/bots/reuse", p.guard(p.handleBotJob("reuse")))
 	mux.HandleFunc("GET /panel/jobs", p.guard(p.handleJobs))
+	mux.HandleFunc("GET /panel/activity", p.guard(p.handleActivity))
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
 	mux.HandleFunc("POST /panel/restart", p.guard(p.handleRestart))
@@ -149,26 +152,101 @@ func New(o Options) http.Handler {
 	if o.AutoFilter != nil {
 		o.AutoFilter.Mount(mux, "/panel", p.guard)
 	}
+	// Screens such as /panel/bots. A more specific API route, like GET /panel/state, still wins.
+	mux.HandleFunc("GET /panel/{path...}", p.guard(p.handlePage))
 	return mux
+}
+
+// pagePaths are addresses the panel itself navigates to. Refresh must return the page.
+var pagePaths = map[string]struct{}{
+	"/panel":                   {},
+	"/panel/accounts":          {},
+	"/panel/channel":           {},
+	"/panel/channel/mirrors":   {},
+	"/panel/channel/shared":    {},
+	"/panel/channel/home":      {},
+	"/panel/channel/subtitles": {},
+	"/panel/telegram":          {},
+	"/panel/bots":              {},
+	"/panel/logs":              {},
+	"/panel/api":               {},
+	"/panel/sources/filter":    {},
+	"/panel/sources":           {},
+	"/panel/news":              {},
+	"/panel/local":             {},
+	"/panel/downloads":         {},
+	"/panel/away":              {},
+}
+
+// pageAPIs are screens that share a path with a JSON GET. A browser load gets the page;
+// a fetch without text/html still gets the JSON.
+var pageAPIs = map[string]struct{}{
+	"/panel/local":   {},
+	"/panel/sources": {},
 }
 
 type panel struct{ o Options }
 
+func wantsDocument(r *http.Request) bool {
+	if r.Header.Get("Sec-Fetch-Dest") == "document" || r.Header.Get("Sec-Fetch-Mode") == "navigate" {
+		return true
+	}
+	return strings.Contains(r.Header.Get("Accept"), "text/html")
+}
+
 func (p *panel) guard(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		code := r.URL.Query().Get("code")
-		if subtle.ConstantTimeCompare([]byte(code), []byte(p.o.Code)) == 1 {
-			next(w, r)
-			return
+		codeOK := subtle.ConstantTimeCompare([]byte(code), []byte(p.o.Code)) == 1
+		if _, page := pagePaths[r.URL.Path]; r.Method == http.MethodGet && page {
+			_, api := pageAPIs[r.URL.Path]
+			// /panel/local and /panel/sources are also JSON. Only a real page load takes the HTML.
+			if !api || wantsDocument(r) {
+				if codeOK || fromThisMachine(r) {
+					p.handlePage(w, r)
+					return
+				}
+				http.Error(w, "On this computer open /panel. From anywhere else, use the address shown on that page.", http.StatusForbidden)
+				return
+			}
 		}
-		// This computer can open the page directly. The page then carries the code, so a site on
-		// the internet cannot submit the form. Every other machine still needs the full address.
-		if r.Method == http.MethodGet && r.URL.Path == "/panel" && fromThisMachine(r) {
+		if codeOK {
 			next(w, r)
 			return
 		}
 		http.Error(w, "On this computer open /panel. From anywhere else, use the address shown on that page.", http.StatusForbidden)
 	}
+}
+
+func (p *panel) handleActivity(w http.ResponseWriter, r *http.Request) {
+	kind := r.URL.Query().Get("kind")
+	if kind != "account" && kind != "bot" {
+		writeError(w, http.StatusBadRequest, "pick an account or a bot")
+		return
+	}
+	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	const limit = 40
+	if p.o.Logs == nil || id == 0 {
+		writeJSON(w, http.StatusOK, map[string]any{"items": []any{}, "total": 0, "page": 1, "pages": 1})
+		return
+	}
+	items, total, err := p.o.Logs(kind, id, page, limit)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	pages := 1
+	if total > 0 {
+		pages = (total + limit - 1) / limit
+	}
+	if items == nil {
+		items = []any{}
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "total": total, "page": page, "pages": pages})
 }
 
 func (p *panel) handlePage(w http.ResponseWriter, _ *http.Request) {

@@ -16,6 +16,8 @@ import (
 	"github.com/gotd/td/telegram"
 	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/actlog"
 )
 
 // View is one session as the panel shows it.
@@ -44,6 +46,7 @@ type Manager struct {
 	channelID int64
 	defaults  Pace
 	log       *slog.Logger
+	journal   actlog.Journal
 
 	mu       sync.Mutex
 	root     context.Context
@@ -93,6 +96,14 @@ func New(dir string, apiID int, apiHash string, channelID int64, defaults Pace, 
 		dir: dir, apiID: apiID, apiHash: apiHash, channelID: channelID,
 		defaults: defaults, log: log, sessions: map[int64]*live{},
 	}, nil
+}
+
+// SetJournal records what each account does. Nil turns that off.
+func (m *Manager) SetJournal(j actlog.Journal) {
+	if m == nil {
+		return
+	}
+	m.journal = j
 }
 
 // SetDefaults replaces the pace inherited by sessions that have no override.
@@ -515,10 +526,29 @@ func (m *Manager) Logout(ctx context.Context, id int64) error {
 		cancel()
 	}
 	lv.run()
+	m.did(lv, "sign out", "", nil)
 	m.mu.Lock()
 	delete(m.sessions, id)
 	m.mu.Unlock()
 	return os.Remove(lv.store.path)
+}
+
+func (m *Manager) did(lv *live, action, detail string, err error) {
+	if lv == nil {
+		return
+	}
+	m.didMeta(lv.meta, action, detail, err)
+}
+
+func (m *Manager) didMeta(meta Meta, action, detail string, err error) {
+	if m == nil || m.journal == nil || meta.UserID == 0 {
+		return
+	}
+	name := meta.Username
+	if name == "" {
+		name = meta.Phone
+	}
+	m.journal.Note("account", meta.UserID, name, action, detail, err)
 }
 
 func (m *Manager) call(ctx context.Context, lv *live, fn func(context.Context, *tg.Client) (any, error)) (any, error) {

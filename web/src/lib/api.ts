@@ -27,7 +27,12 @@ export class ApiError extends Error {
 }
 
 export async function api<T = Record<string, unknown>>(path: string, body?: unknown): Promise<T> {
-  const res = await fetch(path + "?code=" + encodeURIComponent(panelCode()), body === undefined ? undefined : {
+  const q = new URLSearchParams()
+  const cut = path.indexOf("?")
+  const base = cut === -1 ? path : path.slice(0, cut)
+  if (cut !== -1) new URLSearchParams(path.slice(cut + 1)).forEach((v, k) => q.set(k, v))
+  q.set("code", panelCode())
+  const res = await fetch(base + "?" + q.toString(), body === undefined ? undefined : {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),

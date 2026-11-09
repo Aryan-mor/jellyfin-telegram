@@ -2,6 +2,7 @@ package tguser
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/gotd/td/tg"
 )
@@ -66,9 +67,11 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 		return hits, nil
 	})
 	if err != nil {
+		m.did(lv, "search", query, err)
 		return nil, err
 	}
 	hits, _ := val.([]SearchHit)
+	m.did(lv, "search", fmt.Sprintf("%s · %d", query, len(hits)), nil)
 	return hits, nil
 }
 

@@ -17,6 +17,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/actlog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autoupload"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/blockstore"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
@@ -176,6 +177,13 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		return err
 	}
 	pool.Start(ctx)
+	journal, jerr := actlog.Open(filepath.Join(cfg.DataDir, "activity.db"))
+	if jerr != nil {
+		log.Warn("activity log is off", "err", jerr)
+	} else {
+		defer journal.Close()
+		pool.SetJournal(journal)
+	}
 	if err := waitForBots(ctx, pool, log); err != nil {
 		return err
 	}
@@ -268,6 +276,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		},
 	}, log)
 	users := startUsers(ctx, cfg, log)
+	if journal != nil && users != nil {
+		users.SetJournal(journal)
+	}
 	personal := startHome(cfg, envPath, cat, users, log)
 	dl := startDownloads(cfg, envPath, cat, pool, users, seerrTarget, log)
 	local := startLocal(cfg, envPath, cat, pool, users, log)
@@ -285,7 +296,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, hub,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, hub, journal,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -512,7 +523,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, journal *actlog.Store, accounts func() []panel.Account) http.Handler {
 	jobs := &panelJobs{}
 	return panel.New(panel.Options{
 		Accounts: accounts,
@@ -548,6 +559,13 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		Verify:       verifyTelegram(dataDir, log),
 		Restart:      func() error { return scheduleRestart(restartStop) },
 		AutoFilter:   autoFilter(envPath),
+		Logs: func(kind string, id int64, page, limit int) (any, int, error) {
+			if journal == nil {
+				return []actlog.Entry{}, 0, nil
+			}
+			items, total, err := journal.List(kind, id, page, limit)
+			return items, total, err
+		},
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
 			for _, st := range pool.Statuses() {
