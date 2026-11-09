@@ -2,6 +2,7 @@ package hashindex
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"strings"
 
@@ -16,8 +17,8 @@ type Account interface {
 	PostsByLink(ctx context.Context, refs []tguser.PostRef) ([]tguser.SearchHit, error)
 }
 
-// Searcher adds the index to the global hashtag search. Wanted titles from requests and from
-// trending go through the same search, so both use the index without extra code.
+// Searcher asks the hashtag index before the chats this account already has. Wanted titles from
+// requests and from trending go through the same search, so both use the index without extra code.
 type Searcher struct {
 	Account
 	Index *Client
@@ -40,32 +41,36 @@ func patterns(query string) []string {
 	return nil
 }
 
-// SearchHashtag runs the global search and then asks the index. A failure of one is not a
-// failure of the other: the global search keeps its flood wait handling, and the index adds hits
-// when it can.
+// SearchHashtag asks the hashtag index first. Posts there can name channels this account has not
+// joined, which is how a new direct channel is found. When the index has nothing, the account
+// searches the chats it already has, once.
 func (s *Searcher) SearchHashtag(ctx context.Context, query string) ([]tguser.SearchHit, error) {
-	hits, searchErr := s.Account.SearchHashtag(ctx, query)
 	if s.Index == nil {
-		return hits, searchErr
+		return s.Account.SearchHashtag(ctx, query)
 	}
 	extra, err := s.fromIndex(ctx, query)
 	if err != nil && s.Log != nil {
 		s.Log.Warn("hashtag index search failed", "query", query, "err", err)
 	}
-	if len(extra) == 0 {
+	if len(extra) > 0 {
+		return extra, nil
+	}
+	hits, searchErr := s.Account.SearchHashtag(ctx, query)
+	if searchErr != nil {
 		return hits, searchErr
 	}
-	seen := map[[2]int64]bool{}
-	for _, h := range hits {
-		seen[[2]int64{h.ChannelID, int64(h.MessageID)}] = true
-	}
-	for _, h := range extra {
-		if k := [2]int64{h.ChannelID, int64(h.MessageID)}; !seen[k] {
-			seen[k] = true
-			hits = append(hits, h)
-		}
-	}
 	return hits, nil
+}
+
+// History reads a channel through the signed-in account, so a found channel can be checked at once.
+func (s *Searcher) History(ctx context.Context, ref tguser.SourceRef, offsetID, limit int) (tguser.Page, error) {
+	h, ok := s.Account.(interface {
+		History(context.Context, tguser.SourceRef, int, int) (tguser.Page, error)
+	})
+	if !ok || h == nil {
+		return tguser.Page{}, errors.New("the signed-in account cannot read channel history")
+	}
+	return h.History(ctx, ref, offsetID, limit)
 }
 
 func (s *Searcher) fromIndex(ctx context.Context, query string) ([]tguser.SearchHit, error) {

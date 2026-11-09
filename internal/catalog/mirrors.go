@@ -223,6 +223,32 @@ func (c *Catalog) DeleteMirror(ctx context.Context, id int64) error {
 	return err
 }
 
+// RetargetMirror points a mirror at a new channel and forgets what was copied to the old one, so
+// the library is sent again. The bot and the parts stay.
+func (c *Catalog) RetargetMirror(ctx context.Context, id, channelID int64, title, username string) error {
+	tx, err := c.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `UPDATE mirrors SET channel_id=?, title=?, username=?, error='' WHERE id=?`,
+		channelID, title, strings.TrimPrefix(username, "@"), id)
+	if err != nil {
+		return err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return errors.New("that mirror is not listed")
+	}
+	if _, err := tx.ExecContext(ctx, `DELETE FROM mirror_sent WHERE mirror_id=?`, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // SetMirrorError records the last copy failure. An empty string clears it.
 func (c *Catalog) SetMirrorError(ctx context.Context, id int64, msg string) error {
 	_, err := c.db.ExecContext(ctx, `UPDATE mirrors SET error=? WHERE id=?`, msg, id)

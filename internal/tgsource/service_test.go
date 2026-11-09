@@ -333,3 +333,53 @@ func TestStrictChannelNeedsATitle(t *testing.T) {
 		t.Fatal("a strict channel copied a file with no title in its name")
 	}
 }
+
+func TestBannedDiscoveredChannelIsRemoved(t *testing.T) {
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { cat.Close() })
+	ctx := context.Background()
+	found, added, err := cat.AddDiscoveredSource(ctx, catalog.Source{ChannelID: 9, Title: "old"}, "test")
+	if err != nil || !added {
+		t.Fatal(added, err)
+	}
+	manual, err := cat.AddSource(ctx, catalog.Source{ChannelID: 10, Title: "mine"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := New()
+	s.Cat = cat
+	if stop := s.record(ctx, found, tgerr.New(400, "CHANNEL_PRIVATE")); stop {
+		t.Fatal("a banned channel stopped the pass")
+	}
+	if _, ok, err := cat.SourceByChannel(ctx, 9); err != nil || ok {
+		t.Fatalf("discovered channel still listed: %v %v", ok, err)
+	}
+	if stop := s.record(ctx, manual, tgerr.New(400, "CHANNEL_PRIVATE")); stop {
+		t.Fatal("stop")
+	}
+	if _, ok, err := cat.SourceByChannel(ctx, 10); err != nil || !ok {
+		t.Fatalf("a channel a person added was removed: %v %v", ok, err)
+	}
+}
+
+func TestIdleDiscoveredChannelFreesASlot(t *testing.T) {
+	now := time.Date(2026, 11, 9, 0, 0, 0, 0, time.UTC)
+	old := catalog.Source{Origin: catalog.OriginDiscovered, Added: now.Add(-30 * 24 * time.Hour).Unix()}
+	if !sourceDroppable(old, 0, now) {
+		t.Fatal("a quiet discovered channel should free its place")
+	}
+	fresh := catalog.Source{Origin: catalog.OriginDiscovered, Added: now.Add(-24 * time.Hour).Unix()}
+	if sourceDroppable(fresh, 0, now) {
+		t.Fatal("a new channel was treated as idle")
+	}
+	if sourceDroppable(catalog.Source{Origin: catalog.OriginManual, Added: 1}, 0, now) {
+		t.Fatal("a channel a person added was droppable")
+	}
+	banned := catalog.Source{Origin: catalog.OriginDiscovered, Added: now.Unix(), Error: "This account cannot read the channel any more."}
+	if !sourceDroppable(banned, now.Unix(), now) {
+		t.Fatal("a banned channel was kept")
+	}
+}

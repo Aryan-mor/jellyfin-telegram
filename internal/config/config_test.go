@@ -22,7 +22,8 @@ func clearEnv(t *testing.T) {
 			strings.HasPrefix(key, "UPLOAD_") || strings.HasPrefix(key, "DOWNLOADS_") || strings.HasPrefix(key, "BITMAGNET_") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
 			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" ||
-			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" || key == "TELEGRAM_SEARCH" {
+			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" || key == "TELEGRAM_SEARCH" ||
+			key == "HASHTAG_INDEX_BOT" || key == "TMDB_API_KEY" {
 			t.Setenv(key, "")
 			os.Unsetenv(key)
 		}
@@ -80,6 +81,13 @@ func TestLoadValid(t *testing.T) {
 	}
 	if !c.TelegramSearch {
 		t.Error("telegram search is on unless turned off")
+	}
+	if c.SearchMaxDiscovered != 50 || c.SearchPromoteAt != 10 || c.HashtagIndexBot != DefaultHashtagIndexBot {
+		t.Errorf("search defaults discovered=%d promote=%d index=%q", c.SearchMaxDiscovered, c.SearchPromoteAt, c.HashtagIndexBot)
+	}
+	c, err = load(t, validEnv+"HASHTAG_INDEX_BOT=off\n")
+	if err != nil || c.HashtagIndexBot != "" {
+		t.Fatalf("index off: %q %v", c.HashtagIndexBot, err)
 	}
 	c, err = load(t, validEnv+"TELEGRAM_SEARCH=false\n")
 	if err != nil || c.TelegramSearch {

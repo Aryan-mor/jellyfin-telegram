@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gotd/td/tgerr"
+
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
@@ -50,6 +52,59 @@ func TestPassCopiesOnlyTheChosenParts(t *testing.T) {
 	}
 	if len(got) != 1 {
 		t.Fatalf("copied again %v", got)
+	}
+}
+
+func TestBannedMirrorIsReplacedOnce(t *testing.T) {
+	c, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	ctx := context.Background()
+	if err := c.Put(ctx, media.File{MessageID: 1, ChannelID: 9, DocID: 1, Size: 1, MIME: "video/mp4", FileName: "Heat.1995.mkv", RelPath: "Movies/Heat/Heat.strm", Date: time.Unix(1, 0)}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := c.AddMirror(ctx, 50, 7, "Films", []string{"movie"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := c.SetMirrorUsername(ctx, 1, "oldmirror"); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	var copiedTo int64
+	s := &Service{
+		Cat: c, Log: slog.New(slog.DiscardHandler),
+		Copy: func(_ context.Context, _ int64, _ int, channel int64) (int, error) {
+			copiedTo = channel
+			if channel == 50 {
+				return 0, tgerr.New(400, "CHANNEL_PRIVATE")
+			}
+			return 80, nil
+		},
+		Replace: func(_ context.Context, m catalog.Mirror) error {
+			calls++
+			if m.ChannelID != 50 || m.Username != "oldmirror" {
+				t.Fatalf("replace %+v", m)
+			}
+			return c.RetargetMirror(ctx, m.ID, 99, m.Title, "newmirror")
+		},
+	}
+	if err := s.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if calls != 1 {
+		t.Fatalf("replaced %d times", calls)
+	}
+	if err := s.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if copiedTo != 99 || calls != 1 {
+		t.Fatalf("copied to %d, replacements %d", copiedTo, calls)
+	}
+	list, err := c.Mirrors(ctx)
+	if err != nil || len(list) != 1 || list[0].ChannelID != 99 || list[0].Username != "newmirror" {
+		t.Fatalf("%+v %v", list, err)
 	}
 }
 

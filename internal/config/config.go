@@ -105,14 +105,15 @@ type Config struct {
 	SearchMinMinutes          int
 	SearchMinMB               int
 	SearchRuntimeTolerancePct int
-	// SearchPromoteAt is how many accepted files make a channel a direct file channel, and
-	// SearchMaxDiscovered caps how many the search may add (0 turns promotion off).
-	// SearchDenyAfter is how many failed files put a channel or a signer key on the denylist.
+	// SearchPromoteAt is how many verified videos in a channel, seen when the first file is found,
+	// make it a direct file channel. SearchMaxDiscovered caps how many the search may add
+	// (0 turns promotion off). SearchDenyAfter is how many failed files put a channel or a signer
+	// key on the denylist.
 	SearchPromoteAt     int
 	SearchMaxDiscovered int
 	SearchDenyAfter     int
-	// HashtagIndexBot is the username of the hashtag index bot (telegram-hashtag-index). When set,
-	// public mirror posts are shared with it and searches ask it too. Empty turns it off.
+	// HashtagIndexBot is the username of the hashtag index bot (telegram-hashtag-index). It defaults
+	// to tgHashtagIndexBot and turns on when a Telegram account is signed in. "off" turns it off.
 	HashtagIndexBot string
 	// TMDBAPIKey is a TMDB v3 key or v4 read token. Only the trending source uses it.
 	TMDBAPIKey string
@@ -129,6 +130,19 @@ type Config struct {
 	TrendingMaxPerDay int
 	// InboxDeleteOriginals removes an inbox file after it has been copied to Ready.
 	InboxDeleteOriginals bool
+}
+
+// DefaultHashtagIndexBot is the public hashtag index. A signed-in account uses it unless
+// HASHTAG_INDEX_BOT is off, false, none, or 0.
+const DefaultHashtagIndexBot = "tgHashtagIndexBot"
+
+func hashtagIndexBot(name string) string {
+	name = strings.TrimPrefix(strings.TrimSpace(name), "@")
+	switch strings.ToLower(name) {
+	case "", "off", "false", "none", "0", "-":
+		return ""
+	}
+	return name
 }
 
 // DefaultAPIID and DefaultAPIHash are the Telegram app this build ships with, set at build time with
@@ -314,9 +328,9 @@ func Load(envPath string) (Config, error) {
 	c.SearchMinMB = getInt("TELEGRAM_SEARCH_MIN_MB", 50, fail)
 	c.SearchRuntimeTolerancePct = getInt("TELEGRAM_SEARCH_RUNTIME_TOLERANCE_PCT", 25, fail)
 	c.SearchPromoteAt = getInt("TELEGRAM_SEARCH_PROMOTE_AT", 10, fail)
-	c.SearchMaxDiscovered = getInt("TELEGRAM_SEARCH_MAX_DISCOVERED", 20, fail)
+	c.SearchMaxDiscovered = getInt("TELEGRAM_SEARCH_MAX_DISCOVERED", 50, fail)
 	c.SearchDenyAfter = getInt("TELEGRAM_SEARCH_DENY_AFTER", 3, fail)
-	c.HashtagIndexBot = strings.TrimPrefix(strings.TrimSpace(get("HASHTAG_INDEX_BOT", "")), "@")
+	c.HashtagIndexBot = hashtagIndexBot(get("HASHTAG_INDEX_BOT", DefaultHashtagIndexBot))
 	c.TMDBAPIKey = get("TMDB_API_KEY", "")
 	c.TrendingSearch = strings.EqualFold(get("TRENDING_SEARCH", ""), "true") || get("TRENDING_SEARCH", "") == "1"
 	c.TrendingAllowAdult = strings.EqualFold(get("TRENDING_ALLOW_ADULT", ""), "true")

@@ -142,6 +142,17 @@ func (c *Catalog) Sources(ctx context.Context) ([]Source, error) {
 	return out, rows.Err()
 }
 
+// SourceLastCopy is the unix time of the last file this source gave the library, or 0 when it
+// never has.
+func (c *Catalog) SourceLastCopy(ctx context.Context, id int64) (int64, error) {
+	var n sql.NullInt64
+	err := c.db.QueryRowContext(ctx, `SELECT MAX(updated_unix) FROM tgcopied WHERE source_id=? AND state=?`, id, CopyDone).Scan(&n)
+	if err != nil || !n.Valid {
+		return 0, err
+	}
+	return n.Int64, nil
+}
+
 // DeleteSource forgets a channel. What was already copied stays in the library.
 func (c *Catalog) DeleteSource(ctx context.Context, id int64) error {
 	_, err := c.db.ExecContext(ctx, `DELETE FROM tgsources WHERE id=?`, id)

@@ -2,6 +2,7 @@ package tgsearch
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
@@ -90,6 +91,64 @@ func Verify(q Query, hit tguser.SearchHit, tag string, th Thresholds) Verdict {
 }
 
 func hasSignatureLine(caption string) bool { return strings.Contains(caption, "jftg:") }
+
+// credibleVideo reports that a channel post is a real video or a video sent as a document, not a
+// sample, a trailer, or a file whose signature does not hold.
+func credibleVideo(p tguser.Post, th Thresholds) bool {
+	if p.ID == 0 || p.Animated || p.Round || !videoFile(p) {
+		return false
+	}
+	hit := tguser.SearchHit{
+		MessageID: p.ID, Caption: p.Caption, Size: p.Size,
+		Video: true, Duration: int(p.Duration.Seconds()), NoForward: p.NoForward,
+	}
+	if q, tag, ok := queryIn(p.Caption); ok {
+		return Verify(q, hit, tag, th).OK
+	}
+	if hasSignatureLine(p.Caption) {
+		meta, ok := sign.ParseCaption(p.Caption)
+		if !ok || !meta.Authentic() {
+			return false
+		}
+	}
+	if th.MinBytes > 0 && p.Size > 0 && p.Size < th.MinBytes {
+		return false
+	}
+	if th.MinSeconds > 0 && p.Duration > 0 && int(p.Duration.Seconds()) < th.MinSeconds {
+		return false
+	}
+	return p.Size > 0 || p.Duration > 0
+}
+
+func videoFile(p tguser.Post) bool {
+	if strings.HasPrefix(strings.ToLower(p.MIME), "video/") || p.Duration > 0 {
+		return true
+	}
+	name := strings.ToLower(p.Name)
+	for _, ext := range []string{".mp4", ".mkv", ".webm", ".mov", ".avi"} {
+		if strings.HasSuffix(name, ext) {
+			return true
+		}
+	}
+	return false
+}
+
+// queryIn reads the first library hashtag in a caption.
+func queryIn(caption string) (Query, string, bool) {
+	if m := reMovie.FindStringSubmatch(caption); m != nil {
+		id, _ := strconv.Atoi(m[1])
+		if id > 0 {
+			return Query{TMDB: id, Movie: true}, m[0], true
+		}
+	}
+	if m := reTV.FindStringSubmatch(caption); m != nil {
+		id, _ := strconv.Atoi(m[1])
+		if id > 0 {
+			return Query{TMDB: id}, m[0], true
+		}
+	}
+	return Query{}, "", false
+}
 
 // metaMismatch compares the signed claim with the wanted title and with the file at hand.
 func metaMismatch(q Query, m sign.Meta, hit tguser.SearchHit, tag string) string {

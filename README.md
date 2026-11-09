@@ -557,22 +557,32 @@ trailer (shortest running time and smallest size). A film must run about as long
 the file. A forged line never counts against the key it names.
 
 **Trust.** Each accepted file gives one point to its channel and to its signer key, and the search
-prefers higher-trust channels and keys. A channel that reaches `TELEGRAM_SEARCH_PROMOTE_AT` points
-is added to the direct file channels (marked as discovered, with the reason), up to
-`TELEGRAM_SEARCH_MAX_DISCOVERED`. A channel or key whose files fail repeatedly, and more often than
-they pass, goes on a denylist. Points, the denylist and what was already tried survive a restart.
-Global searches run one at a time and back off when Telegram asks for a wait.
+prefers higher-trust channels and keys. The first accepted file from a channel makes the account
+read that channel's other videos and document-videos and verify them then. When
+`TELEGRAM_SEARCH_PROMOTE_AT` of them pass, the channel is added to the direct file channels
+(marked as discovered, with the reason). A discovered channel that is banned, forbids copying, or
+has not given a file for 21 days is removed when a new one needs its place, up to
+`TELEGRAM_SEARCH_MAX_DISCOVERED`. A channel a person added is left alone. A channel or key whose
+files fail repeatedly, and more often than they pass, goes on a denylist. Points, the denylist and
+what was already tried survive a restart. Title searches run one at a time and back off when
+Telegram asks for a wait.
 
-**Hashtag index (off by default).** Telegram's own search only finds posts in chats the account
-has joined. [telegram-hashtag-index](https://github.com/Aryan-mor/telegram-hashtag-index) is a
-small bot that keeps links to public posts under hashtags. Set `HASHTAG_INDEX_BOT` to its
-username and, with a signed-in account:
+**Hashtag index (on when an account is signed in).** Telegram's own search only finds posts in
+chats the account has joined. [telegram-hashtag-index](https://github.com/Aryan-mor/telegram-hashtag-index)
+is a small bot that keeps links to public posts under hashtags. `HASHTAG_INDEX_BOT` defaults to
+`tgHashtagIndexBot`. With a signed-in account the index is on; set the variable to `off` to stop it.
 
 - every post this library copies into a **public mirror** is handed to the index with its
   hashtag (a durable queue, 25 links a minute, nothing is sent twice);
-- every title search, from Seerr requests and from trending, also asks the index
-  (`#tm_m_<tmdb>`, `#tm_m_<tmdb>_*` or `#tm_tv_<tmdb>_*`, which also cover a language suffix), reads the posts it names and sends them
-  through the same verification as any other hit. Posts in this library's own mirrors are skipped.
+- every title search, from Seerr requests and from trending, asks the index first
+  (`#tm_m_<tmdb>`, `#tm_m_<tmdb>_*` or `#tm_tv_<tmdb>_*`, which also cover a language suffix). That
+  is where a new direct channel is found. When the index has nothing, the account searches the
+  chats it already has, once. Hits go through the same verification. Posts in this library's own
+  mirrors are skipped.
+
+A mirror channel that Telegram bans is replaced: a new channel is created with the same bot and
+the same parts, and the library is copied there. A public mirror gets a new public name. Another
+ban within six hours is recorded and does not create a further channel.
 
 **Trending (off by default).** With `TRENDING_SEARCH=true` and a `TMDB_API_KEY`, the top of TMDB's
 daily trending list is searched once a day. Titles not released yet are skipped and looked at again
@@ -586,10 +596,10 @@ and erotic titles are dropped unless `TRENDING_ALLOW_ADULT=true`, and only title
 | `TELEGRAM_SEARCH_MIN_MINUTES` | 10 | Shortest running time accepted (0 = off) |
 | `TELEGRAM_SEARCH_MIN_MB` | 50 | Smallest file accepted (0 = off) |
 | `TELEGRAM_SEARCH_RUNTIME_TOLERANCE_PCT` | 25 | Allowed difference from a film's TMDB runtime (0 = off) |
-| `TELEGRAM_SEARCH_PROMOTE_AT` | 10 | Accepted files that make a channel a direct file channel |
-| `TELEGRAM_SEARCH_MAX_DISCOVERED` | 20 | Most channels the search may add (0 = never add) |
+| `TELEGRAM_SEARCH_PROMOTE_AT` | 10 | Verified videos in a channel, counted when the first file is found, that make it a direct file channel |
+| `TELEGRAM_SEARCH_MAX_DISCOVERED` | 50 | Most channels the search may add (0 = never add) |
 | `TELEGRAM_SEARCH_DENY_AFTER` | 3 | Failed files before a channel or key is denylisted |
-| `HASHTAG_INDEX_BOT` | empty | Username of the hashtag index bot; public mirror posts are shared with it and searches ask it |
+| `HASHTAG_INDEX_BOT` | `tgHashtagIndexBot` | Hashtag index bot. On when an account is signed in. `off` disables it |
 | `TRENDING_SEARCH` | false | Search TMDB trending once a day |
 | `TMDB_API_KEY` | empty | TMDB v3 key or v4 read token |
 | `TRENDING_ALLOW_ADULT` | false | Let adult-flagged titles through |

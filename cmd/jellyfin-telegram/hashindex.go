@@ -12,7 +12,8 @@ import (
 )
 
 // startHashIndex connects to the hashtag index bot and starts handing it the posts of public
-// mirrors. It returns nil when HASHTAG_INDEX_BOT is empty or no account can be used.
+// mirrors. The bot name defaults to tgHashtagIndexBot. It returns nil when that is turned off or
+// no account can be used. A signed-in account is enough for the index to be on.
 func startHashIndex(ctx context.Context, cfg config.Config, cat *catalog.Catalog, users *tguser.Manager, log *slog.Logger) *hashindex.Client {
 	if cfg.HashtagIndexBot == "" || users == nil || cat == nil {
 		return nil

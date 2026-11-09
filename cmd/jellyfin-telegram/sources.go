@@ -26,7 +26,7 @@ func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, source
 	svc := &tgsearch.Service{LibraryChannel: cfg.ChannelID, Log: log, On: tgsearch.Switch(envPath)}
 	if users != nil {
 		svc.TG = users
-		// With the hashtag index on, requests and trending also look there.
+		// With the hashtag index on, requests and trending ask it first.
 		if idx != nil {
 			svc.TG = &hashindex.Searcher{Account: users, Index: idx, Skip: ownMirror(cat), Log: log}
 		}

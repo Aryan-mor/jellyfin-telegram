@@ -243,6 +243,13 @@ func (s *Service) record(ctx context.Context, src catalog.Source, err error) (st
 		// Remember it, so the page can say why and the channel is not tried again.
 		_ = s.Cat.SetSourceError(ctx, src.ID, msg)
 		_, _ = s.Cat.AddSource(ctx, catalog.Source{ChannelID: src.ChannelID, Username: src.Username, Title: src.Title, NoForwards: true})
+		if src.Origin == catalog.OriginDiscovered {
+			s.dropDiscovered(ctx, src, "its owner forbids copying")
+		}
+		return false
+	}
+	if src.Origin == catalog.OriginDiscovered && sourceBanned(err) {
+		s.dropDiscovered(ctx, src, "it can no longer be read")
 		return false
 	}
 	_ = s.Cat.SetSourceError(ctx, src.ID, msg)
@@ -250,6 +257,18 @@ func (s *Service) record(ctx context.Context, src catalog.Source, err error) (st
 		s.Log.Warn("copying from a channel", "channel", src.Title, "err", err)
 	}
 	return false
+}
+
+func sourceBanned(err error) bool {
+	return tgerr.Is(err, "CHANNEL_PRIVATE", "CHANNEL_INVALID", "USER_BANNED_IN_CHANNEL", "CHANNEL_PUBLIC_GROUP_NA")
+}
+
+func (s *Service) dropDiscovered(ctx context.Context, src catalog.Source, why string) {
+	if err := s.Cat.DeleteSource(ctx, src.ID); err != nil {
+		s.logf("could not remove a discovered channel", "channel", src.ChannelID, "err", err)
+		return
+	}
+	s.logf("removed a discovered channel", "channel", src.ChannelID, "why", why)
 }
 
 func friendly(err error) string {
@@ -539,6 +558,83 @@ func (s *Service) AddDiscovered(ctx context.Context, channelID int64, note strin
 
 // Remove forgets a channel. What it already gave the library stays.
 func (s *Service) Remove(ctx context.Context, id int64) error { return s.Cat.DeleteSource(ctx, id) }
+
+// idleSourceAfter is how long a discovered channel may go without giving a file before a new find
+// can take its place. A banned channel is removed at once.
+const idleSourceAfter = 21 * 24 * time.Hour
+
+// FreeSlot removes one discovered channel that is banned, forbids copying, or has not given a
+// file for a long time. It reports false when every discovered channel is still usable. A channel
+// a person added is left alone.
+func (s *Service) FreeSlot(ctx context.Context) (bool, error) {
+	sources, err := s.Cat.Sources(ctx)
+	if err != nil {
+		return false, err
+	}
+	var drop catalog.Source
+	var dropAt int64
+	found := false
+	now := s.now()
+	for _, src := range sources {
+		if src.Origin != catalog.OriginDiscovered {
+			continue
+		}
+		last, err := s.Cat.SourceLastCopy(ctx, src.ID)
+		if err != nil {
+			return false, err
+		}
+		if !sourceDroppable(src, last, now) {
+			continue
+		}
+		activity := src.Added
+		if last > activity {
+			activity = last
+		}
+		if sourceBannedText(src.Error) || src.NoForwards {
+			activity = 0
+		}
+		if !found || activity < dropAt {
+			drop, dropAt, found = src, activity, true
+		}
+	}
+	if !found {
+		return false, nil
+	}
+	why := "it has not given a file for a long time"
+	if sourceBannedText(drop.Error) || drop.NoForwards {
+		why = "it can no longer be read"
+	}
+	s.dropDiscovered(ctx, drop, why)
+	return true, nil
+}
+
+// sourceDroppable reports that a discovered channel should give up its place.
+func sourceDroppable(src catalog.Source, lastCopy int64, now time.Time) bool {
+	if src.Origin != catalog.OriginDiscovered {
+		return false
+	}
+	if src.NoForwards || sourceBannedText(src.Error) {
+		return true
+	}
+	activity := src.Added
+	if lastCopy > activity {
+		activity = lastCopy
+	}
+	if activity <= 0 {
+		return false
+	}
+	return now.Sub(time.Unix(activity, 0)) > idleSourceAfter
+}
+
+func sourceBannedText(msg string) bool {
+	msg = strings.ToLower(msg)
+	for _, part := range []string{"cannot read", "channel_private", "channel_invalid", "user_banned", "forbids copying"} {
+		if strings.Contains(msg, part) {
+			return true
+		}
+	}
+	return false
+}
 
 // Strict makes one channel keep only files whose name shows a year or an episode number.
 func (s *Service) Strict(ctx context.Context, id int64, on bool) error {

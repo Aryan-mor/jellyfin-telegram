@@ -437,6 +437,79 @@ func TestTrendingWithoutAKeyIsQuiet(t *testing.T) {
 	}
 }
 
+type histTG struct {
+	recTG
+	page tguser.Page
+}
+
+func (h *histTG) History(context.Context, tguser.SourceRef, int, int) (tguser.Page, error) {
+	return h.page, nil
+}
+
+func vidPost(id int, caption string) tguser.Post {
+	return tguser.Post{ID: id, Size: 900 * mb, MIME: "video/x-matroska", Name: "film.mkv", Caption: caption, Duration: 100 * time.Minute}
+}
+
+func TestFirstFileAuditsTheChannel(t *testing.T) {
+	cat := openCat(t)
+	ctx := context.Background()
+	prom := &recPromoter{}
+	tg := &histTG{page: tguser.Page{Posts: []tguser.Post{
+		vidPost(1, "#tm_m_5"),
+		vidPost(2, "#tm_m_8"),
+		{ID: 3, Size: mb, MIME: "video/mp4", Name: "sample.mp4", Caption: "#tm_m_9", Duration: time.Minute},
+	}}}
+	tg.hits = []tguser.SearchHit{{ChannelID: 9, AccessHash: 1, MessageID: 1, Caption: "#tm_m_5", Video: true, Size: 900 * mb, Duration: 6000}}
+	s := &Service{TG: tg, Want: listWant{{TMDB: 5, Movie: true}}, Store: cat, Promote: prom, Verify: DefaultThresholds(),
+		Limits: Limits{PromoteAt: 2, MaxDiscovered: 5, QueryCooldown: -1}}
+	s.pass(ctx)
+	if len(tg.copied) != 1 || len(prom.got) != 1 || prom.got[0] != 9 {
+		t.Fatalf("copied %v promoted %v", tg.copied, prom.got)
+	}
+}
+
+func TestAShortChannelIsNotAdded(t *testing.T) {
+	cat := openCat(t)
+	ctx := context.Background()
+	prom := &recPromoter{}
+	tg := &histTG{page: tguser.Page{Posts: []tguser.Post{
+		{ID: 3, Size: mb, MIME: "video/mp4", Name: "sample.mp4", Duration: time.Minute},
+	}}}
+	tg.hits = []tguser.SearchHit{{ChannelID: 9, MessageID: 1, Caption: "#tm_m_5", Video: true, Size: 900 * mb, Duration: 6000}}
+	s := &Service{TG: tg, Want: listWant{{TMDB: 5, Movie: true}}, Store: cat, Promote: prom, Verify: DefaultThresholds(),
+		Limits: Limits{PromoteAt: 2, MaxDiscovered: 5, QueryCooldown: -1}}
+	s.pass(ctx)
+	if len(tg.copied) != 1 || len(prom.got) != 0 {
+		t.Fatalf("copied %v promoted %v", tg.copied, prom.got)
+	}
+}
+
+type roomPromoter struct {
+	recPromoter
+	freed bool
+}
+
+func (p *roomPromoter) FreeSlot(context.Context) (bool, error) {
+	p.freed = true
+	return true, nil
+}
+
+func TestFullListDropsADeadChannel(t *testing.T) {
+	cat := openCat(t)
+	ctx := context.Background()
+	if _, added, err := cat.AddDiscoveredSource(ctx, catalog.Source{ChannelID: 77, Title: "old"}, "test"); err != nil || !added {
+		t.Fatal(added, err)
+	}
+	prom := &roomPromoter{}
+	tg := &recTG{hits: []tguser.SearchHit{{ChannelID: 9, MessageID: 1, Caption: "#tm_m_5", Video: true, Size: 900 * mb, Duration: 6000}}}
+	s := &Service{TG: tg, Want: listWant{{TMDB: 5, Movie: true}}, Store: cat, Promote: prom, Verify: DefaultThresholds(),
+		Limits: Limits{PromoteAt: 1, MaxDiscovered: 1, QueryCooldown: -1}}
+	s.pass(ctx)
+	if !prom.freed || len(prom.got) != 1 || prom.got[0] != 9 {
+		t.Fatalf("freed %v promoted %v", prom.freed, prom.got)
+	}
+}
+
 func TestMultiJoinsAndDedupes(t *testing.T) {
 	m := Multi{listWant{{TMDB: 1, Movie: true}}, listWant{{TMDB: 1, Movie: true}, {TMDB: 2}}}
 	qs, _ := m.Queries(context.Background())

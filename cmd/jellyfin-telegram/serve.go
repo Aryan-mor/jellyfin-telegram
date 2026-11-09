@@ -309,7 +309,16 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	if news != nil {
 		go news.Run(ctx)
 	}
-	go (&mirror.Service{Cat: cat, Copy: pool.CopyMessage, Log: log, ReadyOnly: func() bool { return hub.Get() != nil }}).Run(ctx)
+	go (&mirror.Service{
+		Cat: cat, Copy: pool.CopyMessage, Log: log,
+		ReadyOnly: func() bool { return hub.Get() != nil },
+		Replace: func(ctx context.Context, m catalog.Mirror) error {
+			if users == nil {
+				return errors.New("sign in a Telegram account before a banned mirror can be replaced")
+			}
+			return replaceBannedMirror(ctx, cat, pool, users, m, log)
+		},
+	}).Run(ctx)
 	if g := hub.Get(); g != nil {
 		go g.Run(ctx)
 	}

@@ -11,6 +11,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gotd/td/tgerr"
+
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
@@ -33,6 +35,12 @@ type Service struct {
 	// their status line says ready and so does their signed line. A post that is still being
 	// reviewed, or still waits for its subtitles, is left for a later pass. Nil copies everything.
 	ReadyOnly func() bool
+	// Replace builds a new channel when the current mirror is banned, and points this mirror at it.
+	// Nil leaves the failure recorded and tries again on a later pass.
+	Replace func(ctx context.Context, m catalog.Mirror) error
+	// replaced remembers a mirror that was just replaced or that failed to be replaced, so a banned
+	// channel does not create a new one on every pass.
+	replaced map[int64]time.Time
 }
 
 // Run copies until ctx ends. A full library is spread over many passes.
@@ -86,6 +94,9 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		}
 		dest, err := s.Copy(ctx, m.BotID, messageID, m.ChannelID)
 		if err != nil {
+			if channelGone(err) {
+				return true, err
+			}
 			failed = err.Error()
 			s.log().Warn("mirror copy failed", "channel", m.Title, "message", messageID, "err", err)
 			return true, nil
@@ -122,6 +133,9 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		}
 		refused, err := send(it.MessageID)
 		if err != nil {
+			if channelGone(err) {
+				return s.replaceBanned(ctx, m, err)
+			}
 			return err
 		}
 		if refused {
@@ -129,6 +143,9 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		}
 		if hasArchive {
 			if refused, err = send(archive.MessageID); err != nil {
+				if channelGone(err) {
+					return s.replaceBanned(ctx, m, err)
+				}
 				return err
 			} else if refused {
 				break
@@ -146,6 +163,9 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 				break
 			}
 			if refused, err := send(id); err != nil {
+				if channelGone(err) {
+					return s.replaceBanned(ctx, m, err)
+				}
 				return err
 			} else if refused {
 				break
@@ -153,6 +173,35 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		}
 	}
 	return s.Cat.SetMirrorError(ctx, m.ID, failed)
+}
+
+// channelGone reports that Telegram will not let this account use the channel any more.
+func channelGone(err error) bool {
+	return tgerr.Is(err, "CHANNEL_PRIVATE", "CHANNEL_INVALID", "USER_BANNED_IN_CHANNEL", "CHANNEL_PUBLIC_GROUP_NA")
+}
+
+// replaceBanned creates one new mirror channel and stops this pass. A second ban within six hours
+// is only recorded, so a failure cannot keep creating channels.
+func (s *Service) replaceBanned(ctx context.Context, m catalog.Mirror, cause error) error {
+	if s.replaced != nil {
+		if t, ok := s.replaced[m.ID]; ok && time.Since(t) < 6*time.Hour {
+			return s.Cat.SetMirrorError(ctx, m.ID, cause.Error())
+		}
+	}
+	if s.replaced == nil {
+		s.replaced = map[int64]time.Time{}
+	}
+	s.replaced[m.ID] = time.Now()
+	if s.Replace == nil {
+		return s.Cat.SetMirrorError(ctx, m.ID, cause.Error())
+	}
+	s.log().Warn("mirror channel is banned; creating a new one", "channel", m.Title, "err", cause)
+	if err := s.Replace(ctx, m); err != nil {
+		s.log().Warn("could not create a replacement mirror", "channel", m.Title, "err", err)
+		return s.Cat.SetMirrorError(ctx, m.ID, "could not create a replacement channel: "+err.Error())
+	}
+	s.log().Info("replaced a banned mirror channel", "channel", m.Title)
+	return nil
 }
 
 func (s *Service) log() *slog.Logger {

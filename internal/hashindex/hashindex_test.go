@@ -105,11 +105,13 @@ func TestSubmitBatches(t *testing.T) {
 type account struct {
 	global  []tguser.SearchHit
 	globErr error
+	calls   int
 	byLink  map[string]tguser.SearchHit
 	asked   []tguser.PostRef
 }
 
 func (a *account) SearchHashtag(context.Context, string) ([]tguser.SearchHit, error) {
+	a.calls++
 	return a.global, a.globErr
 }
 func (a *account) InReady(context.Context, string) (bool, error)       { return false, nil }
@@ -125,11 +127,11 @@ func (a *account) PostsByLink(_ context.Context, refs []tguser.PostRef) ([]tguse
 	return out, nil
 }
 
-func TestSearcherMergesGlobalAndIndexHits(t *testing.T) {
+func TestSearcherAsksTheIndexBeforeJoinedChats(t *testing.T) {
 	acc := &account{
-		global: []tguser.SearchHit{{ChannelID: 1, MessageID: 10}},
+		global: []tguser.SearchHit{{ChannelID: 9, MessageID: 99}},
 		byLink: map[string]tguser.SearchHit{
-			"chan1/10": {ChannelID: 1, MessageID: 10}, // also found by the global search
+			"chan1/10": {ChannelID: 1, MessageID: 10},
 			"chan2/20": {ChannelID: 2, MessageID: 20},
 			"mine/30":  {ChannelID: 3, MessageID: 30},
 		},
@@ -142,6 +144,9 @@ func TestSearcherMergesGlobalAndIndexHits(t *testing.T) {
 	hits, err := s.SearchHashtag(context.Background(), "#tm_m_603")
 	if err != nil || len(hits) != 2 || hits[0].MessageID != 10 || hits[1].MessageID != 20 {
 		t.Fatalf("hits %+v, %v", hits, err)
+	}
+	if acc.calls != 0 {
+		t.Fatalf("joined chats were searched even though the index had the title: %d", acc.calls)
 	}
 	// A film is asked for twice: its own tag and the tags with language letters.
 	if len(b.sent) != 2 || !strings.Contains(b.sent[0], "/q #tm_m_603 kind:") || !strings.Contains(b.sent[1], "/q #tm_m_603_* kind:") {
@@ -156,14 +161,14 @@ func TestSearcherMergesGlobalAndIndexHits(t *testing.T) {
 
 func TestSearcherSurvivesFailures(t *testing.T) {
 	flood := errors.New("flood wait")
-	// The index is down: the global result and its error come through untouched.
+	// The index is down: one look through joined chats, and its error, still comes through.
 	acc := &account{global: []tguser.SearchHit{{ChannelID: 1, MessageID: 10}}, globErr: flood}
 	s := &Searcher{Account: acc, Index: &Client{Bot: "idxbot", TG: &bot{err: errors.New("the bot did not answer")}}}
 	hits, err := s.SearchHashtag(context.Background(), "#tm_tv_5")
-	if len(hits) != 1 || !errors.Is(err, flood) {
-		t.Errorf("index down: %v, %v", hits, err)
+	if len(hits) != 1 || !errors.Is(err, flood) || acc.calls != 1 {
+		t.Errorf("index down: %v, %v, calls %d", hits, err, acc.calls)
 	}
-	// The global search failed but the index found something: the title still moves on.
+	// The index found the title, so joined chats are not searched.
 	acc = &account{globErr: flood, byLink: map[string]tguser.SearchHit{"chan2/20": {ChannelID: 2, MessageID: 20}}}
 	s = &Searcher{Account: acc, Index: &Client{Bot: "idxbot", TG: &bot{answers: []string{"https://t.me/chan2/20 video #tm_tv_5_1_1"}}}}
 	hits, err = s.SearchHashtag(context.Background(), "#tm_tv_5")

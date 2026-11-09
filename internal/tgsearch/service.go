@@ -71,7 +71,9 @@ type Promoter interface {
 
 // Limits are the numbers that steer trust and politeness. Zero fields take the defaults.
 type Limits struct {
-	// PromoteAt is how many accepted files make a channel a direct file channel.
+	// PromoteAt is how many verified videos a channel must show, counted when the first file from
+	// it is accepted, before it becomes a direct file channel. When the channel cannot be read,
+	// the same number of accepted search hits is used instead.
 	PromoteAt int
 	// MaxDiscovered caps the channels the search may add. Negative turns promotion off.
 	MaxDiscovered int
@@ -91,7 +93,7 @@ func (l Limits) withDefaults() Limits {
 		l.PromoteAt = 10
 	}
 	if l.MaxDiscovered == 0 {
-		l.MaxDiscovered = 20
+		l.MaxDiscovered = 50
 	}
 	if l.DenyAfter <= 0 {
 		l.DenyAfter = 3
@@ -400,15 +402,40 @@ func signerOf(h tguser.SearchHit) string {
 	return sign.KeyID(meta.PubKey)
 }
 
-// reward gives the accepted file's channel and signer a point, and promotes a channel that earned
-// enough of them.
+// channelHistory reads the videos of one channel. The signed-in account and the hashtag searcher
+// both provide it.
+type channelHistory interface {
+	History(ctx context.Context, ref tguser.SourceRef, offsetID, limit int) (tguser.Page, error)
+}
+
+// slotFreeer drops one discovered channel that is banned or no longer posting, so a new one can
+// take its place. Promotion still works when the promoter does not implement this.
+type slotFreeer interface {
+	FreeSlot(ctx context.Context) (bool, error)
+}
+
+// reward gives the accepted file's channel and signer a point. The first accepted file makes the
+// search read that channel's other videos and document-videos and verify them then. Enough of
+// those, and the channel becomes a direct file channel.
 func (s *Service) reward(ctx context.Context, hit tguser.SearchHit, v Verdict, lim Limits) {
 	s.addPoint(ctx, catalog.TrustChannel, channelKey(hit.ChannelID))
 	if v.KeyID != "" {
 		s.addPoint(ctx, catalog.TrustKey, v.KeyID)
 	}
 	t := s.getTrust(catalog.TrustChannel, channelKey(hit.ChannelID))
-	if s.Promote == nil || lim.MaxDiscovered < 0 || t.Denied || t.Points < lim.PromoteAt {
+	if s.Promote == nil || lim.MaxDiscovered < 0 || t.Denied {
+		return
+	}
+	verified := t.Points
+	if hist, ok := s.TG.(channelHistory); ok {
+		n, err := s.auditChannel(ctx, hit, hist, lim.PromoteAt)
+		if err != nil {
+			s.warn("read the channel before adding it", err)
+		} else {
+			verified = n
+		}
+	}
+	if verified < lim.PromoteAt {
 		return
 	}
 	if s.Store != nil {
@@ -418,17 +445,67 @@ func (s *Service) reward(ctx context.Context, hit tguser.SearchHit, v Verdict, l
 			return
 		}
 		if n >= lim.MaxDiscovered {
-			return
+			free, ok := s.Promote.(slotFreeer)
+			if !ok {
+				return
+			}
+			freed, err := free.FreeSlot(ctx)
+			if err != nil {
+				s.warn("drop a direct channel that is not usable", err)
+				return
+			}
+			if !freed {
+				return
+			}
 		}
 	}
-	added, err := s.Promote.AddDiscovered(ctx, hit.ChannelID, fmt.Sprintf("%d verified files", t.Points))
+	added, err := s.Promote.AddDiscovered(ctx, hit.ChannelID, fmt.Sprintf("%d verified files", verified))
 	if err != nil {
 		s.warn("add discovered channel", err)
 		return
 	}
 	if added && s.Log != nil {
-		s.Log.Info("a channel earned enough trust to become a direct file channel", "channel", hit.ChannelID, "points", t.Points)
+		s.Log.Info("a channel's videos verified, so it became a direct file channel", "channel", hit.ChannelID, "verified", verified)
 	}
+}
+
+// auditChannel counts real videos and document-videos in the channel, including the file just
+// accepted. It stops once want of them pass. Two pages are enough to see a channel that posts films.
+func (s *Service) auditChannel(ctx context.Context, hit tguser.SearchHit, hist channelHistory, want int) (int, error) {
+	if want < 1 {
+		want = 1
+	}
+	ref := tguser.SourceRef{ChannelID: hit.ChannelID, AccessHash: hit.AccessHash}
+	seenHit := false
+	verified := 0
+	offset := 0
+	var firstErr error
+	for pageN := 0; pageN < 2 && verified < want; pageN++ {
+		page, err := hist.History(ctx, ref, offset, 100)
+		if err != nil {
+			if verified == 0 && !seenHit {
+				return 0, err
+			}
+			firstErr = err
+			break
+		}
+		for _, p := range page.Posts {
+			if p.ID == hit.MessageID {
+				seenHit = true
+			}
+			if credibleVideo(p, s.Verify) {
+				verified++
+			}
+		}
+		if !page.More || page.Lowest == 0 || page.Lowest == offset {
+			break
+		}
+		offset = page.Lowest
+	}
+	if !seenHit {
+		verified++
+	}
+	return verified, firstErr
 }
 
 func (s *Service) addPoint(ctx context.Context, kind, id string) {
