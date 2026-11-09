@@ -89,6 +89,9 @@ type Options struct {
 	Job func() JobView
 	// Restart starts the program again so new settings apply. Nil means the button is not available.
 	Restart func() error
+	// ApplyUpdate downloads the newest release for this channel and replaces the program.
+	// Nil means the install button is not available. The caller starts the new program.
+	ApplyUpdate func(context.Context) error
 	// AutoFilter serves the auto-add filter under /panel. It may be nil.
 	AutoFilter setup.Mounter
 	// Logs lists one page of what an account or a bot did. kind is "account" or "bot".
@@ -149,6 +152,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /panel/update", p.guard(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, version.Check(r.Context()))
 	}))
+	mux.HandleFunc("POST /panel/update", p.guard(p.handleUpdate))
 	if o.AutoFilter != nil {
 		o.AutoFilter.Mount(mux, "/panel", p.guard)
 	}
@@ -641,6 +645,22 @@ func (p *panel) handleBotJob(action string) http.HandlerFunc {
 		out, err := p.o.BotCreate(r, action, body)
 		writeJob(w, out, err)
 	}
+}
+
+func (p *panel) handleUpdate(w http.ResponseWriter, r *http.Request) {
+	if !setup.TrustedClient(r) {
+		writeError(w, http.StatusForbidden, "Install an update from this computer or over Tailscale. The panel is plain HTTP.")
+		return
+	}
+	if p.o.ApplyUpdate == nil {
+		writeError(w, http.StatusNotFound, "installing an update is not available")
+		return
+	}
+	if err := p.o.ApplyUpdate(r.Context()); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
 func (p *panel) handleRestart(w http.ResponseWriter, r *http.Request) {

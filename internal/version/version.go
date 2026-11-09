@@ -23,7 +23,7 @@ var Channel = "stable"
 // Repo is the GitHub repository whose releases are checked.
 const Repo = "Aryan-mor/jellyfin-telegram"
 
-const cacheFor = 6 * time.Hour
+const cacheFor = 15 * time.Minute
 
 // Info is what the panel shows.
 type Info struct {
@@ -35,23 +35,30 @@ type Info struct {
 	Notes     string `json:"notes,omitempty"`
 }
 
+// Asset is one file attached to a GitHub release.
+type Asset struct {
+	Name string
+	URL  string
+}
+
 // Release is one GitHub release, newest-or-not. Choose picks the one this install should follow.
 type Release struct {
-	Tag   string
-	URL   string
-	Notes string
-	Pre   bool
+	Tag    string
+	URL    string
+	Notes  string
+	Pre    bool
+	Assets []Asset
 }
 
 var (
 	mu      sync.Mutex
 	cached  Info
 	fetched time.Time
-	// Fetch can be replaced in tests.
+	// Fetch loads the release this channel should follow. Tests replace it.
 	Fetch = fetchLatest
 )
 
-// Check returns the running version and the newest release. The answer is cached for six hours,
+// Check returns the running version and the newest release. The answer is cached for 15 minutes,
 // and a failed lookup (offline, rate limited) simply reports no update.
 func Check(ctx context.Context) Info {
 	info := Info{Current: Version, Channel: Channel}
@@ -65,15 +72,15 @@ func Check(ctx context.Context) Info {
 		cached.Channel = Channel
 		return cached
 	}
-	tag, url, notes, err := Fetch(ctx)
+	rel, err := Fetch(ctx)
 	fetched = time.Now()
 	if err != nil {
 		cached = info
 		return cached
 	}
-	info.Latest = strings.TrimPrefix(tag, "v")
-	info.URL = url
-	info.Notes = notes
+	info.Latest = strings.TrimPrefix(rel.Tag, "v")
+	info.URL = rel.URL
+	info.Notes = rel.Notes
 	info.Available = Newer(info.Latest, Version)
 	cached = info
 	return info
@@ -150,31 +157,35 @@ func Choose(channel string, list []Release) (Release, bool) {
 	return best, found
 }
 
-func fetchLatest(ctx context.Context) (tag, url, notes string, err error) {
+func fetchLatest(ctx context.Context) (Release, error) {
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+Repo+"/releases?per_page=30", nil)
 	if err != nil {
-		return "", "", "", err
+		return Release{}, err
 	}
 	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "jellyfin-telegram")
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {
-		return "", "", "", err
+		return Release{}, err
 	}
 	defer res.Body.Close()
 	if res.StatusCode != http.StatusOK {
-		return "", "", "", fmt.Errorf("github answered %d", res.StatusCode)
+		return Release{}, fmt.Errorf("github answered %d", res.StatusCode)
 	}
 	var body []struct {
-		Tag  string `json:"tag_name"`
-		URL  string `json:"html_url"`
-		Body string `json:"body"`
-		Pre  bool   `json:"prerelease"`
+		Tag    string `json:"tag_name"`
+		URL    string `json:"html_url"`
+		Body   string `json:"body"`
+		Pre    bool   `json:"prerelease"`
+		Assets []struct {
+			Name string `json:"name"`
+			URL  string `json:"browser_download_url"`
+		} `json:"assets"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
-		return "", "", "", err
+		return Release{}, err
 	}
 	list := make([]Release, 0, len(body))
 	for _, rel := range body {
@@ -182,11 +193,15 @@ func fetchLatest(ctx context.Context) (tag, url, notes string, err error) {
 		if len(notes) > 1500 {
 			notes = notes[:1500]
 		}
-		list = append(list, Release{Tag: rel.Tag, URL: rel.URL, Notes: notes, Pre: rel.Pre})
+		assets := make([]Asset, 0, len(rel.Assets))
+		for _, asset := range rel.Assets {
+			assets = append(assets, Asset{Name: asset.Name, URL: asset.URL})
+		}
+		list = append(list, Release{Tag: rel.Tag, URL: rel.URL, Notes: notes, Pre: rel.Pre, Assets: assets})
 	}
 	chosen, ok := Choose(Channel, list)
 	if !ok {
-		return "", "", "", fmt.Errorf("no %s release", Channel)
+		return Release{}, fmt.Errorf("no %s release", Channel)
 	}
-	return chosen.Tag, chosen.URL, chosen.Notes, nil
+	return chosen, nil
 }

@@ -50,6 +50,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/version"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 	"github.com/gotd/td/tg"
 )
@@ -558,7 +559,13 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		ForumDo:      forumDo(envPath, cat, hub, pool),
 		Verify:       verifyTelegram(dataDir, log),
 		Restart:      func() error { return scheduleRestart(restartStop) },
-		AutoFilter:   autoFilter(envPath),
+		ApplyUpdate: func(ctx context.Context) error {
+			if err := version.Install(ctx); err != nil {
+				return err
+			}
+			return scheduleRestart(restartStop)
+		},
+		AutoFilter: autoFilter(envPath),
 		Logs: func(kind string, id int64, page, limit int) (any, int, error) {
 			if journal == nil {
 				return []actlog.Entry{}, 0, nil

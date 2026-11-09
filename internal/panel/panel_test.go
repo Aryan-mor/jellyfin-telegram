@@ -604,3 +604,39 @@ func TestRestartNeedsThisComputer(t *testing.T) {
 		t.Fatalf("restart without a hook: %d", rec.Code)
 	}
 }
+
+func TestUpdateInstallNeedsThisComputer(t *testing.T) {
+	path := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	var calls int
+	h := New(Options{
+		Code: "secret", EnvPath: path,
+		ApplyUpdate: func(context.Context) error {
+			calls++
+			return nil
+		},
+	})
+	call := func(addr string) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(http.MethodPost, "/panel/update?code=secret", strings.NewReader(`{}`))
+		req.RemoteAddr = addr
+		rec := httptest.NewRecorder()
+		h.ServeHTTP(rec, req)
+		return rec
+	}
+	if rec := call("192.168.1.9:1"); rec.Code != http.StatusForbidden {
+		t.Fatalf("install from the LAN: %d", rec.Code)
+	}
+	if rec := call("127.0.0.1:9"); rec.Code != http.StatusOK || calls != 1 {
+		t.Fatalf("install here: %d calls=%d %s", rec.Code, calls, rec.Body.String())
+	}
+	gone := New(Options{Code: "secret", EnvPath: path})
+	req := httptest.NewRequest(http.MethodPost, "/panel/update?code=secret", strings.NewReader(`{}`))
+	req.RemoteAddr = "127.0.0.1:9"
+	rec := httptest.NewRecorder()
+	gone.ServeHTTP(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("install without a hook: %d", rec.Code)
+	}
+}

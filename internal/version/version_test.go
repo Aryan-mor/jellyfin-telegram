@@ -47,7 +47,7 @@ func TestChooseStaysOnOneChannel(t *testing.T) {
 func TestDevBuildNeverOffersAnUpdate(t *testing.T) {
 	old := Fetch
 	t.Cleanup(func() { Fetch = old })
-	Fetch = func(context.Context) (string, string, string, error) { return "v9.9.9", "u", "", nil }
+	Fetch = func(context.Context) (Release, error) { return Release{Tag: "v9.9.9", URL: "u"}, nil }
 	if Check(context.Background()).Available {
 		t.Fatal("a dev build offered an update")
 	}

@@ -67,11 +67,12 @@ export function Shell() {
   const update = useQuery({
     queryKey: ["panel-update"],
     queryFn: () => api<{ current: string; channel?: string; latest?: string; available: boolean; url?: string }>("/panel/update"),
-    refetchInterval: () => (pollingPaused() ? false : 6 * 60 * 60 * 1000),
-    staleTime: 60 * 60 * 1000,
+    refetchInterval: () => (pollingPaused() ? false : 15 * 60 * 1000),
+    staleTime: 5 * 60 * 1000,
   })
   const [restart, setRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)
+  const [installing, setInstalling] = useState(false)
   const [open, setOpen] = useState(false)
   const [theme, setTheme] = useState(themeNow)
   useEffect(() => {
@@ -85,6 +86,15 @@ export function Shell() {
   }, [])
   useEffect(() => { if (job.data?.restart) setRestart(true) }, [job.data?.restart])
   useEffect(() => { adoptServerLanguage(state.data?.ui_language) }, [state.data?.ui_language])
+  useEffect(() => {
+    const data = update.data
+    if (!data?.available || !data.latest) return
+    const key = "jftg-update-noted"
+    if (sessionStorage.getItem(key) === data.latest) return
+    sessionStorage.setItem(key, data.latest)
+    const kind = data.channel === "nightly" ? t("nightly") : t("version")
+    toast(t("A new {{kind}} is out: {{latest}}", { kind, latest: data.latest }))
+  }, [update.data])
   useEffect(() => {
     const q = new URLSearchParams(window.location.search)
     const notice = q.get("notice")
@@ -148,9 +158,12 @@ export function Shell() {
         {update.data?.available && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-sky-500/15 px-4 py-2 text-sm">
             <span>
-              {t("A new {{kind}} is out: {{latest}} (you have {{current}}). Run the installer again. It stays on this channel, and your settings and library are kept.", { kind: update.data.channel === "nightly" ? t("nightly") : t("version"), latest: update.data.latest ?? "", current: update.data.current ?? "" })}
+              {t("A new {{kind}} is out: {{latest}} (you have {{current}}). Install it here, or open the release page. This stays on this channel, and your settings and library are kept.", { kind: update.data.channel === "nightly" ? t("nightly") : t("version"), latest: update.data.latest ?? "", current: update.data.current ?? "" })}
             </span>
-            {update.data.url && <a className="font-medium underline" href={update.data.url} target="_blank" rel="noreferrer">{t("What changed")}</a>}
+            <span className="flex items-center gap-3">
+              <Button size="sm" disabled={installing} onClick={() => void installUpdate(setInstalling)}>{installing ? t("Installing") : t("Install update")}</Button>
+              {update.data.url && <a className="font-medium underline" href={update.data.url} target="_blank" rel="noreferrer">{t("Release page")}</a>}
+            </span>
           </div>
         )}
         {restart && (
@@ -168,6 +181,42 @@ export function Shell() {
   )
 }
 
+async function waitUntilBack() {
+  let sawDown = false
+  for (let i = 0; i < 90; i++) {
+    await new Promise((r) => setTimeout(r, 1000))
+    let up = false
+    try {
+      const res = await fetch("/panel/state?code=" + encodeURIComponent(panelCode()), { cache: "no-store" })
+      up = res.ok
+    } catch {
+      up = false
+    }
+    if (!up) sawDown = true
+    else if (sawDown) return true
+  }
+  return false
+}
+
+async function installUpdate(setBusy: (v: boolean) => void) {
+  const ok = await confirmDialog(t("Install this update?"), t("Playback stops while the new version is installed. This usually takes under a minute."), t("Install update"), false)
+  if (!ok) return
+  setBusy(true)
+  try {
+    await api("/panel/update", {})
+    toast(t("Installing"))
+    if (await waitUntilBack()) {
+      location.reload()
+      return
+    }
+    toast.error(t("The program did not come back. Start it again from this computer."))
+    setBusy(false)
+  } catch (e) {
+    toast.error(e instanceof Error ? e.message : t("The update failed"))
+    setBusy(false)
+  }
+}
+
 async function restartProgram(setBusy: (v: boolean) => void) {
   const ok = await confirmDialog(t("Restart now?"), t("Playback stops until the program is back. This usually takes under a minute."), t("Restart"), false)
   if (!ok) return
@@ -175,21 +224,9 @@ async function restartProgram(setBusy: (v: boolean) => void) {
   try {
     await api("/panel/restart", {})
     toast(t("Restarting"))
-    let sawDown = false
-    for (let i = 0; i < 60; i++) {
-      await new Promise((r) => setTimeout(r, 1000))
-      let up = false
-      try {
-        const res = await fetch("/panel/state?code=" + encodeURIComponent(panelCode()), { cache: "no-store" })
-        up = res.ok
-      } catch {
-        up = false
-      }
-      if (!up) sawDown = true
-      else if (sawDown) {
-        location.reload()
-        return
-      }
+    if (await waitUntilBack()) {
+      location.reload()
+      return
     }
     toast.error(t("The program did not come back. Start it again from this computer."))
     setBusy(false)
