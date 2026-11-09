@@ -5,7 +5,7 @@ import { Toaster, toast } from "sonner"
 import "@/index.css"
 import { api, panelCode } from "@/lib/api"
 import { Button, Card, CardBody, Checkbox, FieldLabel, Input, SwitchBox, Textarea } from "@/components/ui"
-import { CopyField, LoginForm, MultiSelect, ProgressSteps } from "@/components/widgets"
+import { ConfirmHost, confirmDialog, CopyField, LoginForm, MultiSelect, ProgressSteps } from "@/components/widgets"
 
 const client = new QueryClient()
 
@@ -43,10 +43,12 @@ function Setup() {
   const [own, setOwn] = useState(false)
   const [apiId, setApiId] = useState("")
   const [apiHash, setApiHash] = useState("")
+  const [signedIn, setSignedIn] = useState(false)
 
   useEffect(() => {
     void api<{ available: boolean; signed_in: boolean; found?: Found }>("/setup/auto/info").then((info) => {
       setAvailable(info.available)
+      setSignedIn(info.signed_in)
       if (info.found) { setFound(info.found); setMode("auto"); setStep("prefs") }
     }).catch(() => setAvailable(false))
   }, [])
@@ -68,9 +70,29 @@ function Setup() {
     setStep("done")
   }
 
+  async function signOut() {
+    if (!(await confirmDialog("Sign out of Telegram?", "The session on this computer ends. Sign in again to continue setup.", "Sign out"))) return
+    try {
+      await api("/setup/auto/logout", {})
+      setFound(null)
+      setJob(null)
+      setOwned([])
+      setPicked([])
+      setChannel("")
+      setSignedIn(false)
+      if (mode === "auto") setStep("login")
+      toast("Signed out")
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not sign out")
+    }
+  }
+
   return (
     <div className="mx-auto max-w-lg space-y-4 p-4">
-      <div className="text-sm font-semibold">jellyfin-telegram <span className="font-normal text-muted-foreground">First-time setup</span></div>
+      <div className="flex items-center justify-between gap-2">
+        <div className="text-sm font-semibold">jellyfin-telegram <span className="font-normal text-muted-foreground">First-time setup</span></div>
+        {signedIn && step !== "done" && <Button size="sm" variant="ghost" onClick={() => void signOut()}>Sign out</Button>}
+      </div>
       <ol className="flex gap-2 text-xs text-muted-foreground">
         {["Sign in", "Channel", "Bots", "Subtitles", "Done"].map((label, i) => <li key={label} className={i <= ["login", "channel", "bots", "prefs", "done"].indexOf(step) ? "font-medium text-foreground" : ""}>{i + 1}. {label}</li>)}
       </ol>
@@ -78,12 +100,12 @@ function Setup() {
         {mode === "choose" && <>
           <h1 className="text-lg font-semibold">Connect Telegram</h1>
           <p className="text-sm text-muted-foreground">Your videos live in a private Telegram channel, and bots read them for playback.</p>
-          <Button className="w-full" disabled={!available} onClick={() => { setMode("auto"); void api("/setup/auto/resume", {}).then((r) => { const info = r as { signed_in?: boolean; found?: Found }; if (info.found) { setFound(info.found); setStep("prefs"); return }; setStep(info.signed_in ? "channel" : "login") }).catch((e) => toast.error(e.message)) }}>Automatic</Button>
+          <Button className="w-full" disabled={!available} onClick={() => { setMode("auto"); void api<{ signed_in?: boolean; found?: Found }>("/setup/auto/resume", {}).then((info) => { setSignedIn(!!info.signed_in); if (info.found) { setFound(info.found); setStep("prefs"); return }; setStep(info.signed_in ? "channel" : "login") }).catch((e) => toast.error(e.message)) }}>Automatic</Button>
           <Button className="w-full" variant="outline" onClick={() => { setMode("manual"); setStep("login") }}>Manual</Button>
           {!available && <p className="text-sm">The automatic setup is not available in this run. Use the manual way.</p>}
         </>}
         {mode === "auto" && step === "login" && <>
-          <LoginForm resend path="/setup/auto/login" extra={own && apiId && apiHash ? { api_id: apiId, api_hash: apiHash } : undefined} onDone={() => setStep("channel")} />
+          <LoginForm resend path="/setup/auto/login" extra={own && apiId && apiHash ? { api_id: apiId, api_hash: apiHash } : undefined} onDone={() => { setSignedIn(true); setStep("channel") }} />
           <Checkbox checked={own} onCheckedChange={setOwn} label="Advanced: use my own api_id" />
           {own && <div className="grid grid-cols-2 gap-2"><Input placeholder="API ID" value={apiId} onChange={(e) => setApiId(e.target.value)} /><Input placeholder="API hash" value={apiHash} onChange={(e) => setApiHash(e.target.value)} /></div>}
         </>}
@@ -163,6 +185,7 @@ createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <QueryClientProvider client={client}>
       <Toaster position="bottom-right" />
+      <ConfirmHost />
       <Setup />
     </QueryClientProvider>
   </StrictMode>,
