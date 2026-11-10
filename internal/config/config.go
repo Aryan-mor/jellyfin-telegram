@@ -121,10 +121,10 @@ type Config struct {
 	SearchMaxDiscovered int
 	SearchDenyAfter     int
 	// HashtagIndexBot is the username of the hashtag index bot (telegram-hashtag-index). It defaults
-	// to tgHashtagIndexBot and turns on when a Telegram account is signed in. "off" turns it off.
+	// to tgHashtagIndexBot. A library bot talks to it. "off" turns it off.
 	HashtagIndexBot string
-	// ChannelIndexBot is the username of the channel index bot (telegram-channel-index), a separate
-	// program. Empty leaves that off. "off" turns it off too.
+	// ChannelIndexBot is the username of the channel index bot (telegram-channel-index). It defaults
+	// to tgChannelIndexBot, the same way the hashtag index does. "off" turns it off.
 	ChannelIndexBot string
 	// TMDBAPIKey is a TMDB v3 key or v4 read token. Only the trending source uses it.
 	TMDBAPIKey string
@@ -143,9 +143,12 @@ type Config struct {
 	InboxDeleteOriginals bool
 }
 
-// DefaultHashtagIndexBot is the public hashtag index. A signed-in account uses it unless
+// DefaultHashtagIndexBot is the public hashtag index. A library bot uses it unless
 // HASHTAG_INDEX_BOT is off, false, none, or 0.
 const DefaultHashtagIndexBot = "tgHashtagIndexBot"
+
+// DefaultChannelIndexBot is the public channel index. Same off switch as the hashtag index.
+const DefaultChannelIndexBot = "tgChannelIndexBot"
 
 func hashtagIndexBot(name string) string {
 	name = strings.TrimPrefix(strings.TrimSpace(name), "@")
@@ -357,7 +360,7 @@ func Load(envPath string) (Config, error) {
 	c.SearchMaxDiscovered = getInt("TELEGRAM_SEARCH_MAX_DISCOVERED", 50, fail)
 	c.SearchDenyAfter = getInt("TELEGRAM_SEARCH_DENY_AFTER", 3, fail)
 	c.HashtagIndexBot = hashtagIndexBot(get("HASHTAG_INDEX_BOT", DefaultHashtagIndexBot))
-	c.ChannelIndexBot = hashtagIndexBot(get("CHANNEL_INDEX_BOT", ""))
+	c.ChannelIndexBot = hashtagIndexBot(get("CHANNEL_INDEX_BOT", DefaultChannelIndexBot))
 	c.TMDBAPIKey = get("TMDB_API_KEY", "")
 	c.TrendingSearch = strings.EqualFold(get("TRENDING_SEARCH", ""), "true") || get("TRENDING_SEARCH", "") == "1"
 	c.TrendingAllowAdult = strings.EqualFold(get("TRENDING_ALLOW_ADULT", ""), "true")

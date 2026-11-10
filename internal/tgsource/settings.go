@@ -35,6 +35,9 @@ type Settings struct {
 	// PauseSeconds is the longest rest between bursts of 4 to 8 videos. Each rest is a random
 	// time between 20 seconds and this. Zero means no extra rest; the account clock still waits.
 	PauseSeconds int `json:"pause_seconds"`
+	// AutoAdd asks the channel index once a day and adds a channel whose recent posts look useful.
+	// It stays on unless a person turns it off. Nothing is added while Enabled is off.
+	AutoAdd bool `json:"auto_add"`
 }
 
 // Defaults are cautious: a week back, no short clips, and a steady pace.
@@ -42,6 +45,7 @@ func Defaults() Settings {
 	return Settings{
 		LookBackDays: 7, EveryMinutes: 30, MinMinutes: 15, MinMB: 100,
 		SkipWords: "trailer,teaser,sample,promo", MaxPerDay: 500, PauseSeconds: 120,
+		AutoAdd: true,
 	}
 }
 

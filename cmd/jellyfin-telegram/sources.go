@@ -263,6 +263,9 @@ func sourceActions(cat *catalog.Catalog, svc *tgsource.Service, news *newsfeed.S
 			if v, ok := body["need_title"].(bool); ok {
 				next.NeedTitle = v
 			}
+			if v, ok := body["auto_add"].(bool); ok {
+				next.AutoAdd = v
+			}
 			if next.Enabled && !cur.Enabled {
 				if err := mustHaveAccount(svc); err != nil {
 					return nil, err
@@ -335,6 +338,9 @@ func saveNewsRules(ctx context.Context, news *newsfeed.Service, body map[string]
 	}
 	if v, ok := body["need_title"].(bool); ok {
 		cur.NeedTitle = v
+	}
+	if v, ok := body["auto_add"].(bool); ok {
+		cur.AutoAdd = v
 	}
 	return news.Save(ctx, cur)
 }

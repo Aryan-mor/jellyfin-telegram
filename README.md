@@ -595,10 +595,11 @@ files fail repeatedly, and more often than they pass, goes on a denylist. Points
 what was already tried survive a restart. Title searches run one at a time and back off when
 Telegram asks for a wait.
 
-**Hashtag index (on when an account is signed in).** Telegram's own search only finds posts in
+**Hashtag index (on with the library bots).** Telegram's own search only finds posts in
 chats the account has joined. [telegram-hashtag-index](https://github.com/Aryan-mor/telegram-hashtag-index)
 is a small bot that keeps links to public posts under hashtags. `HASHTAG_INDEX_BOT` defaults to
-`tgHashtagIndexBot`. With a signed-in account the index is on; set the variable to `off` to stop it.
+`tgHashtagIndexBot`. A library bot sends the links and the queries. The signed-in account only opens
+the posts the index returns. Set the variable to `off` to stop it.
 
 - every post this library copies into a **public mirror** is handed to the index with its
   hashtag (a durable queue, 25 links a minute, nothing is sent twice);
@@ -627,7 +628,8 @@ and erotic titles are dropped unless `TRENDING_ALLOW_ADULT=true`, and only title
 | `TELEGRAM_SEARCH_PROMOTE_AT` | 10 | Verified videos in a channel, counted when the first file is found, that make it a direct file channel |
 | `TELEGRAM_SEARCH_MAX_DISCOVERED` | 50 | Most channels the search may add (0 = never add) |
 | `TELEGRAM_SEARCH_DENY_AFTER` | 3 | Failed files before a channel or key is denylisted |
-| `HASHTAG_INDEX_BOT` | `tgHashtagIndexBot` | Hashtag index bot. On when an account is signed in. `off` disables it |
+| `HASHTAG_INDEX_BOT` | `tgHashtagIndexBot` | Hashtag index bot. A library bot talks to it. `off` disables it |
+| `CHANNEL_INDEX_BOT` | `tgChannelIndexBot` | Channel index bot. Same switch. Direct and News can auto-add one page a day |
 | `TRENDING_SEARCH` | false | Search TMDB trending once a day |
 | `TMDB_API_KEY` | empty | TMDB v3 key or v4 read token |
 | `TRENDING_ALLOW_ADULT` | false | Let adult-flagged titles through |

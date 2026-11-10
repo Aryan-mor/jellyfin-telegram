@@ -82,8 +82,8 @@ func TestLoadValid(t *testing.T) {
 	if !c.TelegramSearch {
 		t.Error("telegram search is on unless turned off")
 	}
-	if c.SearchMaxDiscovered != 50 || c.SearchPromoteAt != 10 || c.HashtagIndexBot != DefaultHashtagIndexBot {
-		t.Errorf("search defaults discovered=%d promote=%d index=%q", c.SearchMaxDiscovered, c.SearchPromoteAt, c.HashtagIndexBot)
+	if c.SearchMaxDiscovered != 50 || c.SearchPromoteAt != 10 || c.HashtagIndexBot != DefaultHashtagIndexBot || c.ChannelIndexBot != DefaultChannelIndexBot {
+		t.Errorf("search defaults discovered=%d promote=%d index=%q channel=%q", c.SearchMaxDiscovered, c.SearchPromoteAt, c.HashtagIndexBot, c.ChannelIndexBot)
 	}
 	c, err = load(t, validEnv+"HASHTAG_INDEX_BOT=off\n")
 	if err != nil || c.HashtagIndexBot != "" {

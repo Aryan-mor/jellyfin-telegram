@@ -2,7 +2,8 @@
 //
 // The index keeps links to public posts under hashtags, so a post can be found without joining
 // its channel. This program hands it the links of its public mirror posts and asks it for the
-// links of wanted titles. Messages go through the signed-in account.
+// links of wanted titles. A library bot sends those messages. The signed-in account only opens
+// the links the index returns.
 package hashindex
 
 import (

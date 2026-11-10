@@ -1,7 +1,8 @@
 // Package chanindex talks to the channel index bot (telegram-channel-index).
 //
 // The index lists channels under a fixed set of tags. This program asks it for a page and, later,
-// tells it when a channel it added has brought files in. Messages go through the signed-in account.
+// tells it when a channel it added has brought files in. A library bot sends those messages. The
+// signed-in account only opens a channel to see whether its posts are useful.
 package chanindex
 
 import (

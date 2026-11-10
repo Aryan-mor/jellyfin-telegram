@@ -700,7 +700,7 @@ export function ApiPage() {
 
 const lookbacks: [string, string][] = [["1", "1 day"], ["3", "3 days"], ["7", "1 week"], ["14", "2 weeks"], ["30", "1 month"], ["90", "3 months"], ["180", "6 months"], ["365", "1 year"], ["0", "No limit, all history"]]
 
-type Rule = { enabled?: boolean; look_back_days?: number; every_minutes?: number; min_minutes?: number; min_mb?: number; max_gb?: number; max_per_day?: number; pause_seconds?: number; skip_words?: string; only_words?: string; need_title?: boolean }
+type Rule = { enabled?: boolean; auto_add?: boolean; look_back_days?: number; every_minutes?: number; min_minutes?: number; min_mb?: number; max_gb?: number; max_per_day?: number; pause_seconds?: number; skip_words?: string; only_words?: string; need_title?: boolean }
 type Src = { id: number; title?: string; username?: string; channel_id: number; enabled: boolean; strict?: boolean; no_forwards?: boolean; in_progress?: boolean; last_scan?: number; copied?: number; error?: string }
 type Recent = { name?: string; url?: string; source_id?: number; size?: number; updated?: number; state?: string; error?: string; detail?: string }
 type SourcesView = {
@@ -825,6 +825,16 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
         {note && <Alert>{note}</Alert>}
       </Section>
 
+      {enabled && <Section title={t("Auto-add channels")}>
+        <Row title={t("Add useful channels by themselves")} text={t("Once a day one page is asked from the channel index. A channel is added when a recent post looks useful. The signed-in account only opens the channel to check.")}>
+          <SwitchBox label={t("Auto-add")} checked={!!remote.auto_add} onCheckedChange={(on) => void run("auto", async () => {
+            await api(act("settings"), { auto_add: on })
+            toast(on ? t("Auto-add is on") : t("Auto-add is off"))
+            await q.refetch()
+          })} />
+        </Row>
+      </Section>}
+
       <Card>
         <div className="flex flex-wrap items-center gap-2 border-b px-4 py-3">
           <Input className="min-w-48 flex-1" value={value} placeholder={t("@channel or -100…")} onChange={(e) => setValue(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") (e.currentTarget.nextElementSibling as HTMLButtonElement | null)?.click() }} />
@@ -896,7 +906,8 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
         <div className="flex justify-end gap-2">
           {draft.dirty && <Button size="sm" variant="ghost" onClick={() => draft.saved()}>{t("Discard")}</Button>}
           <Button size="sm" disabled={!draft.dirty || busy === "rules"} onClick={() => void run("rules", async () => {
-            const { enabled: _skip, ...rules } = draft.value!
+            const { enabled: _skip, auto_add: _auto, ...rules } = draft.value!
+            void _auto
             void _skip
             await api(act("settings"), rules); draft.saved(); toast(t("Rules saved")); await q.refetch()
           })}>{t("Save rules")}</Button>

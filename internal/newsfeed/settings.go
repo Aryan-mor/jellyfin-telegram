@@ -22,6 +22,9 @@ type Settings struct {
 	NeedTitle    bool   `json:"need_title"`
 	MaxPerDay    int    `json:"max_per_day"`
 	PauseSeconds int    `json:"pause_seconds"`
+	// AutoAdd asks the channel index once a day and adds a channel whose recent posts carry a bot link.
+	// It stays on unless a person turns it off. Nothing is added while Enabled is off.
+	AutoAdd bool `json:"auto_add"`
 }
 
 // Defaults match the direct-file rules, stored separately so each tab can diverge.
@@ -31,6 +34,7 @@ func Defaults() Settings {
 		LookBackDays: d.LookBackDays, EveryMinutes: d.EveryMinutes, MinMinutes: d.MinMinutes,
 		MinMB: d.MinMB, MaxGB: d.MaxGB, SkipWords: d.SkipWords, OnlyWords: d.OnlyWords,
 		NeedTitle: d.NeedTitle, MaxPerDay: d.MaxPerDay, PauseSeconds: d.PauseSeconds,
+		AutoAdd: true,
 	}
 }
 
