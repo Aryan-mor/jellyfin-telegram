@@ -712,6 +712,60 @@ type SourcesView = {
 export function Sources() { return <RulesPage kind="direct" /> }
 export function News() { return <RulesPage kind="news" /> }
 
+type DiscoverItem = { n: number; ref: string; score: number; members: number; title: string }
+type DiscoverPage = { page: number; pages: number; items?: DiscoverItem[] }
+
+function Discover({ news, onAdded }: { news: boolean; onAdded: () => void }) {
+  const tag = news ? "news" : "direct-file"
+  const [page, setPage] = useState(1)
+  const [res, setRes] = useState<DiscoverPage | null>(null)
+  const [err, setErr] = useState("")
+  const { busy, run } = useBusy()
+  const load = (p: number) => void run("discover", async () => {
+    setErr("")
+    try {
+      const out = await api<DiscoverPage>("/panel/sources/discover", { tag, page: p })
+      setPage(out.page || p)
+      setRes(out)
+    } catch (e) {
+      setErr((e as Error).message)
+    }
+  })
+  const items = res?.items ?? []
+  return (
+    <Section title={t("Suggested channels")}>
+      <Row title={t("Channels other people have marked for this")} text={res && res.pages > 1 ? t("Page {{page}} of {{pages}}", { page: res.page, pages: res.pages }) : ""}>
+        <Button size="sm" variant="outline" disabled={busy === "discover"} onClick={() => load(1)}>{t("Search")}</Button>
+      </Row>
+      {err && <Alert tone="bad">{err}</Alert>}
+      {!!items.length && <Table>
+        <TBody>{items.map((item) => (
+          <TR key={item.n + item.ref}>
+            <TD className="pl-4">
+              <div className="font-medium">{item.title || item.ref}</div>
+              <div className="text-xs text-muted-foreground">{item.ref} · {item.score} · {t("{{count}} members", { count: item.members })}</div>
+            </TD>
+            <TD className="pr-4">
+              <div className="flex justify-end">
+                <Button size="sm" variant="ghost" disabled={busy === "add" + item.ref || item.ref.startsWith("+")} onClick={() => void run("add" + item.ref, async () => {
+                  await api("/panel/sources/discover_add", { ref: item.ref, tag })
+                  toast(t("Added"))
+                  onAdded()
+                })}>{t("Add")}</Button>
+              </div>
+            </TD>
+          </TR>
+        ))}</TBody>
+      </Table>}
+      {res && !items.length && !err && <Empty>{t("Nothing on this page.")}</Empty>}
+      {res && res.pages > 1 && <div className="flex justify-end gap-2">
+        <Button size="sm" variant="outline" disabled={page <= 1 || busy === "discover"} onClick={() => load(page - 1)}>{t("Previous")}</Button>
+        <Button size="sm" variant="outline" disabled={page >= res.pages || busy === "discover"} onClick={() => load(page + 1)}>{t("Next")}</Button>
+      </div>}
+    </Section>
+  )
+}
+
 const newsStates: Record<string, [string, Tone]> = { done: ["forwarded", "ok"], skipped: ["skipped", "warn"], gave_up: ["gave up", "bad"], fetched: ["forwarding", "info"], pending: ["opening", "info"] }
 
 function srcStatus(src: Src, running: boolean): [string, Tone] {
@@ -818,6 +872,8 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
         </Table>
         {!list.length && <Empty>{news ? t("No news channel yet.") : t("No channel yet. Add one above.")}</Empty>}
       </Card>
+
+      <Discover news={news} onAdded={() => q.refetch()} />
 
       <Section title={t("What to copy")}>
         <Collapse title={t("How do I get a channel id?")}>

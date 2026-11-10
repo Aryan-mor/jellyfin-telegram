@@ -21,6 +21,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autoupload"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/blockstore"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/downloads"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
@@ -311,6 +312,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	sources := startSources(cfg, cat, users)
 	news := startNews(ctx, cfg, cat, users, sources, log)
 	tagIndex := startHashIndex(ctx, cfg, cat, users, log)
+	channelIndex := startChannelIndex(ctx, cfg, cat, users, log)
 	search := startSearch(cfg, envPath, cat, sources, users, tagIndex, news, log)
 	if seerrTarget != nil {
 		key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
@@ -331,7 +333,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, hub, journal,
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, hub, journal, channelIndex,
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
@@ -563,7 +565,7 @@ func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, poo
 	return svc
 }
 
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, journal *actlog.Store, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, journal *actlog.Store, channels *chanindex.Client, accounts func() []panel.Account) http.Handler {
 	jobs := &panelJobs{}
 	return panel.New(panel.Options{
 		Accounts: accounts,
@@ -588,7 +590,7 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		HomeDo:       homeActions(personal),
 		Sessions:     sessionsView(users),
 		Sources:      sourcesView(sources, news, users),
-		SourceDo:     sourcesDo(sources, news),
+		SourceDo:     sourcesDo(cat, sources, news, channels),
 		Mirrors:      mirrorsView(cat),
 		MirrorDo:     mirrorsDo(cat, pool, users, channel),
 		MirrorCreate: jobs.mirrorCreate(cat, pool, users, envPath, channel),

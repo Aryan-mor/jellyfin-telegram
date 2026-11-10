@@ -3,10 +3,12 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +17,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autofilter"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hashindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
@@ -164,7 +167,7 @@ func sourceState(svc *tgsource.Service, news *newsfeed.Service, users *tguser.Ma
 }
 
 // sourceActions runs what the Channels tab asks for. Nothing is copied until the switch is turned on.
-func sourceActions(svc *tgsource.Service, news *newsfeed.Service) func(*http.Request, string, map[string]any) (any, error) {
+func sourceActions(cat *catalog.Catalog, svc *tgsource.Service, news *newsfeed.Service, channels *chanindex.Client) func(*http.Request, string, map[string]any) (any, error) {
 	return func(r *http.Request, action string, body map[string]any) (any, error) {
 		ctx := r.Context()
 		switch action {
@@ -221,6 +224,15 @@ func sourceActions(svc *tgsource.Service, news *newsfeed.Service) func(*http.Req
 			return nil, setNewsUser(ctx, news, int64(number(body["user_id"])))
 		case "news_settings":
 			return nil, saveNewsRules(ctx, news, body)
+		case "discover":
+			if channels == nil {
+				return nil, errors.New("channel index is off")
+			}
+			tag, _ := body["tag"].(string)
+			page := int(number(body["page"]))
+			return channels.Search(ctx, tag, page)
+		case "discover_add":
+			return addDiscoveredChannel(ctx, cat, svc, news, body)
 		case "settings":
 			cur, err := svc.Settings(ctx)
 			if err != nil {
@@ -327,6 +339,55 @@ func saveNewsRules(ctx context.Context, news *newsfeed.Service, body map[string]
 	return news.Save(ctx, cur)
 }
 
+func addDiscoveredChannel(ctx context.Context, cat *catalog.Catalog, svc *tgsource.Service, news *newsfeed.Service, body map[string]any) (any, error) {
+	ref, _ := body["ref"].(string)
+	tag, _ := body["tag"].(string)
+	input, err := channelLookup(ref)
+	if err != nil {
+		return nil, err
+	}
+	var src catalog.Source
+	kind := "direct"
+	switch tag {
+	case "news":
+		if news == nil {
+			return nil, errors.New("news channels are not available")
+		}
+		src, err = news.Add(ctx, input)
+		kind = "news"
+	case "direct-file":
+		src, err = svc.Add(ctx, input)
+	default:
+		return nil, errors.New("unknown channel")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if cat != nil {
+		if err := cat.WatchChannelIndex(ctx, ref, tag, kind, src.ID); err != nil {
+			return nil, err
+		}
+	}
+	return map[string]any{"source": src}, nil
+}
+
+// channelLookup turns an index ref into the text the copier already accepts.
+func channelLookup(ref string) (string, error) {
+	ref = strings.TrimSpace(ref)
+	if strings.HasPrefix(ref, "@") && len(ref) > 1 {
+		return ref, nil
+	}
+	id, ok := strings.CutPrefix(ref, "c/")
+	if !ok {
+		return "", errors.New("that channel has no public name")
+	}
+	n, err := strconv.ParseInt(id, 10, 64)
+	if err != nil || n <= 0 {
+		return "", errors.New("that channel has no public name")
+	}
+	return fmt.Sprintf("-100%d", n), nil
+}
+
 func mustHaveAccount(svc *tgsource.Service) error {
 	if !svc.TG.HasAccount() {
 		return errors.New("sign in a Telegram account that is an admin of the library channel first")
@@ -342,11 +403,11 @@ func sourcesView(svc *tgsource.Service, news *newsfeed.Service, users *tguser.Ma
 	return sourceState(svc, news, users)
 }
 
-func sourcesDo(svc *tgsource.Service, news *newsfeed.Service) func(*http.Request, string, map[string]any) (any, error) {
+func sourcesDo(cat *catalog.Catalog, svc *tgsource.Service, news *newsfeed.Service, channels *chanindex.Client) func(*http.Request, string, map[string]any) (any, error) {
 	if svc == nil {
 		return nil
 	}
-	return sourceActions(svc, news)
+	return sourceActions(cat, svc, news, channels)
 }
 
 // autoFilter serves the auto-add filter. Genres come from TMDB when a key is saved, so the setup

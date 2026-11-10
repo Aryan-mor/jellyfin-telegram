@@ -1,12 +1,15 @@
-# Plan: `telegram-channel-index` (new public Go repo)
+# Plan: `telegram-channel-index` (separate public repo)
+
+The bot lives in `../telegram-channel-index`. This repo only talks to it, the same way it talks to `telegram-hashtag-index`.
 
 ## Context
 This is a new bot, modelled on `telegram-hashtag-index`. That bot indexes posts; this one indexes whole channels under fixed tags.
 
 - **Who submits:** people and bots.
 - **Searching:** a tag returns 10 channels per page, with Prev/Next and buttons 1..10.
-- **Voting:** pressing a number means "this one was good". Bots can't press buttons, so they vote with `/accept` or `/reject`.
+- **Voting:** pressing a number means "this one was good". A bot has no buttons, so the same vote exists as `/accept` or `/reject` in code. A bot's vote weighs 1, the same as a person's.
 - **Score:** `/reject` is a downvote. Each voter has one vote per (channel, tag): +1, -1 or none, and a new vote replaces the old one. Results are sorted by score.
+- **Replies stay human.** Usage text, errors, `/start`, and vote replies never say that a bot can call this bot, and never show the machine forms below. This plan is the only write-up. A caller learns the forms by reading the code.
 - **Later use:** jellyfin-telegram will use it to discover "news" sources (channels that post file-bot links) and "direct" sources (channels that post video files).
 
 This file moves to the new repo once it exists.
@@ -82,7 +85,9 @@ next: /search news 3
 2. `/accept 4812:3`, with no reply. This form is for TalkToBot and for bots.
 3. `/accept @chan news`.
 
-`/unvote` takes the same forms. Sending the same `/accept` twice changes nothing, so a bot always gets the same answer. Each vote gets a one-line reply such as `ok news @chan +1 score 15`.
+`/unvote` takes the same forms. Sending the same `/accept` twice changes nothing, so a repeat gets the same one-line result. Each vote gets a one-line reply such as `ok news @chan +1 score 15`.
+
+That line is the whole reply. It does not add a usage example, a list of forms, or any hint that another bot can send these commands. Unknown input gets the same silence as plain text, not a help message. `/tags` output is the tag list only.
 
 **Admin commands:** `/hide`, `/untag`, `/deny`, `/allow`, and `/purge <voter>`, which deletes that voter's votes and recomputes the scores.
 
@@ -114,7 +119,7 @@ A user account checks each submitted channel. It does 20 checks per minute, wait
   - `v:` 30 votes per hour;
   - `s:` 10 submits per day;
   - `r:` 60 searches per hour.
-- **Vote weights:** a person's vote counts 1 and a trusted person's counts 2. A bot's vote counts 0 until an admin marks the bot trusted, so nobody can stuff votes with throwaway bots.
+- **Vote weights:** a person's vote counts 1, a bot's vote counts 1, and a trusted person's counts 2. No admin step for bots. If throwaway bots become a problem later, handle it then.
 - `/purge` cleans up whatever gets past these.
 
 ## Phases
@@ -143,7 +148,7 @@ A user account checks each submitted channel. It does 20 checks per minute, wait
 ## Risks
 - Privacy mode may hide replies between bots in groups. The P0 spike checks this.
 - The verify account can get flood limits.
-- People can game the votes. Weights and `/purge` cover it for now; a Wilson-style ranking can come later.
+- People or bots can game the votes. Each account, bot or person, has one vote of weight 1 (a trusted person has 2). `/purge` is there if that becomes a problem. A Wilson-style ranking can come later.
 
 ## Verification
 - **Store:** step through the transition table none→+1→-1→none, and check `score == SUM(value*weight)` after each step.
@@ -151,8 +156,9 @@ A user account checks each submitted channel. It does 20 checks per minute, wait
   - every `/accept` form;
   - the `option3` alias;
   - `@botname` stripping;
-  - silence rules;
-  - an unknown list id.
+  - silence rules, including no usage text on an unknown command;
+  - an unknown list id;
+  - a vote reply is only the one-line result, with no command template in it.
 - **botapi:** an httptest fake records each edit and answer call.
 - **Live:** in a test chat with two people and one bot:
   - add a channel, verify it, search, page;

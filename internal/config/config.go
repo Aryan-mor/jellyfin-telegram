@@ -123,6 +123,9 @@ type Config struct {
 	// HashtagIndexBot is the username of the hashtag index bot (telegram-hashtag-index). It defaults
 	// to tgHashtagIndexBot and turns on when a Telegram account is signed in. "off" turns it off.
 	HashtagIndexBot string
+	// ChannelIndexBot is the username of the channel index bot (telegram-channel-index), a separate
+	// program. Empty leaves that off. "off" turns it off too.
+	ChannelIndexBot string
 	// TMDBAPIKey is a TMDB v3 key or v4 read token. Only the trending source uses it.
 	TMDBAPIKey string
 	// TrendingSearch looks up TMDB's trending titles once a day. Off until TRENDING_SEARCH=true,
@@ -354,6 +357,7 @@ func Load(envPath string) (Config, error) {
 	c.SearchMaxDiscovered = getInt("TELEGRAM_SEARCH_MAX_DISCOVERED", 50, fail)
 	c.SearchDenyAfter = getInt("TELEGRAM_SEARCH_DENY_AFTER", 3, fail)
 	c.HashtagIndexBot = hashtagIndexBot(get("HASHTAG_INDEX_BOT", DefaultHashtagIndexBot))
+	c.ChannelIndexBot = hashtagIndexBot(get("CHANNEL_INDEX_BOT", ""))
 	c.TMDBAPIKey = get("TMDB_API_KEY", "")
 	c.TrendingSearch = strings.EqualFold(get("TRENDING_SEARCH", ""), "true") || get("TRENDING_SEARCH", "") == "1"
 	c.TrendingAllowAdult = strings.EqualFold(get("TRENDING_ALLOW_ADULT", ""), "true")

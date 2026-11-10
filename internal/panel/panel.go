@@ -593,6 +593,7 @@ var sourceActions = map[string]bool{
 	"add": true, "remove": true, "pause": true, "strict": true, "settings": true, "check": true, "rescan": true,
 	"news": true, "news_add": true, "news_remove": true, "news_pause": true,
 	"news_account": true, "news_settings": true,
+	"discover": true, "discover_add": true,
 }
 
 func (p *panel) handleSourceAction(w http.ResponseWriter, r *http.Request) {
