@@ -161,6 +161,14 @@ function Setup() {
     return () => clearInterval(id)
   }, [step])
 
+  const finished = !!status?.ready && !status.error
+  useEffect(() => {
+    if (!finished) return
+    // Setup is over, so go to the panel without waiting for a click.
+    const id = setTimeout(() => { location.href = "/panel" + (panelCode() ? "?code=" + encodeURIComponent(panelCode()) : "") }, 2000)
+    return () => clearTimeout(id)
+  }, [finished])
+
   function run(key: string, fn: () => Promise<void>) {
     if (lock.current) return
     lock.current = true
@@ -365,6 +373,7 @@ function Setup() {
         {step === "done" && status?.ready && !status.error && <>
           <h1 className="text-lg font-semibold">{t("Installed")}</h1>
           <p className="text-sm text-muted-foreground">{t("Setup finished. Open the panel to use this server.")}</p>
+          <p className="text-sm text-muted-foreground">{t("Opening the panel…")}</p>
           <Button className="h-12 w-full text-base" asChild>
             <a href={"/panel" + (panelCode() ? "?code=" + encodeURIComponent(panelCode()) : "")}>{t("Open panel")}</a>
           </Button>

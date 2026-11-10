@@ -39,8 +39,8 @@ export function Button({ className, variant, size, asChild, loading, children, d
   const Comp = asChild ? Slot : "button"
   return (
     <Comp className={cn(buttonVariants({ variant, size }), className)} disabled={disabled || loading} {...props}>
-      {!asChild && loading && <Loader2 className="size-3.5 animate-spin" />}
-      {children}
+      {/* Slot needs exactly one element child. The spinner next to it, even a false one, makes it throw and blanks the page. */}
+      {asChild ? children : <>{loading && <Loader2 className="size-3.5 animate-spin" />}{children}</>}
     </Comp>
   )
 }

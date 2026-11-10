@@ -8,6 +8,7 @@
   "No folders here": "اینجا پوشه‌ای نیست",
   "One folder for Jellyfin, Seerr, the cache and the library. Pick a drive with enough free space.": "یک پوشه برای Jellyfin، Seerr، حافظهٔ نهان و کتابخانه. درایوی با فضای خالی کافی انتخاب کنید.",
   "Only {{free}} free. At least 10 GB is recommended.": "فقط {{free}} آزاد است. دست‌کم ۱۰ گیگابایت توصیه می‌شود.",
+  "Opening the panel…": "در حال باز کردن پنل…",
   "The first install downloads a few hundred MB and can take several minutes. Keep this window open.": "نصب اول چند صد مگابایت دانلود می‌کند و ممکن است چند دقیقه طول بکشد. این پنجره را باز نگه دارید.",
   "The folder will be created.": "پوشه ساخته می‌شود.",
   "This computer": "این رایانه",
