@@ -53,6 +53,33 @@ func load(t *testing.T, body string) (Config, error) {
 	return Load(writeEnv(t, body))
 }
 
+func TestReloadReplacesTokensLeftInTheEnvironment(t *testing.T) {
+	clearEnv(t)
+	t.Setenv("TELEGRAM_API_ID", "12345")
+	t.Setenv("TELEGRAM_API_HASH", "abcdef")
+	t.Setenv("TELEGRAM_CHANNEL_ID", "-1001234567890")
+	t.Setenv("TELEGRAM_BOT_TOKENS", "111:old")
+	body := `TELEGRAM_API_ID=12345
+TELEGRAM_API_HASH=abcdef
+TELEGRAM_CHANNEL_ID=-1001234567890
+TELEGRAM_BOT_TOKENS=111:old,333:new
+`
+	stale, err := Load(writeEnv(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(stale.BotTokens) != 1 || stale.BotTokens[0] != "111:old" {
+		t.Fatalf("environment should still win on a normal start: %v", stale.BotTokens)
+	}
+	fresh, err := Reload(writeEnv(t, body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fresh.BotTokens) != 2 || fresh.BotTokens[1] != "333:new" {
+		t.Fatalf("restart should read the file: %v", fresh.BotTokens)
+	}
+}
+
 func TestLoadValid(t *testing.T) {
 	c, err := load(t, validEnv)
 	if err != nil {

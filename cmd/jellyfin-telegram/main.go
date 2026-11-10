@@ -48,7 +48,14 @@ func main() {
 
 	waitForPredecessor()
 
-	cfg, err := config.Load(*env)
+	// A panel restart inherits the old process environment. Those values were copied
+	// from the settings file at the previous start, so they would hide bots added since.
+	// Reload lets the file win. A normal start still lets a real environment win.
+	load := config.Load
+	if os.Getenv(restartWaitEnv) != "" {
+		load = config.Reload
+	}
+	cfg, err := load(*env)
 	// A first run has no settings at all. The setup page asks for them.
 	if err != nil && !(cmd == "serve" && cfg.NeedsSetup()) {
 		fmt.Fprintf(os.Stderr, "Configuration problems:\n%v\n", err)
