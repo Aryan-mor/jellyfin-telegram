@@ -67,8 +67,10 @@ export function Shell() {
   const update = useQuery({
     queryKey: ["panel-update"],
     queryFn: () => api<{ current: string; channel?: string; latest?: string; available: boolean; url?: string }>("/panel/update"),
-    refetchInterval: () => (pollingPaused() ? false : 15 * 60 * 1000),
-    staleTime: 5 * 60 * 1000,
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchInterval: 30 * 60 * 1000,
+    refetchIntervalInBackground: true,
   })
   const [restart, setRestart] = useState(false)
   const [restarting, setRestarting] = useState(false)

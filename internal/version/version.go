@@ -3,8 +3,10 @@ package version
 
 import (
 	"context"
-	"encoding/json"
+	"encoding/xml"
 	"fmt"
+	"io"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,8 +24,6 @@ var Channel = "stable"
 
 // Repo is the GitHub repository whose releases are checked.
 const Repo = "Aryan-mor/jellyfin-telegram"
-
-const cacheFor = 15 * time.Minute
 
 // Info is what the panel shows.
 type Info struct {
@@ -51,38 +51,70 @@ type Release struct {
 }
 
 var (
-	mu      sync.Mutex
-	cached  Info
-	fetched time.Time
+	mu     sync.Mutex
+	cached Info
+	// flight is set while a lookup is running. A second caller waits for that one
+	// instead of starting another. The answer is not kept: the next check looks again.
+	flight chan struct{}
 	// Fetch loads the release this channel should follow. Tests replace it.
 	Fetch = fetchLatest
 )
 
-// Check returns the running version and the newest release. The answer is cached for 15 minutes,
-// and a failed lookup (offline, rate limited) simply reports no update.
+// githubClient does not reuse a dead connection. One check every few minutes does not need a pool,
+// and a stuck connection used to burn the whole timeout and get stored as "no update".
+var githubClient = &http.Client{
+	Timeout: 20 * time.Second,
+	Transport: &http.Transport{
+		Proxy:                 http.ProxyFromEnvironment,
+		DialContext:           (&net.Dialer{Timeout: 8 * time.Second}).DialContext,
+		ForceAttemptHTTP2:     true,
+		ResponseHeaderTimeout: 15 * time.Second,
+		DisableKeepAlives:     true,
+	},
+}
+
+// Check returns the running version and the newest release. Each call looks.
+// Two calls at the same moment share one lookup. A failed lookup reports no update
+// and does not stick: the next call looks again.
 func Check(ctx context.Context) Info {
 	info := Info{Current: Version, Channel: Channel}
 	if Version == "dev" {
 		return info
 	}
 	mu.Lock()
-	defer mu.Unlock()
-	if time.Since(fetched) < cacheFor {
-		cached.Current = Version
-		cached.Channel = Channel
-		return cached
+	if flight != nil {
+		wait := flight
+		mu.Unlock()
+		select {
+		case <-wait:
+		case <-ctx.Done():
+		}
+		mu.Lock()
+		out := cached
+		mu.Unlock()
+		out.Current = Version
+		out.Channel = Channel
+		return out
 	}
-	rel, err := Fetch(ctx)
-	fetched = time.Now()
-	if err != nil {
-		cached = info
-		return cached
+	done := make(chan struct{})
+	flight = done
+	mu.Unlock()
+
+	// A closed tab cancels the request. That must not be stored as "no update".
+	lookup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 20*time.Second)
+	defer cancel()
+	rel, err := Fetch(lookup)
+	if err == nil {
+		info.Latest = strings.TrimPrefix(rel.Tag, "v")
+		info.URL = rel.URL
+		info.Notes = rel.Notes
+		info.Available = Newer(info.Latest, Version)
 	}
-	info.Latest = strings.TrimPrefix(rel.Tag, "v")
-	info.URL = rel.URL
-	info.Notes = rel.Notes
-	info.Available = Newer(info.Latest, Version)
+	mu.Lock()
 	cached = info
+	flight = nil
+	close(done)
+	mu.Unlock()
 	return info
 }
 
@@ -158,15 +190,16 @@ func Choose(channel string, list []Release) (Release, bool) {
 }
 
 func fetchLatest(ctx context.Context) (Release, error) {
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://api.github.com/repos/"+Repo+"/releases?per_page=30", nil)
+	// The releases atom feed is not the REST API. That API allows 60 anonymous calls an hour
+	// for the whole computer, and a 403 was stored as "nothing new", so the panel stayed quiet.
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://github.com/"+Repo+"/releases.atom", nil)
 	if err != nil {
 		return Release{}, err
 	}
-	req.Header.Set("Accept", "application/vnd.github+json")
 	req.Header.Set("User-Agent", "jellyfin-telegram")
-	res, err := http.DefaultClient.Do(req)
+	res, err := githubClient.Do(req)
 	if err != nil {
 		return Release{}, err
 	}
@@ -174,34 +207,74 @@ func fetchLatest(ctx context.Context) (Release, error) {
 	if res.StatusCode != http.StatusOK {
 		return Release{}, fmt.Errorf("github answered %d", res.StatusCode)
 	}
-	var body []struct {
-		Tag    string `json:"tag_name"`
-		URL    string `json:"html_url"`
-		Body   string `json:"body"`
-		Pre    bool   `json:"prerelease"`
-		Assets []struct {
-			Name string `json:"name"`
-			URL  string `json:"browser_download_url"`
-		} `json:"assets"`
-	}
-	if err := json.NewDecoder(res.Body).Decode(&body); err != nil {
+	body, err := io.ReadAll(io.LimitReader(res.Body, 1<<20))
+	if err != nil {
 		return Release{}, err
 	}
-	list := make([]Release, 0, len(body))
-	for _, rel := range body {
-		notes := rel.Body
-		if len(notes) > 1500 {
-			notes = notes[:1500]
-		}
-		assets := make([]Asset, 0, len(rel.Assets))
-		for _, asset := range rel.Assets {
-			assets = append(assets, Asset{Name: asset.Name, URL: asset.URL})
-		}
-		list = append(list, Release{Tag: rel.Tag, URL: rel.URL, Notes: notes, Pre: rel.Pre, Assets: assets})
+	list, err := releasesFromFeed(body)
+	if err != nil {
+		return Release{}, err
 	}
 	chosen, ok := Choose(Channel, list)
 	if !ok {
 		return Release{}, fmt.Errorf("no %s release", Channel)
 	}
 	return chosen, nil
+}
+
+func releasesFromFeed(data []byte) ([]Release, error) {
+	var feed struct {
+		Entries []struct {
+			Title   string `xml:"title"`
+			Content string `xml:"content"`
+			Links   []struct {
+				Href string `xml:"href,attr"`
+			} `xml:"link"`
+		} `xml:"entry"`
+	}
+	if err := xml.Unmarshal(data, &feed); err != nil {
+		return nil, err
+	}
+	list := make([]Release, 0, len(feed.Entries))
+	for _, entry := range feed.Entries {
+		tag := strings.TrimSpace(entry.Title)
+		if tag == "" {
+			continue
+		}
+		page := ""
+		for _, link := range entry.Links {
+			if strings.Contains(link.Href, "/releases/tag/") {
+				page = link.Href
+				break
+			}
+		}
+		if page == "" {
+			page = "https://github.com/" + Repo + "/releases/tag/" + tag
+		}
+		notes := entry.Content
+		if len(notes) > 1500 {
+			notes = notes[:1500]
+		}
+		list = append(list, Release{
+			Tag: tag, URL: page, Notes: notes,
+			Pre: strings.Contains(tag, "-nightly."), Assets: releaseAssets(tag),
+		})
+	}
+	return list, nil
+}
+
+func releaseAssets(tag string) []Asset {
+	names := []string{
+		"jellyfin-telegram-windows-amd64.zip",
+		"jellyfin-telegram-linux-amd64.tar.gz",
+		"jellyfin-telegram-linux-arm64.tar.gz",
+	}
+	out := make([]Asset, 0, len(names))
+	for _, name := range names {
+		out = append(out, Asset{
+			Name: name,
+			URL:  "https://github.com/" + Repo + "/releases/download/" + tag + "/" + name,
+		})
+	}
+	return out
 }
