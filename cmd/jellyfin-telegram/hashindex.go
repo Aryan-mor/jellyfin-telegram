@@ -9,17 +9,18 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hashindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
 // startHashIndex connects to the hashtag index bot and starts handing it the posts of public
-// mirrors. The bot name defaults to tgHashtagIndexBot. A library bot sends the messages. It
-// returns nil when that is turned off or no library bot exists. Opening the returned links still
-// uses the signed-in account.
-func startHashIndex(ctx context.Context, cfg config.Config, cat *catalog.Catalog, pool *tgpool.Pool, log *slog.Logger) *hashindex.Client {
-	if cfg.HashtagIndexBot == "" || pool == nil || cat == nil {
+// mirrors. The bot name defaults to tgHashtagIndexBot. A library bot sends the messages. The
+// signed-in account is the fallback when that bot cannot talk to other bots. It returns nil when
+// that is turned off or neither sender exists. Opening the returned links still uses the account.
+func startHashIndex(ctx context.Context, cfg config.Config, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, log *slog.Logger) *hashindex.Client {
+	if cfg.HashtagIndexBot == "" || cat == nil || (pool == nil && users == nil) {
 		return nil
 	}
-	idx := &hashindex.Client{Bot: cfg.HashtagIndexBot, TG: pool}
+	idx := &hashindex.Client{Bot: cfg.HashtagIndexBot, TG: indexTalk(pool, users, log)}
 	go (&hashindex.Publisher{Store: cat, Index: idx, Log: log}).Run(ctx)
 	log.Info("hashtag index on", "bot", "@"+cfg.HashtagIndexBot)
 	return idx

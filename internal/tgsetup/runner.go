@@ -357,7 +357,31 @@ func (r *Runner) newBot(ctx context.Context, name string, progress Step) (Bot, e
 	if err != nil {
 		return Bot{}, err
 	}
-	return val.(Bot), nil
+	bot := val.(Bot)
+	if progress == nil {
+		progress = func(string, string) {}
+	}
+	if err := r.AllowBotTalk(ctx, bot.Username); err != nil {
+		progress("Could not turn on bot-to-bot mode: "+err.Error(), "bad")
+	} else {
+		progress("Bot-to-bot mode on", "ok")
+	}
+	return bot, nil
+}
+
+// AllowBotTalk turns on Bot-to-Bot Communication Mode for one bot this account owns.
+func (r *Runner) AllowBotTalk(ctx context.Context, username string) error {
+	if r == nil || r.S == nil {
+		return errors.New("no signed-in account")
+	}
+	_, err := r.S.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+		chat, err := newBotFatherChat(ctx, api)
+		if err != nil {
+			return nil, err
+		}
+		return nil, EnableBotToBot(ctx, chat, username)
+	})
+	return err
 }
 
 func (r *Runner) revoke(ctx context.Context, username string, progress Step) (Bot, error) {

@@ -212,6 +212,42 @@ func TestListBotsFollowsTheNextPage(t *testing.T) {
 	}
 }
 
+func TestEnableBotToBotPressesTheModeOn(t *testing.T) {
+	m := &menuFake{
+		page: answer{text: "Choose a bot", id: 4, buttons: []Button{{Text: "@lib_bot", Data: []byte("bot")}}},
+		press: map[string]answer{
+			"bot": {text: "What do you want to do?", id: 5, buttons: []Button{{Text: "Bot Settings", Data: []byte("set")}}},
+			"set": {text: "Settings", id: 6, buttons: []Button{{Text: "Bot-to-Bot Communication", Data: []byte("b2b")}}},
+			"b2b": {text: "This mode is off.", id: 7, buttons: []Button{{Text: "Enable", Data: []byte("on")}}},
+			"on":  {text: "Success. Bot-to-bot communication is enabled.", id: 8},
+		},
+	}
+	if err := EnableBotToBot(context.Background(), m, "@lib_bot"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnableBotToBotLeavesItWhenAlreadyOn(t *testing.T) {
+	m := &menuFake{
+		page: answer{text: "Choose", id: 4, buttons: []Button{{Text: "lib_bot", Data: []byte("bot")}}},
+		press: map[string]answer{
+			"bot": {text: "Bot", id: 5, buttons: []Button{{Text: "Bot Settings", Data: []byte("set")}}},
+			"set": {text: "Settings", id: 6, buttons: []Button{{Text: "Bot to Bot Communication Mode", Data: []byte("b2b")}}},
+			"b2b": {text: "Bot-to-bot communication is enabled.", id: 7, buttons: []Button{{Text: "Turn off", Data: []byte("off")}}},
+		},
+	}
+	if err := EnableBotToBot(context.Background(), m, "lib_bot"); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestEnableBotToBotRefusesAStranger(t *testing.T) {
+	m := &menuFake{page: answer{text: "Choose", id: 4, buttons: []Button{{Text: "@other_bot", Data: []byte("o")}}}}
+	if err := EnableBotToBot(context.Background(), m, "lib_bot"); !errors.Is(err, ErrNotOwner) {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestListBotsOpensATitle(t *testing.T) {
 	m := &menuFake{
 		page: answer{text: "Choose", id: 4, buttons: []Button{
