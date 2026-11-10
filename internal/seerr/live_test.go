@@ -23,11 +23,14 @@ func TestLiveBundleInstallsAndRuns(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	began := time.Now()
 	bundle, err := Install(ctx, root, http.DefaultClient, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("download and unpack: %v", time.Since(began).Round(time.Second))
 	srv := &Server{Root: root, APIKey: "live-test-key", Bundle: bundle}
+	started := time.Now()
 	srv.Prepare()
 	done := make(chan struct{})
 	go func() {
@@ -37,6 +40,7 @@ func TestLiveBundleInstallsAndRuns(t *testing.T) {
 	if err := srv.WaitReady(ctx, 5*time.Minute); err != nil {
 		t.Fatal(err)
 	}
+	t.Logf("first start until it answers: %v", time.Since(started).Round(time.Second))
 	req, _ := http.NewRequestWithContext(ctx, http.MethodGet, srv.URL()+"/api/v1/status", nil)
 	res, err := http.DefaultClient.Do(req)
 	if err != nil {

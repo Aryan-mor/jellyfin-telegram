@@ -2,6 +2,7 @@ package front
 
 import (
 	"bytes"
+	"html"
 	"io"
 	"net/http"
 	"net/http/httputil"
@@ -171,4 +172,47 @@ func seerrBoundary(s string, i int) bool {
 	default:
 		return false
 	}
+}
+
+// SeerrState is how far Seerr has got.
+type SeerrState struct {
+	// Ready is true once Seerr answers and is set up.
+	Ready bool
+	// Text says what it is doing, or what went wrong.
+	Text string
+	// Failed is true when it stopped for good, so waiting will not help.
+	Failed bool
+}
+
+// seerrGate shows a waiting page while Seerr is not ready, instead of a proxy error. The page
+// reloads itself, so it turns into Seerr by itself.
+func seerrGate(state func() SeerrState, next http.Handler) http.Handler {
+	if state == nil {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		s := state()
+		if s.Ready {
+			next.ServeHTTP(w, r)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-store")
+		title, refresh := "Seerr is starting", `<meta http-equiv="refresh" content="4">`
+		text := s.Text
+		if s.Failed {
+			title, refresh = "Seerr could not start", ""
+		} else {
+			w.Header().Set("Retry-After", "5")
+			if text == "" {
+				text = "Starting."
+			}
+			text += " The first start after an install or an update can take a few minutes."
+		}
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = io.WriteString(w, `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">`+refresh+
+			`<title>`+title+`</title><style>body{font:16px system-ui,sans-serif;margin:12vh auto;max-width:34em;padding:0 1em;color:#222;background:#fff}`+
+			`@media(prefers-color-scheme:dark){body{color:#ddd;background:#111}}h1{font-size:1.3em}</style>`+
+			`<h1>`+title+`</h1><p>`+html.EscapeString(text)+`</p>`)
+	})
 }

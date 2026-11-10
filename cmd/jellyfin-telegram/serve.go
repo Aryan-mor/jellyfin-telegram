@@ -199,6 +199,26 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 	wizard.Logf("Telegram is connected")
 
+	// Seerr's download, unpacking and first start do not need Jellyfin, so they run beside it. The panel
+	// does not wait for them: /seerr/ shows how far Seerr is until it is ready.
+	var seerrTarget *url.URL
+	var seerrState func() front.SeerrState
+	var jellyfinForSeerr chan jellyfinReady
+	if cfg.SeerrManaged {
+		if seerrTarget, err = url.Parse((&seerr.Server{}).URL()); err != nil {
+			return err
+		}
+		progress := &seerrProgress{}
+		seerrState = progress.State
+		jellyfinForSeerr = make(chan jellyfinReady, 1)
+		child.Add(1)
+		go func() {
+			defer child.Done()
+			runSeerr(ctx, cfg, wizard, log, progress, &child, jellyfinForSeerr)
+		}()
+		armDone()
+	}
+
 	var creds managed.Credentials
 	if cfg.JellyfinManaged {
 		server, c, err := startManaged(ctx, cfg, wizard, log)
@@ -229,16 +249,8 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		cfg.JellyfinAPIKey = creds.APIKey
 	}
 
-	var seerrTarget *url.URL
-	if cfg.SeerrManaged {
-		base, err := startSeerr(ctx, cfg, creds, wizard, log, &child, armDone)
-		if err != nil {
-			return err
-		}
-		seerrTarget, err = url.Parse(base)
-		if err != nil {
-			return err
-		}
+	if jellyfinForSeerr != nil {
+		jellyfinForSeerr <- jellyfinReady{cfg: cfg, creds: creds}
 	}
 
 	var fladderTarget *url.URL
@@ -314,6 +326,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
+		SeerrState: seerrState,
 		Fladder:    fladderTarget,
 		Radarr:     radarrURL,
 		Sonarr:     sonarrURL,
@@ -866,71 +879,6 @@ func finishManaged(ctx context.Context, cfg config.Config, server *managed.Serve
 		Language:  cfg.SubtitleLanguage,
 	}
 	return b.Run(ctx)
-}
-
-// startSeerr downloads the pinned Seerr, runs it, and points it at the private Jellyfin.
-func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credentials, wizard *setup.Wizard, log *slog.Logger, child *sync.WaitGroup, armDone func()) (string, error) {
-	root, err := filepath.Abs(filepath.Join(cfg.DataDir, "seerr"))
-	if err != nil {
-		return "", err
-	}
-	key, err := seerr.EnsureAPIKey(root)
-	if err != nil {
-		return "", err
-	}
-	wizard.SetStatus(setup.Status{Stage: "Preparing Seerr", Percent: 55})
-	// The bundle is a few hundred MB, so the download gets a client with a long timeout.
-	bundle, err := seerr.Install(ctx, root, &http.Client{Timeout: 30 * time.Minute}, newInstallReporter(wizard, 55, 70, 85).Progress)
-	if err != nil {
-		return "", err
-	}
-	srv := &seerr.Server{Root: root, APIKey: key, Bundle: bundle, Log: log}
-	srv.Prepare()
-	child.Add(1)
-	go func() {
-		defer child.Done()
-		srv.Run(ctx)
-	}()
-	armDone()
-	wizard.SetStatus(setup.Status{Stage: "Starting Seerr", Percent: 88, Detail: "The first start builds its database and takes about a minute."})
-	if err := srv.WaitReady(ctx, managedStartTimeout); err != nil {
-		return "", err
-	}
-	wizard.Logf("Seerr is running")
-	wizard.SetStatus(setup.Status{Stage: "Setting up Seerr", Percent: 94, Detail: "Connecting it to Jellyfin."})
-	host, port, err := seerrJellyfin(cfg)
-	if err != nil {
-		return "", err
-	}
-	user, pass := creds.User, creds.Password
-	if pass == "" {
-		user, pass, err = seerr.LoginAccount(root)
-		if err != nil {
-			return "", err
-		}
-		if err := jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey).EnsureAdmin(ctx, user, pass); err != nil {
-			return "", fmt.Errorf("prepare the Jellyfin user for Seerr: %w", err)
-		}
-	}
-	public := publicBase(cfg)
-	setupSeerr := seerr.Setup{
-		URL:               srv.URL(),
-		APIKey:            key,
-		JellyfinHost:      host,
-		JellyfinPort:      port,
-		JellyfinUser:      user,
-		JellyfinPassword:  pass,
-		JellyfinPublicURL: public,
-		ApplicationURL:    strings.TrimRight(public, "/") + "/seerr",
-		Language:          cfg.SubtitleLanguage,
-	}
-	// Seerr reaching Jellyfin can fail once at random right after it starts. That must not stop the player.
-	err = retry(ctx, 5, 5*time.Second, log, "Seerr setup", func() error { return setupSeerr.Run(ctx) })
-	if err != nil {
-		return "", err
-	}
-	wizard.Logf("Seerr is set up")
-	return srv.URL(), nil
 }
 
 // startFladder runs the web client. Jellyfin and Seerr addresses are the ones a browser opens.

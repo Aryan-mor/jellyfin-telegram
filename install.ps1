@@ -109,14 +109,23 @@ try {
 if ($updating) {
   $panel = 'http://127.0.0.1:8097/panel?notice=updated'
   $up = $false
-  foreach ($i in 1..40) {
+  # The panel answers once Jellyfin is up, which takes a minute or so. Seerr starts in the background
+  # and does not hold it back. Three minutes is only a limit for a very slow computer.
+  Write-Host 'Waiting for the program to start. This usually takes about a minute.'
+  foreach ($i in 1..360) {
     try {
       $res = Invoke-WebRequest -Uri 'http://127.0.0.1:8097/panel' -UseBasicParsing -TimeoutSec 2
       if ($res.StatusCode -eq 200) { $up = $true; break }
     } catch {}
+    if ($i % 40 -eq 0) { Write-Host ('Still starting... {0} s' -f ($i / 2)) }
     Start-Sleep -Milliseconds 500
   }
-  if (-not $up) { throw 'Updated, but the panel did not start.' }
-  Start-Process $panel
+  if ($up) {
+    Start-Process $panel
+  } else {
+    # The update is installed and the program is running. It is only slow, so this is not a failure.
+    Write-Host 'The update is installed, and the program is still starting.'
+    Write-Host 'Open http://127.0.0.1:8097/panel in a minute.'
+  }
 }
 

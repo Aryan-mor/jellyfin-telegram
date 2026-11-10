@@ -1,6 +1,7 @@
 package front
 
 import (
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -104,5 +105,54 @@ func TestFladderSeerrAPILandsOnSeerr(t *testing.T) {
 	}
 	if res.StatusCode != http.StatusOK || string(body) != `{"id":1}` {
 		t.Errorf("status %d body %s", res.StatusCode, body)
+	}
+}
+
+func TestSeerrWaitingPageUntilReady(t *testing.T) {
+	passed := 0
+	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { passed++; w.WriteHeader(http.StatusOK) })
+	state := SeerrState{Text: "Unpacking Seerr. 40% <b>"}
+	h := seerrGate(func() SeerrState { return state }, next)
+
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seerr/", nil))
+	body := rec.Body.String()
+	if rec.Code != http.StatusServiceUnavailable || passed != 0 {
+		t.Fatalf("code %d, passed %d", rec.Code, passed)
+	}
+	for _, want := range []string{"Seerr is starting", "Unpacking Seerr. 40% &lt;b&gt;", `http-equiv="refresh"`, "few minutes"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("page has no %q:\n%s", want, body)
+		}
+	}
+	if strings.Contains(body, "<b>") {
+		t.Error("the status text was not escaped")
+	}
+	if rec.Header().Get("Retry-After") == "" {
+		t.Error("no Retry-After")
+	}
+
+	state = SeerrState{Ready: true}
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seerr/", nil))
+	if rec.Code != http.StatusOK || passed != 1 {
+		t.Errorf("ready: code %d, passed %d", rec.Code, passed)
+	}
+}
+
+func TestSeerrFailurePageDoesNotKeepReloading(t *testing.T) {
+	h := seerrGate(func() SeerrState { return SeerrState{Failed: true, Text: "port in use"} }, http.NotFoundHandler())
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seerr/", nil))
+	body := rec.Body.String()
+	if !strings.Contains(body, "could not start") || !strings.Contains(body, "port in use") || strings.Contains(body, "refresh") {
+		t.Errorf("page:\n%s", body)
+	}
+}
+
+func TestNoSeerrStateMeansAlwaysReady(t *testing.T) {
+	next := http.NotFoundHandler()
+	if got := seerrGate(nil, next); fmt.Sprintf("%p", got) != fmt.Sprintf("%p", next) {
+		t.Error("a nil state should not wrap the proxy")
 	}
 }

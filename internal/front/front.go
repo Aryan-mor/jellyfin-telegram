@@ -46,6 +46,9 @@ type Options struct {
 	Jellyfin *url.URL
 	// Seerr is the request app, served under /seerr/. Nil leaves that path to Jellyfin.
 	Seerr *url.URL
+	// SeerrState says how far Seerr is. Seerr starts in the background and takes minutes the first
+	// time, so until it is ready /seerr/ shows that instead of an error. Nil means always ready.
+	SeerrState func() SeerrState
 	// Fladder is the web client, served under /fladder/. Nil leaves that path to Jellyfin.
 	Fladder *url.URL
 	// Radarr and Sonarr are the download apps, served under /radarr/ and /sonarr/.
@@ -80,7 +83,7 @@ func Handler(o Options) http.Handler {
 		mux.Handle("/ui/", o.UI)
 	}
 	if o.Seerr != nil {
-		proxy := seerrProxy(o.Seerr)
+		proxy := seerrGate(o.SeerrState, seerrProxy(o.Seerr))
 		mux.Handle("/seerr/", proxy)
 		mux.HandleFunc("/seerr", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/seerr/", http.StatusTemporaryRedirect)

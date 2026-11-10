@@ -32,15 +32,15 @@ const bundleBase = "https://github.com/Aryan-mor/seerr-bundles/releases/download
 var bundles = map[string]managed.Artifact{
 	"windows/amd64": {
 		URL:    bundleBase + "seerr-" + Version + "-windows-amd64.tar.gz",
-		SHA256: "71a98cbe2fcb6b6dd5555dc6ac6bc03b57b3e7de01b9da1e710e616f12d99900",
+		SHA256: "0cb7e22cc2f2e0f0855da791f6cfb734b76fd9e884e371513e079191c03bf642",
 	},
 	"linux/amd64": {
 		URL:    bundleBase + "seerr-" + Version + "-linux-amd64.tar.gz",
-		SHA256: "3cfb360d28dde6b20599e9ba513ce2e53f18230125c3118455a0815501fe4649",
+		SHA256: "f947bde44f9b96c364ec995701edb39c26d5594db9a0caafc8d814d7148c461d",
 	},
 	"linux/arm64": {
 		URL:    bundleBase + "seerr-" + Version + "-linux-arm64.tar.gz",
-		SHA256: "96f5db90c504c46abe4452dd1d9065f76d3d0ae38368b4ca1c518396501477c4",
+		SHA256: "57fd658fd1326e978ef99250de1799f420bfd057e31986c1d09a0b1c88be9c83",
 	},
 }
 

@@ -10,11 +10,17 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 )
 
+// installSink is where install progress goes: the setup page for Jellyfin, Seerr's own page for Seerr.
+type installSink interface {
+	SetStatus(setup.Status)
+	Logf(format string, args ...any)
+}
+
 // installReporter turns the progress of a download and its unpacking into what the setup page
 // shows: a bar that moves, the bytes and speed, and a line in the log at each quarter. Unpacking
 // is reported on its own because it is the longest quiet wait on a slow disk.
 type installReporter struct {
-	wizard *setup.Wizard
+	wizard installSink
 	// The bar runs from downloadFrom to downloadTo while downloading, then on to unpackTo.
 	downloadFrom, downloadTo, unpackTo int
 
@@ -27,7 +33,7 @@ type installReporter struct {
 	quarter map[string]int
 }
 
-func newInstallReporter(w *setup.Wizard, downloadFrom, downloadTo, unpackTo int) *installReporter {
+func newInstallReporter(w installSink, downloadFrom, downloadTo, unpackTo int) *installReporter {
 	return &installReporter{
 		wizard: w, downloadFrom: downloadFrom, downloadTo: downloadTo, unpackTo: unpackTo,
 		now: time.Now, started: map[string]time.Time{}, quarter: map[string]int{},
