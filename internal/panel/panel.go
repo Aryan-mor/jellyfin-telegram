@@ -637,6 +637,9 @@ func (p *panel) handleUpdate(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 func (p *panel) handleRestart(w http.ResponseWriter, r *http.Request) {

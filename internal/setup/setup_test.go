@@ -205,6 +205,40 @@ func TestStatusReachesThePage(t *testing.T) {
 	}
 }
 
+func TestWaitingPanelStaysQuiet(t *testing.T) {
+	w, _, _ := rig(t, nil)
+	srv := httptest.NewServer(w.Waiting())
+	defer srv.Close()
+	res, err := http.Get(srv.URL + "/panel/state?code=" + w.Code())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("state %d", res.StatusCode)
+	}
+	var state map[string]any
+	if err := json.NewDecoder(res.Body).Decode(&state); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := state["bots"].([]any); !ok {
+		t.Fatalf("bots %#v", state["bots"])
+	}
+	req, err := http.NewRequest(http.MethodGet, srv.URL+"/panel", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Accept", "text/html")
+	page, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer page.Body.Close()
+	if page.StatusCode != http.StatusOK || !strings.Contains(page.Header.Get("Content-Type"), "text/html") {
+		t.Fatalf("page %d %s", page.StatusCode, page.Header.Get("Content-Type"))
+	}
+}
+
 func TestWaitingOnlyServesSetup(t *testing.T) {
 	w, _, _ := rig(t, nil)
 	srv := httptest.NewServer(w.Waiting())

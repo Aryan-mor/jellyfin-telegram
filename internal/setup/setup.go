@@ -218,6 +218,9 @@ func (w *Wizard) Handler() http.Handler {
 }
 
 // Waiting serves the setup paths and tells anyone else to come back, while nothing else is up yet.
+// The panel is the exception. A restart leaves it open on the previous page, and that page treats
+// any failed poll as "Something went wrong" even though the new version is already installed.
+// Quiet successful answers let that page reload itself instead of showing an error.
 func (w *Wizard) Waiting() http.Handler {
 	setup := w.Handler()
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -229,10 +232,49 @@ func (w *Wizard) Waiting() http.Handler {
 			webui.Assets().ServeHTTP(rw, r)
 			return
 		}
+		if r.Method == http.MethodGet && (r.URL.Path == "/panel" || strings.HasPrefix(r.URL.Path, "/panel/")) {
+			w.serveWaitingPanel(rw, r)
+			return
+		}
 		writeJSON(rw, http.StatusServiceUnavailable, map[string]string{
 			"error": "The program is still starting. Wait a moment.",
 		})
 	})
+}
+
+func (w *Wizard) serveWaitingPanel(rw http.ResponseWriter, r *http.Request) {
+	switch r.URL.Path {
+	case "/panel/state":
+		writeJSON(rw, http.StatusOK, map[string]any{
+			"channel_id": 0, "language": "", "bots": []any{}, "addresses": []any{}, "accounts": []any{},
+			"seerr": false, "fladder": false, "telegram_search": false, "local": false, "sources": false,
+		})
+		return
+	case "/panel/jobs":
+		writeJSON(rw, http.StatusOK, map[string]any{"running": false, "progress": []any{}})
+		return
+	case "/panel/update":
+		writeJSON(rw, http.StatusOK, map[string]any{"available": false})
+		return
+	}
+	document := r.Header.Get("Sec-Fetch-Dest") == "document" || r.Header.Get("Sec-Fetch-Mode") == "navigate" || strings.Contains(r.Header.Get("Accept"), "text/html")
+	if document {
+		codeOK := subtle.ConstantTimeCompare([]byte(r.URL.Query().Get("code")), []byte(w.code)) == 1
+		host, _, err := net.SplitHostPort(r.RemoteAddr)
+		if err != nil {
+			host = r.RemoteAddr
+		}
+		ip := net.ParseIP(host)
+		if !codeOK && (ip == nil || !ip.IsLoopback()) {
+			writeJSON(rw, http.StatusForbidden, map[string]string{"error": "Open the panel from this computer."})
+			return
+		}
+		rw.Header().Set("Content-Type", "text/html; charset=utf-8")
+		rw.Header().Set("Cache-Control", "no-store")
+		_, _ = rw.Write(webui.Page("panel.html", w.Code()))
+		return
+	}
+	writeJSON(rw, http.StatusOK, map[string]any{})
 }
 
 func (w *Wizard) guard(next http.HandlerFunc) http.HandlerFunc {
