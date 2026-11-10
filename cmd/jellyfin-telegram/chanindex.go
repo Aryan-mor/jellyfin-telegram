@@ -9,18 +9,18 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
 // startChannelIndex connects to the channel index bot. The bot name defaults to tgChannelIndexBot.
-// A library bot sends the messages. It returns nil when that is turned off or no library bot exists.
-func startChannelIndex(ctx context.Context, cfg config.Config, cat *catalog.Catalog, pool *tgpool.Pool, sources *tgsource.Service, news *newsfeed.Service, users *tguser.Manager, log *slog.Logger) *chanindex.Client {
-	if cfg.ChannelIndexBot == "" || pool == nil || cat == nil {
+// The signed-in account sends the messages. A library bot cannot: Telegram answers
+// USER_BOT_TO_BOT_DISABLED. It returns nil when that is turned off or no account session exists.
+func startChannelIndex(ctx context.Context, cfg config.Config, cat *catalog.Catalog, sources *tgsource.Service, news *newsfeed.Service, users *tguser.Manager, log *slog.Logger) *chanindex.Client {
+	if cfg.ChannelIndexBot == "" || users == nil || cat == nil {
 		return nil
 	}
-	idx := &chanindex.Client{Bot: cfg.ChannelIndexBot, TG: pool}
+	idx := &chanindex.Client{Bot: cfg.ChannelIndexBot, TG: users}
 	go watchChannelIndex(ctx, cat, idx, log)
 	go autoAddChannels(ctx, cat, sources, news, users, idx, log)
 	go introduceChannels(ctx, cat, idx, log)

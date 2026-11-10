@@ -76,6 +76,8 @@ func introducePass(ctx context.Context, cat *catalog.Catalog, idx *chanindex.Cli
 		}
 		if errors.Is(err, chanindex.ErrRejected) && log != nil {
 			log.Warn("channel index refused a channel", "channel", name)
+		} else if log != nil {
+			log.Info("channel index introduced", "channel", name, "tags", want[name])
 		}
 		have[name] = want[name]
 		if err := cat.SetStateValue(ctx, introducedKey, formatIntroduced(have)); err != nil {

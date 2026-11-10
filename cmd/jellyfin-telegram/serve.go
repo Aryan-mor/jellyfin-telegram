@@ -297,7 +297,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	sources := startSources(cfg, cat, users)
 	news := startNews(ctx, cfg, cat, users, sources, log)
 	tagIndex := startHashIndex(ctx, cfg, cat, pool, log)
-	channelIndex := startChannelIndex(ctx, cfg, cat, pool, sources, news, users, log)
+	channelIndex := startChannelIndex(ctx, cfg, cat, sources, news, users, log)
 	search := startSearch(cfg, envPath, cat, sources, users, tagIndex, news, log)
 	if seerrTarget != nil {
 		key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
