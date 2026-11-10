@@ -48,7 +48,10 @@ func install(ctx context.Context, root string, art managed.Artifact, client *htt
 	dir := filepath.Join(versions, Version)
 	b := bundleAt(dir)
 	marker := filepath.Join(dir, ".installed")
-	if _, err := os.Stat(marker); err == nil {
+	// The marker holds the hash of the bundle that was unpacked. A bundle rebuilt for the same Seerr
+	// version has another hash, and replaces the old one instead of being skipped.
+	want := Version + " " + art.SHA256 + "\n"
+	if have, err := os.ReadFile(marker); err == nil && string(have) == want {
 		return b, nil
 	}
 	if art.SHA256 == "" {
@@ -70,7 +73,7 @@ func install(ctx context.Context, root string, art managed.Artifact, client *htt
 			return Bundle{}, fmt.Errorf("the Seerr download holds no %s", p)
 		}
 	}
-	if err := os.WriteFile(marker, []byte(Version+"\n"), 0o644); err != nil {
+	if err := os.WriteFile(marker, []byte(want), 0o644); err != nil {
 		return Bundle{}, err
 	}
 	// An older version is no use once the new one runs, and Seerr is large.

@@ -130,3 +130,36 @@ func TestSeerrEnvironmentKeepsItOnLoopbackAndIgnoresTheShell(t *testing.T) {
 		t.Error("the shell's NODE_OPTIONS reached Seerr")
 	}
 }
+
+func TestARebuiltBundleReplacesTheOldOne(t *testing.T) {
+	data, sum := fakeBundle(t)
+	hits := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Write(data)
+	}))
+	defer srv.Close()
+	root := t.TempDir()
+	// An install made before the marker held a hash, as the first released builds wrote it.
+	old := filepath.Join(root, "bundle", Version)
+	if err := os.MkdirAll(filepath.Join(old, "seerr", "app"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, ".installed"), []byte(Version+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(old, "seerr", "app", "committag.json"), []byte("stale"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	art := managed.Artifact{URL: srv.URL + "/seerr.tar.gz", SHA256: sum}
+	b, err := install(context.Background(), root, art, srv.Client(), nil)
+	if err != nil || hits != 1 {
+		t.Fatalf("hits=%d err=%v", hits, err)
+	}
+	if _, err := os.Stat(filepath.Join(b.App, "committag.json")); !os.IsNotExist(err) {
+		t.Error("the stale file of the old bundle stayed")
+	}
+	if _, err := install(context.Background(), root, art, srv.Client(), nil); err != nil || hits != 1 {
+		t.Errorf("the same bundle was downloaded again: hits=%d err=%v", hits, err)
+	}
+}
