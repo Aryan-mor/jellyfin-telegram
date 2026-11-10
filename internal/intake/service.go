@@ -387,7 +387,7 @@ func (s *Service) markSource(ctx context.Context, id int, status, why string) {
 		return
 	}
 	caption := sign.WithHeader(status, why, "", sign.StripHeader(msgs[0].File.Caption))
-	if err := s.write(ctx, id, caption); err != nil {
+	if err := s.write(ctx, id, msgs[0].File.Caption, caption); err != nil {
 		s.log().Warn("cannot write the status on a file", "message", id, "status", status, "err", err)
 	}
 }
@@ -565,15 +565,19 @@ func (s *Service) take(ctx context.Context, f *media.File, op string) (won, clai
 	}
 	line := s.Key.SignClaim(op, f.MessageID, int(claimFor/time.Second))
 	caption := sign.WithHeader(status, "", line, sign.StripHeader(f.Caption))
-	if err := s.write(ctx, f.MessageID, caption); err != nil {
+	if err := s.write(ctx, f.MessageID, f.Caption, caption); err != nil {
 		return false, false, err
 	}
 	return false, true, nil
 }
 
 // write sets a caption. A channel post does not say which bot sent it, so the bots are tried in
-// turn. The catalog row, if there is one, follows.
-func (s *Service) write(ctx context.Context, messageID int, caption string) error {
+// turn. The catalog row, if there is one, follows. A caption that is already in place is not sent
+// again.
+func (s *Service) write(ctx context.Context, messageID int, current, caption string) error {
+	if caption == current {
+		return nil
+	}
 	var last error
 	for _, bot := range s.Bots {
 		if last = s.TG.EditCaption(ctx, bot, messageID, caption); last == nil {
@@ -696,7 +700,7 @@ func (s *Service) edit(ctx context.Context, messageID int, anyKey bool, change f
 	}
 	room := sign.WithHeader(status, "", claimLine, naming.Caption(hd)) + "\n" + hd.LookupTag()
 	line := s.Key.Post(room, next)
-	return s.write(ctx, messageID, sign.WithHeader(status, "", claimLine, sign.ReplaceLine(body, line)))
+	return s.write(ctx, messageID, file.Caption, sign.WithHeader(status, "", claimLine, sign.ReplaceLine(body, line)))
 }
 
 // reconsider gives each rejected file one more look. A file the parser can now place as an
@@ -744,7 +748,7 @@ func (s *Service) reopenEpisode(ctx context.Context, id int) error {
 	if !p.Episode || p.Title == "" || naming.WeakTitle(p.Title) {
 		return nil
 	}
-	if err := s.write(ctx, id, sign.StripHeader(file.Caption)); err != nil {
+	if err := s.write(ctx, id, file.Caption, sign.StripHeader(file.Caption)); err != nil {
 		return err
 	}
 	s.mu.Lock()
@@ -820,7 +824,7 @@ func (s *Service) hint(ctx context.Context, m media.Message) error {
 		body += "\n"
 	}
 	body += line
-	if err := s.write(ctx, file.MessageID, body); err != nil {
+	if err := s.write(ctx, file.MessageID, file.Caption, body); err != nil {
 		return err
 	}
 	s.mu.Lock()

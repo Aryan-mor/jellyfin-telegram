@@ -962,6 +962,10 @@ func (b *bot) editCaption(ctx context.Context, messageID int, caption string) er
 	req := &tg.MessagesEditMessageRequest{Peer: peer, ID: messageID}
 	req.SetMessage(caption)
 	if _, err := api.MessagesEditMessage(ctx, req); err != nil {
+		// Telegram refuses an edit that changes nothing. The caption is already what we want.
+		if tgerr.Is(err, "MESSAGE_NOT_MODIFIED") {
+			return nil
+		}
 		return fmt.Errorf("messages.editMessage: %w", err)
 	}
 	return nil
