@@ -75,6 +75,10 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 		return err
 	}
 	wizard.AutoFilter = autoFilter(envPath)
+	if abs, err := filepath.Abs(cfg.DataDir); err == nil {
+		// The page asks for one folder. By default that is the one that already holds data.
+		wizard.DefaultFolder = filepath.Dir(abs)
+	}
 	var entry front.Switch
 	entry.Set(wizard.Waiting())
 	srv := &http.Server{Addr: cfg.GatewayListen, Handler: &entry, ReadHeaderTimeout: 15 * time.Second}
@@ -104,8 +108,13 @@ func serve(ctx context.Context, cfg config.Config, envPath string, log *slog.Log
 		// The account the page signed in stays saved. It is released first, so the service can
 		// connect the same session.
 		wizard.StopAuto()
+		pickedFrom := cfg.DataDir
 		if cfg, err = config.Reload(envPath); err != nil {
 			return err
+		}
+		// The sign-in made on the page was kept in the old folder. The person may have picked another.
+		if err := moveSetupFiles(pickedFrom, cfg.DataDir, log); err != nil {
+			return fmt.Errorf("move the sign-in to %s: %w", cfg.DataDir, err)
 		}
 	}
 	err = run(ctx, cfg, envPath, wizard, &entry, srvErr, log, firstSetup)

@@ -4,6 +4,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { Toaster, toast } from "sonner"
 import "@/index.css"
 import { api, panelCode } from "@/lib/api"
+import { bytes } from "@/lib/utils"
 import { I18nProvider, setUiLang, t, uiLang, uiLanguages, useUiLang } from "@/lib/i18n"
 import { Button, Card, CardBody, Checkbox, FieldLabel, Input, SwitchBox, Textarea } from "@/components/ui"
 import { AutoFilterForm } from "@/components/autofilter"
@@ -57,6 +58,9 @@ function Setup() {
   const [apiId, setApiId] = useState("")
   const [apiHash, setApiHash] = useState("")
   const [signedIn, setSignedIn] = useState(false)
+  const [folder, setFolder] = useState("")
+  const [folderDefault, setFolderDefault] = useState("")
+  const [folderInfo, setFolderInfo] = useState<{ free?: number; low?: boolean; exists?: boolean; error?: string } | null>(null)
 
   useEffect(() => {
     void api<{ available: boolean; signed_in: boolean; found?: Found }>("/setup/auto/info").then((info) => {
@@ -69,6 +73,22 @@ function Setup() {
       }
     }).catch(() => setAvailable(false))
   }, [])
+
+  useEffect(() => {
+    void api<{ default: string }>("/setup/folder").then((f) => setFolderDefault(f.default)).catch(() => undefined)
+  }, [])
+
+  useEffect(() => {
+    const path = (folder || folderDefault).trim()
+    if (!path) return
+    let stale = false
+    const timer = setTimeout(() => {
+      void api<{ free: number; low: boolean; exists: boolean }>("/setup/folder", { path })
+        .then((f) => { if (!stale) setFolderInfo(f) })
+        .catch((e) => { if (!stale) setFolderInfo({ error: e instanceof Error ? e.message : t("Something went wrong") }) })
+    }, 500)
+    return () => { stale = true; clearTimeout(timer) }
+  }, [folder, folderDefault])
 
   useEffect(() => {
     if (step !== "bots" && step !== "done") return
@@ -89,7 +109,8 @@ function Setup() {
   async function save(auto: boolean) {
     if (mirrorOn && mirrorMode === "have" && !mirrorLink.trim()) throw new Error(t("Paste the public channel link, or choose automatic"))
     await api("/setup/save", {
-      auto, ...manual, language: langs.join(","), ui_language: uiLang(), ...prefs,
+      auto, ...manual, language: langs.join(","), ui_language: uiLang(), ...prefs, downloads: false,
+      folder: folder.trim(),
       jellyfin_url: ownJellyfin ? prefs.jellyfin_url : "",
       jellyfin_key: ownJellyfin ? prefs.jellyfin_key : "",
       mirror: mirrorOn,
@@ -240,8 +261,15 @@ function Setup() {
           <label className="flex items-center justify-between text-sm">{t("Telegram search")} <SwitchBox label={t("Telegram search")} checked={prefs.telegram_search} onCheckedChange={(telegram_search) => setPrefs({ ...prefs, telegram_search })} /></label>
           <label className="flex items-center justify-between text-sm">Fladder <SwitchBox label="Fladder" checked={prefs.fladder} onCheckedChange={(fladder) => setPrefs({ ...prefs, fladder })} /></label>
           <label className="flex items-center justify-between text-sm">Seerr <SwitchBox label="Seerr" checked={prefs.seerr} onCheckedChange={(seerr) => setPrefs({ ...prefs, seerr })} /></label>
-          <label className="flex items-center justify-between text-sm">{t("Torrent")} <SwitchBox label={t("Torrent")} checked={prefs.downloads} onCheckedChange={(downloads) => setPrefs({ ...prefs, downloads })} /></label>
-          {prefs.downloads && <p className="text-sm text-destructive">{t("Torrents connect this computer to strangers and can be illegal where you live.")}</p>}
+          <div className="space-y-2 border-t pt-3">
+            <div className="text-sm font-semibold">{t("Where to keep the files")}</div>
+            <p className="text-sm text-muted-foreground">{t("One folder for Jellyfin, Seerr, the cache and the library. Pick a drive with enough free space.")}</p>
+            <Input value={folder} placeholder={folderDefault} onChange={(e) => setFolder(e.target.value)} />
+            {folderInfo?.error && <p className="text-sm text-destructive">{folderInfo.error}</p>}
+            {folderInfo && !folderInfo.error && folderInfo.free !== undefined && (folderInfo.low
+              ? <p className="text-sm text-destructive">{t("Only {{free}} free. At least 10 GB is recommended.", { free: bytes(folderInfo.free) })}</p>
+              : <p className="text-sm text-muted-foreground">{t("{{free}} free", { free: bytes(folderInfo.free) })}{folderInfo.exists ? "" : " · " + t("The folder will be created.")}</p>)}
+          </div>
           <div className="space-y-3 border-t pt-3">
             <div>
               <div className="text-sm font-semibold">Jellyfin</div>
@@ -258,7 +286,7 @@ function Setup() {
               <Input placeholder={t("API key")} value={prefs.jellyfin_key} onChange={(e) => setPrefs({ ...prefs, jellyfin_key: e.target.value })} />
             </>}
           </div>
-          <div className="flex justify-end"><Button size="sm" disabled={!!busy} onClick={() => setStep("filter")}>{t("Continue")}</Button></div>
+          <div className="flex justify-end"><Button size="sm" disabled={!!busy || !!folderInfo?.error} onClick={() => setStep("filter")}>{t("Continue")}</Button></div>
         </>}
         {step === "filter" && <>
           <h1 className="text-lg font-semibold">{t("Auto-add filter")}</h1>

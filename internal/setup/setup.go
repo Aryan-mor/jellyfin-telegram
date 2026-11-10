@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"runtime"
 	"strings"
 	"sync"
 
@@ -50,6 +51,9 @@ type Values struct {
 	// Auto means the Telegram details come from the automatic setup held on the server: the
 	// api_id, the channel and the bot tokens never pass through the browser.
 	Auto bool `json:"auto"`
+	// Folder is the one folder the program keeps everything in: Jellyfin, Seerr, the cache and the
+	// library. Empty keeps the current place.
+	Folder string `json:"folder"`
 }
 
 // BotReport is the result of trying one bot.
@@ -102,6 +106,9 @@ type Wizard struct {
 
 	// AutoFilter serves the auto-add filter under /setup. Set it before Handler or Waiting.
 	AutoFilter Mounter
+
+	// DefaultFolder is where files go when the person does not choose. Set it before Handler.
+	DefaultFolder string
 }
 
 // Mounter adds endpoints to a page, behind that page's code check.
@@ -155,6 +162,8 @@ func (w *Wizard) Handler() http.Handler {
 		_, _ = rw.Write(webui.Page("setup.html", ""))
 	}))
 	w.autoRoutes(mux)
+	mux.HandleFunc("POST /setup/folder", w.guard(w.handleFolder))
+	mux.HandleFunc("GET /setup/folder", w.guard(w.handleFolderDefault))
 	mux.HandleFunc("POST /setup/verify", w.guard(w.handleVerify))
 	mux.HandleFunc("POST /setup/save", w.guard(w.handleSave))
 	mux.HandleFunc("GET /setup/status", w.guard(func(rw http.ResponseWriter, _ *http.Request) {
@@ -311,12 +320,76 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 	if code, ok := config.NormalizeUILanguage(v.UILanguage); ok {
 		env["UI_LANGUAGE"] = code
 	}
+	if folder := strings.TrimSpace(v.Folder); folder != "" {
+		picked, err := w.useFolder(folder)
+		if err != nil {
+			writeError(rw, http.StatusBadRequest, err.Error())
+			return
+		}
+		for k, val := range picked {
+			env[k] = val
+		}
+	}
 	if err = UpdateEnv(w.env, env); err != nil {
 		writeError(rw, http.StatusInternalServerError, "cannot write the settings file: "+err.Error())
 		return
 	}
 	w.once.Do(func() { close(w.saved) })
 	writeJSON(rw, http.StatusOK, map[string]bool{"ok": true})
+}
+
+// useFolder makes the folder the person picked and returns the settings that point at it. Choosing
+// the place that is already in use changes nothing.
+func (w *Wizard) useFolder(raw string) (map[string]string, error) {
+	f, err := PrepareFolder(raw)
+	if err != nil {
+		return nil, err
+	}
+	if w.DefaultFolder != "" {
+		if def, err := absFolder(w.DefaultFolder); err == nil && sameFolder(def, f.Path) {
+			return nil, nil
+		}
+	}
+	layout := LayoutIn(f.Path)
+	for _, dir := range []string{layout.Data, layout.Library} {
+		if err := os.MkdirAll(dir, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	return layout.Env(), nil
+}
+
+func sameFolder(a, b string) bool {
+	if runtime.GOOS == "windows" {
+		return strings.EqualFold(a, b)
+	}
+	return a == b
+}
+
+// handleFolderDefault tells the page where files go when it is left alone.
+func (w *Wizard) handleFolderDefault(rw http.ResponseWriter, _ *http.Request) {
+	out := map[string]any{"default": w.DefaultFolder}
+	if f, err := CheckFolder(w.DefaultFolder); err == nil {
+		out["free"], out["low"] = f.Free, f.Low
+	}
+	writeJSON(rw, http.StatusOK, out)
+}
+
+// handleFolder checks a typed folder without creating it.
+func (w *Wizard) handleFolder(rw http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Path string `json:"path"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(rw, http.StatusBadRequest, "bad request")
+		return
+	}
+	f, err := CheckFolder(body.Path)
+	if err != nil {
+		writeError(rw, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(rw, http.StatusOK, f)
 }
 
 // TrustedClient reports that a request comes from this machine or a Tailscale address. Signing in a

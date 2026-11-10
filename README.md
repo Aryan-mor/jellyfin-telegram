@@ -301,6 +301,10 @@ playback alone.
      enter your own. Build with `-ldflags "-X github.com/Aryan-mor/jellyfin-telegram/internal/config.DefaultAPIID=... -X github.com/Aryan-mor/jellyfin-telegram/internal/config.DefaultAPIHash=..."`
      to ship one.
 
+   The page also asks **where to keep the files**: one folder, used for Jellyfin, Seerr, the stream
+   cache, the sessions and the library (`data` and `library` are made inside it). It shows the free
+   space and warns below 10 GB. Leave it as it is to keep them next to the program.
+
    The page then checks every bot against the channel and writes `.env` for you.
 4. Wait while it downloads Jellyfin 12.4, starts it, creates the libraries and signs in. The
    Jellyfin password is saved in `DATA_DIR/jellyfin/credentials.json`.
@@ -438,7 +442,7 @@ Every setting is explained inside [.env.example](.env.example). The ones you wil
 | `TELEGRAM_BOT_CONCURRENCY` | Parallel downloads per bot (default 4) |
 | `GATEWAY_LISTEN` | The one port served (default `0.0.0.0:8097`) |
 | `GATEWAY_PUBLIC_URL` | Needed only with your own Jellyfin |
-| `LIBRARY_DIR`, `DATA_DIR` | Where `.strm` files and the database, sessions and cache live |
+| `LIBRARY_DIR`, `DATA_DIR` | Where `.strm` files and the database, sessions, cache, Jellyfin and Seerr live. The setup page sets both from the one folder you pick. Changing them later does not move existing files |
 | `CACHE_MAX_GB` | Block cache limit (default 4) |
 | `SYNC_INTERVAL_SECONDS` | How often to look for new channel messages (default 60) |
 | `SUBTITLE_LANGUAGE` | Your language code: `en`, `de`, `fr`, `fa`, `ja`, ... Empty turns subtitles off |
