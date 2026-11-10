@@ -239,7 +239,7 @@ func (a *autoSetup) Existing(ctx context.Context, channel string) (setup.AutoFou
 	if err != nil {
 		return setup.AutoFound{}, err
 	}
-	f, err := r.Existing(ctx, channel)
+	f, err := r.Existing(tguser.Prioritise(ctx), channel)
 	return foundOf(f), err
 }
 
@@ -248,7 +248,7 @@ func (a *autoSetup) Create(ctx context.Context, o setup.AutoCreate, progress fun
 	if err != nil {
 		return setup.AutoFound{}, err
 	}
-	f, err := r.Create(ctx, tgsetup.CreateOptions{Title: o.Title, Channel: o.Channel, Bots: o.Bots}, progress)
+	f, err := r.Create(tguser.Prioritise(ctx), tgsetup.CreateOptions{Title: o.Title, Channel: o.Channel, Bots: o.Bots}, progress)
 	return foundOf(f), err
 }
 
@@ -257,7 +257,7 @@ func (a *autoSetup) Reuse(ctx context.Context, o setup.AutoReuse, progress func(
 	if err != nil {
 		return setup.AutoFound{}, err
 	}
-	f, err := r.Reuse(ctx, tgsetup.ReuseOptions{
+	f, err := r.Reuse(tguser.Prioritise(ctx), tgsetup.ReuseOptions{
 		ChannelID: o.ChannelID, Title: o.Title, Tokens: o.Tokens, Bots: o.Bots, Usernames: o.Usernames,
 	}, progress)
 	return foundOf(f), err

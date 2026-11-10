@@ -78,6 +78,7 @@ type call struct {
 	ctx  context.Context
 	fn   func(context.Context, *tg.Client) (any, error)
 	resp chan result
+	user bool
 }
 
 type result struct {
@@ -270,11 +271,16 @@ func (m *Manager) serveOnce(ctx context.Context, lv *live) error {
 func (m *Manager) serveCalls(ctx context.Context, lv *live, api *tg.Client) error {
 	var queued []call
 	for {
+		queued = drainOps(lv.ops, queued)
 		if err := ctx.Err(); err != nil {
 			failCalls(queued, err)
 			return err
 		}
-		if lv.clock.remaining() <= 0 && len(queued) > 0 {
+		var wait time.Duration
+		if len(queued) > 0 {
+			wait = lv.clock.blockFor(queued[0].user)
+		}
+		if wait <= 0 && len(queued) > 0 {
 			op := queued[0]
 			queued = queued[1:]
 			if op.ctx.Err() != nil {
@@ -282,20 +288,20 @@ func (m *Manager) serveCalls(ctx context.Context, lv *live, api *tg.Client) erro
 				continue
 			}
 			val, err := op.fn(op.ctx, api)
-			if wait, ok := tgerr.AsFloodWait(err); ok && wait > 0 {
+			if flood, ok := tgerr.AsFloodWait(err); ok && flood > 0 {
 				// The wait belongs to the account, not to the job that tripped it.
-				lv.clock.hold(wait + 2*time.Second)
-				m.noteFlood(lv, wait)
+				lv.clock.holdFlood(flood + 2*time.Second)
+				m.noteFlood(lv, flood)
 			}
-			// One controller, one pace. The next job on this account waits, whatever called.
+			// One controller, one pace. Background work waits. A job the person asked for does not.
 			lv.clock.hold(callGap)
 			op.resp <- result{val, err}
 			continue
 		}
 		var timer *time.Timer
 		var wake <-chan time.Time
-		if d := lv.clock.remaining(); d > 0 {
-			timer = time.NewTimer(d)
+		if wait > 0 {
+			timer = time.NewTimer(wait)
 			wake = timer.C
 		}
 		select {
@@ -305,11 +311,38 @@ func (m *Manager) serveCalls(ctx context.Context, lv *live, api *tg.Client) erro
 			failCalls(queued, err)
 			return err
 		case op := <-lv.ops:
-			queued = append(queued, op)
+			queued = enqueue(queued, op)
 		case <-wake:
 		}
 		stopTimer(timer)
 	}
+}
+
+func drainOps(ops <-chan call, queued []call) []call {
+	for {
+		select {
+		case op := <-ops:
+			queued = enqueue(queued, op)
+		default:
+			return queued
+		}
+	}
+}
+
+// enqueue puts a job the person asked for ahead of background work, and behind other such jobs.
+func enqueue(queued []call, op call) []call {
+	if !op.user {
+		return append(queued, op)
+	}
+	for i, item := range queued {
+		if !item.user {
+			queued = append(queued, call{})
+			copy(queued[i+1:], queued[i:])
+			queued[i] = op
+			return queued
+		}
+	}
+	return append(queued, op)
 }
 
 func (m *Manager) prepare(ctx context.Context, api *tg.Client, lv *live) error {
@@ -588,7 +621,7 @@ func (m *Manager) call(ctx context.Context, lv *live, fn func(context.Context, *
 	if !lv.connected.Load() {
 		return nil, errors.New("session is not connected")
 	}
-	op := call{ctx: ctx, fn: fn, resp: make(chan result, 1)}
+	op := call{ctx: ctx, fn: fn, resp: make(chan result, 1), user: UserJob(ctx)}
 	// A busy account, or one sitting out a flood rest, still accepts the call. Give up only when
 	// this job is cancelled or the connection is actually gone. A fixed 30s send used to report
 	// "session is not answering" while the account was alive and busy.

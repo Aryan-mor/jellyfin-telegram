@@ -35,19 +35,34 @@ func forwardGap(n int) time.Duration {
 // here, so a channel that yields several files does not start a timer of its own,
 // and a FLOOD_WAIT parks the whole account until Telegram's clock runs out.
 type clock struct {
-	mu    sync.Mutex
-	until time.Time
+	mu         sync.Mutex
+	gapUntil   time.Time
+	floodUntil time.Time
 }
 
-// remaining is how long the next job still has to wait. Zero means it can run.
-func (c *clock) remaining() time.Duration {
+// remaining is how long a background job still has to wait. Zero means it can run.
+func (c *clock) remaining() time.Duration { return c.blockFor(false) }
+
+// blockFor is the wait before the next job. A job the person asked for skips the
+// voluntary rest and still waits out a FLOOD_WAIT.
+func (c *clock) blockFor(user bool) time.Duration {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	d := time.Until(c.until)
-	if d < 0 {
-		return 0
+	flood := time.Until(c.floodUntil)
+	if flood < 0 {
+		flood = 0
 	}
-	return d
+	if user {
+		return flood
+	}
+	gap := time.Until(c.gapUntil)
+	if gap < 0 {
+		gap = 0
+	}
+	if gap > flood {
+		return gap
+	}
+	return flood
 }
 
 func (c *clock) wait(ctx context.Context) error {
@@ -75,7 +90,20 @@ func (c *clock) hold(d time.Duration) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	at := time.Now().Add(d)
-	if at.After(c.until) {
-		c.until = at
+	if at.After(c.gapUntil) {
+		c.gapUntil = at
+	}
+}
+
+// holdFlood parks every job, including one the person asked for, until Telegram's wait ends.
+func (c *clock) holdFlood(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	at := time.Now().Add(d)
+	if at.After(c.floodUntil) {
+		c.floodUntil = at
 	}
 }

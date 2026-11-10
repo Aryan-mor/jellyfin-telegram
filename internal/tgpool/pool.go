@@ -18,6 +18,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/actlog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
 
 const (
@@ -568,8 +569,9 @@ func (p *Pool) callGap(ctx context.Context, messageID int, gap time.Duration, fn
 }
 
 func (p *Pool) acquire(ctx context.Context) (*slot, error) {
+	user := tguser.UserJob(ctx)
 	for {
-		if s := p.tryAcquire(time.Now()); s != nil {
+		if s := p.tryAcquire(time.Now(), user); s != nil {
 			return s, nil
 		}
 		select {
@@ -581,7 +583,7 @@ func (p *Pool) acquire(ctx context.Context) (*slot, error) {
 }
 
 // tryAcquire picks the ready bot with the fewest running calls, rotating between ties.
-func (p *Pool) tryAcquire(now time.Time) *slot {
+func (p *Pool) tryAcquire(now time.Time, user bool) *slot {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	var best *slot
@@ -589,7 +591,7 @@ func (p *Pool) tryAcquire(now time.Time) *slot {
 	for i := range p.slots {
 		idx := (p.next + i) % len(p.slots)
 		s := p.slots[idx]
-		if s.inflight >= p.concurrency || now.Before(s.floodUntil) || now.Before(s.benchUntil) || now.Before(s.gapUntil) || !s.w.status().Ready {
+		if slotBusy(s, now, p.concurrency, user) {
 			continue
 		}
 		if best == nil || s.inflight < best.inflight {
@@ -615,8 +617,9 @@ func (p *Pool) findSlot(id int64) (*slot, *bot, error) {
 }
 
 func (p *Pool) acquireSlot(ctx context.Context, s *slot) error {
+	user := tguser.UserJob(ctx)
 	for {
-		if p.tryTake(s, time.Now()) {
+		if p.tryTake(s, time.Now(), user) {
 			return nil
 		}
 		select {
@@ -627,14 +630,22 @@ func (p *Pool) acquireSlot(ctx context.Context, s *slot) error {
 	}
 }
 
-func (p *Pool) tryTake(s *slot, now time.Time) bool {
+func (p *Pool) tryTake(s *slot, now time.Time, user bool) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	if s.inflight >= p.concurrency || now.Before(s.floodUntil) || now.Before(s.benchUntil) || now.Before(s.gapUntil) || !s.w.status().Ready {
+	if slotBusy(s, now, p.concurrency, user) {
 		return false
 	}
 	s.inflight++
 	return true
+}
+
+func slotBusy(s *slot, now time.Time, limit int, user bool) bool {
+	if s.inflight >= limit || now.Before(s.floodUntil) || now.Before(s.benchUntil) || !s.w.status().Ready {
+		return true
+	}
+	// A job the person asked for skips the voluntary rest. A flood wait still applies.
+	return !user && now.Before(s.gapUntil)
 }
 
 // finish returns the bot to the queue. A success starts the rest. A flood wait benches it.

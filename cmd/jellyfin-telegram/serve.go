@@ -677,6 +677,7 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 				return nil, err
 			}
 			if action == "add" {
+				ctx := tguser.Prioritise(r.Context())
 				channelID, username, err := mirror.ParseTarget(fmt.Sprint(body["channel"]))
 				if err != nil {
 					return nil, err
@@ -684,7 +685,7 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 				if channelID != 0 && channelID == main {
 					return nil, errors.New("that is the main channel")
 				}
-				id, title, err := pool.AcceptMirror(r.Context(), botID, channelID, username)
+				id, title, err := pool.AcceptMirror(ctx, botID, channelID, username)
 				if err != nil {
 					return nil, err
 				}
@@ -693,7 +694,7 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 				}
 				// Muted once, when the channel is first listed. A mirror only receives copies, so the
 				// account has no reason to hear about each one. A failure here never blocks the mirror.
-				if err := muteMirror(r.Context(), users, id); err != nil {
+				if err := muteMirror(ctx, users, id); err != nil {
 					slog.Warn("could not mute the mirror channel", "channel", id, "err", err)
 				}
 				return map[string]any{"ok": true}, nil
@@ -717,7 +718,7 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 			if !found {
 				return nil, errors.New("that mirror is not listed")
 			}
-			got, title, err := pool.AcceptMirror(r.Context(), botID, current.ChannelID, "")
+			got, title, err := pool.AcceptMirror(tguser.Prioritise(r.Context()), botID, current.ChannelID, "")
 			if err != nil {
 				return nil, err
 			}

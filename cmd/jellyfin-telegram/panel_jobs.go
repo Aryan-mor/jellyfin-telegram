@@ -71,7 +71,7 @@ func (j *panelJobs) start(work func(context.Context, panel.Step) (any, error)) e
 	j.owned = nil
 	j.mu.Unlock()
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		ctx, cancel := context.WithTimeout(tguser.Prioritise(context.Background()), 30*time.Minute)
 		defer cancel()
 		res, err := work(ctx, j.push)
 		j.finish(res, err)
@@ -409,7 +409,7 @@ func mirrorVisibility(r *http.Request, cat *catalog.Catalog, users *tguser.Manag
 		return map[string]any{"ok": true, "username": current.Username, "link": mirrorLink(current.Username)}, nil
 	}
 	var name string
-	_, err = users.Run(r.Context(), func(ctx context.Context, api *tg.Client) (any, error) {
+	_, err = users.Run(tguser.Prioritise(r.Context()), func(ctx context.Context, api *tg.Client) (any, error) {
 		ch, err := tguser.ResolveChannelInput(ctx, api, strconv.FormatInt(current.ChannelID, 10))
 		if err != nil {
 			return nil, err
@@ -447,7 +447,7 @@ func mirrorAdmin(r *http.Request, pool *tgpool.Pool, users *tguser.Manager, body
 	if err != nil {
 		return nil, err
 	}
-	_, err = users.Run(r.Context(), func(ctx context.Context, api *tg.Client) (any, error) {
+	_, err = users.Run(tguser.Prioritise(r.Context()), func(ctx context.Context, api *tg.Client) (any, error) {
 		ch, err := tguser.ResolveChannelInput(ctx, api, channel)
 		if err != nil {
 			return nil, err

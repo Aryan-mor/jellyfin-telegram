@@ -91,6 +91,7 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 }
 
 func attachExistingMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, main, botID int64, raw string) error {
+	ctx = tguser.Prioritise(ctx)
 	channelID, username, err := mirror.ParseTarget(raw)
 	if err != nil {
 		return err

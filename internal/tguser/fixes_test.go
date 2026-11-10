@@ -142,6 +142,60 @@ func TestCallWaitsOutAFloodRest(t *testing.T) {
 	}
 }
 
+func TestUserJobRunsBeforeBackground(t *testing.T) {
+	m := &Manager{}
+	lv := &live{ops: make(chan call, 4)}
+	lv.connected.Store(true)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		_ = m.serveCalls(ctx, lv, nil)
+		close(done)
+	}()
+	held := make(chan struct{})
+	release := make(chan struct{})
+	go func() {
+		_, _ = m.call(ctx, lv, func(context.Context, *tg.Client) (any, error) {
+			close(held)
+			<-release
+			return nil, nil
+		})
+	}()
+	<-held
+	order := make(chan string, 2)
+	bgCtx, bgStop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer bgStop()
+	userCtx, userStop := context.WithTimeout(Prioritise(context.Background()), 3*time.Second)
+	defer userStop()
+	go func() {
+		_, _ = m.call(bgCtx, lv, func(context.Context, *tg.Client) (any, error) {
+			order <- "background"
+			return nil, nil
+		})
+	}()
+	go func() {
+		_, _ = m.call(userCtx, lv, func(context.Context, *tg.Client) (any, error) {
+			order <- "user"
+			return nil, nil
+		})
+	}()
+	time.Sleep(100 * time.Millisecond)
+	close(release)
+	if got := <-order; got != "user" {
+		t.Fatalf("first job was %s", got)
+	}
+	if got := <-order; got != "background" {
+		t.Fatalf("second job was %s", got)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session loop did not stop")
+	}
+}
+
 func TestCancelLoginStopsTheWaitingSignIn(t *testing.T) {
 	m := &Manager{}
 	ctx, cancel := context.WithCancel(context.Background())
