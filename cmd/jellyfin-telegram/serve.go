@@ -445,6 +445,20 @@ func uploadPace(cfg config.Config) tguser.Pace {
 	}
 }
 
+// usersWarming is true while a saved Telegram sign-in has not connected and has not failed yet.
+// The panel would otherwise say nobody is signed in. After a short wait it shows whatever it has.
+func usersWarming(users *tguser.Manager, opened time.Time) bool {
+	if users == nil || time.Since(opened) > 45*time.Second {
+		return false
+	}
+	for _, v := range users.Views() {
+		if v.Connected || v.Error != "" {
+			return false
+		}
+	}
+	return users.HasSaved()
+}
+
 // startUsers connects the Telegram accounts a person signed in to. The local files tab and the
 // other tools share them, so one account never sends two files at once. It returns nil when they cannot start.
 func startUsers(ctx context.Context, cfg config.Config, log *slog.Logger) *tguser.Manager {
@@ -493,7 +507,9 @@ func startLocal(cfg config.Config, envPath string, cat *catalog.Catalog, pool *t
 
 func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr bool, ctl *accountControl, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, journal *actlog.Store, channels *chanindex.Client, accounts func() []panel.Account) http.Handler {
 	jobs := &panelJobs{}
+	opened := time.Now()
 	return panel.New(panel.Options{
+		Starting:  func() bool { return usersWarming(users, opened) },
 		Accounts:  accounts,
 		Code:      code,
 		EnvPath:   envPath,

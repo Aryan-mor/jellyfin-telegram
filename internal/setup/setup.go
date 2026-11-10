@@ -220,7 +220,8 @@ func (w *Wizard) Handler() http.Handler {
 // Waiting serves the setup paths and tells anyone else to come back, while nothing else is up yet.
 // The panel is the exception. A restart leaves it open on the previous page, and that page treats
 // any failed poll as "Something went wrong" even though the new version is already installed.
-// Quiet successful answers let that page reload itself instead of showing an error.
+// Quiet successful answers let that page reload itself instead of showing an error. Those answers
+// set starting, so the page waits instead of treating the empty reply as a server with no accounts.
 func (w *Wizard) Waiting() http.Handler {
 	setup := w.Handler()
 	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
@@ -246,6 +247,7 @@ func (w *Wizard) serveWaitingPanel(rw http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/panel/state":
 		writeJSON(rw, http.StatusOK, map[string]any{
+			"starting": true,
 			"channel_id": 0, "language": "", "bots": []any{}, "addresses": []any{}, "accounts": []any{},
 			"seerr": false, "fladder": false, "telegram_search": false, "local": false, "sources": false,
 		})

@@ -1,8 +1,9 @@
 // Publishes one release from the main branch that is already on GitHub.
 //   node scripts/release.mjs stable
 //   node scripts/release.mjs nightly
-// Stable versions are 1.0.N. Nightly versions are 1.0.N-nightly.K on top of the
-// current stable. The GitHub workflow builds the files; this only picks the number.
+// Stable versions are 1.0.N. A nightly is a prerelease of the next stable,
+// 1.0.(N+1)-nightly.K. 1.0.N-nightly.K is always below 1.0.N in semver, for any K.
+// The GitHub workflow builds the files; this only picks the number.
 import { execFileSync } from "node:child_process"
 
 const tagRe = /^v?(\d+)\.(\d+)\.(\d+)(?:-nightly\.(\d+))?$/
@@ -30,14 +31,14 @@ export function nextVersion(channel, tags) {
   const parsed = tags.map(parseTag).filter(Boolean)
   const stables = parsed.filter((p) => p.nightly === null).sort(compare)
   const stable = stables.at(-1) ?? { major: 1, minor: 0, patch: 0 }
-  const base = `${stable.major}.${stable.minor}.${stable.patch}`
   if (channel === "stable") return `${stable.major}.${stable.minor}.${stable.patch + 1}`
   if (channel !== "nightly") throw new Error("channel must be stable or nightly")
+  const patch = stable.patch + 1
   const n = parsed
-    .filter((p) => p.nightly !== null && p.major === stable.major && p.minor === stable.minor && p.patch === stable.patch)
+    .filter((p) => p.nightly !== null && p.major === stable.major && p.minor === stable.minor && p.patch === patch)
     .reduce((max, p) => Math.max(max, p.nightly), 0)
   // Two digits so GitHub's same-day tag sort (lexicographic) keeps .10 above .09.
-  return `${base}-nightly.${String(n + 1).padStart(2, "0")}`
+  return `${stable.major}.${stable.minor}.${patch}-nightly.${String(n + 1).padStart(2, "0")}`
 }
 
 function run(cmd, args, opts = {}) {

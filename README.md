@@ -81,8 +81,8 @@ When the setup page finishes, Jellyfin is at `http://127.0.0.1:8097` and the pan
 `http://127.0.0.1:8097/panel`.
 
 **Updates.** A release is published when someone runs `pnpm release:stable` or
-`pnpm release:nightly`. Stable versions are `1.0.N`. Nightly versions are `1.0.N-nightly.K` and
-do not move the stable download. The panel shows a blue bar only for a newer build on the same
+`pnpm release:nightly`. Stable versions are `1.0.N`. Nightly versions are `1.0.(N+1)-nightly.K`
+(a prerelease of the next stable, so they sort above `1.0.N`) and do not move the stable download. The panel shows a blue bar only for a newer build on the same
 channel. To update, run the same install command again: your settings and library are kept.
 
 **Something went wrong?** See [Troubleshooting](docs/TROUBLESHOOTING.md): every common error

@@ -467,6 +467,7 @@
   "The fields below are used instead of a new server.": "Aşağıdaki alanlar yeni bir sunucu yerine kullanılır.",
   "The link t.me/{{username}} stops working. People already in the channel stay.": "t.me/{{username}} bağlantısı çalışmayı durdurur. Halihazırda kanalda bulunan kişiler kalır.",
   "The program did not come back. Start it again from this computer.": "Program geri dönmedi. Bu bilgisayardan yeniden başlatın.",
+  "The server is getting ready.": "Sunucu hazırlanıyor.",
   "The update failed": "Güncelleme başarısız oldu",
   "The session on this computer ends. Sign in again to continue setup.": "Bu bilgisayardaki oturum sona eriyor. Kuruluma devam etmek için tekrar oturum açın.",
   "The session on this computer is ended. Tools that need an account stop until one is signed in again.": "Bu bilgisayardaki oturum sonlandırıldı. Hesap gerektiren araçlar, yeniden oturum açılana kadar durdurulur.",

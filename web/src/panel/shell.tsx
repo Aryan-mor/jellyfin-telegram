@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
-  Bot, Cable, CloudUpload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
+  Bot, Cable, CloudUpload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Loader2, Menu, Moon, Newspaper,
   Radio, ScrollText, Send, Share2, Sun, Tv, UserRound,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -30,6 +30,8 @@ export type PanelState = {
   telegram?: { sessions?: Session[] }
   accounts: { app: string; path: string; user?: string; password?: string; note?: string }[]
   forum?: Record<string, unknown> | null
+  // starting is set while the process is still coming up. The reply is empty on purpose.
+  starting?: boolean
 }
 
 export type Session = {
@@ -41,16 +43,33 @@ export function usePanel() {
   return useQuery({
     queryKey: ["panel-state"],
     queryFn: () => api<PanelState>("/panel/state"),
-    refetchInterval: () => (pollingPaused() ? false : 8000),
+    retry: (_count, error) => unreachable(error),
+    retryDelay: 1000,
+    refetchInterval: (q) => {
+      // Keep asking after retries, too. A dead poll must not turn into "no account".
+      if (unreachable(q.state.error)) return 1000
+      if (pollingPaused()) return false
+      return q.state.data?.starting ? 1000 : 8000
+    },
   })
 }
 
-export function useJob() {
+export function useJob(enabled = true) {
   return useQuery({
     queryKey: ["panel-job"],
+    enabled,
     queryFn: () => api<{ running: boolean; progress: { text: string; state: string }[]; error?: string; restart?: boolean; result?: { link?: string; bots?: string[] }; owned?: { username: string; name?: string }[] }>("/panel/jobs"),
     refetchInterval: (q) => (pollingPaused() ? false : q.state.data?.running ? 1000 : 4000),
   })
+}
+
+// unreachable is a server that is down or still booting. A real refusal (wrong code, not this
+// computer) has its own message and must not sit on the preparing screen.
+function unreachable(error: unknown) {
+  if (error instanceof TypeError) return true
+  if (!(error instanceof Error)) return false
+  const msg = error.message
+  return msg === "Failed to fetch" || msg === "Load failed" || msg === "Something went wrong" || msg === "starting" || msg.includes("still starting")
 }
 
 function themeNow() {
@@ -62,9 +81,14 @@ function themeNow() {
 export function Shell() {
   useUiLang()
   const state = usePanel()
-  const job = useJob()
+  const s = state.data
+  // A restart answers before Telegram, bots and the library are up, or it does not answer at all.
+  // Either way the pages would say nothing is signed in. Hold every page until a finished state arrives.
+  const preparing = state.isPending || !!s?.starting || unreachable(state.error)
+  const job = useJob(!preparing)
   const update = useQuery({
     queryKey: ["panel-update"],
+    enabled: !preparing,
     queryFn: () => api<{ current: string; channel?: string; latest?: string; available: boolean; url?: string }>("/panel/update"),
     staleTime: 0,
     refetchOnMount: "always",
@@ -105,7 +129,21 @@ export function Shell() {
     const next = q.toString()
     window.history.replaceState(null, "", window.location.pathname + (next ? "?" + next : "") + window.location.hash)
   }, [])
-  const s = state.data
+  if (preparing) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-3 p-6 text-center">
+        <Loader2 className="size-8 animate-spin text-muted-foreground" />
+        <p className="text-sm text-muted-foreground">{t("The server is getting ready.")}</p>
+      </div>
+    )
+  }
+  if (state.isError && !s) {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <p className="text-sm text-destructive">{(state.error as Error).message}</p>
+      </div>
+    )
+  }
   const signed = (s?.telegram?.sessions?.length ?? 0) > 0
   const botBad = (s?.bots ?? []).some((b) => b.connected && (!b.ok || !b.admin || b.error))
   const nav = (

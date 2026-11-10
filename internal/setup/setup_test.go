@@ -224,6 +224,9 @@ func TestWaitingPanelStaysQuiet(t *testing.T) {
 	if _, ok := state["bots"].([]any); !ok {
 		t.Fatalf("bots %#v", state["bots"])
 	}
+	if state["starting"] != true {
+		t.Fatalf("starting %#v", state["starting"])
+	}
 	req, err := http.NewRequest(http.MethodGet, srv.URL+"/panel", nil)
 	if err != nil {
 		t.Fatal(err)

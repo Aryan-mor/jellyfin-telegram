@@ -68,6 +68,8 @@ type Options struct {
 	HomeDo func(r *http.Request, action string, body map[string]any) (any, error)
 	// Sessions lists the signed-in Telegram accounts. Nil hides the account tab.
 	Sessions func() any
+	// Starting reports that an empty account list is not final yet. The page waits.
+	Starting func() bool
 	// Sources reports the Telegram channels that videos are copied from. Nil hides that tab.
 	Sources func(context.Context) (any, error)
 	// SourceDo runs one action of that tab: add, remove, pause, settings, check or rescan.
@@ -306,6 +308,7 @@ type state struct {
 	Sources        bool      `json:"sources"`
 	Telegram       any       `json:"telegram,omitempty"`
 	Accounts       []Account `json:"accounts"`
+	Starting       bool      `json:"starting,omitempty"`
 	Forum          any       `json:"forum,omitempty"`
 }
 
@@ -1001,6 +1004,9 @@ func (p *panel) snapshot() (state, error) {
 	s.Sources = p.o.Sources != nil
 	if p.o.Sessions != nil {
 		s.Telegram = map[string]any{"sessions": p.o.Sessions()}
+	}
+	if p.o.Starting != nil && p.o.Starting() {
+		s.Starting = true
 	}
 	return s, nil
 }

@@ -467,6 +467,7 @@
   "The fields below are used instead of a new server.": "Die folgenden Felder werden anstelle eines neuen Servers verwendet.",
   "The link t.me/{{username}} stops working. People already in the channel stay.": "Der Link t.me/{{username}} funktioniert nicht mehr. Personen, die bereits im Kanal sind, bleiben.",
   "The program did not come back. Start it again from this computer.": "Das Programm kam nicht zurück. Starte es erneut von diesem Computer aus.",
+  "The server is getting ready.": "Der Server wird vorbereitet.",
   "The update failed": "Das Update ist fehlgeschlagen",
   "The session on this computer ends. Sign in again to continue setup.": "Die Sitzung auf diesem Computer endet. Melde dich erneut an, um die Einrichtung fortzusetzen.",
   "The session on this computer is ended. Tools that need an account stop until one is signed in again.": "Die Sitzung auf diesem Computer wird beendet. Tools, die ein Konto benötigen, bleiben stehen, bis jemand erneut angemeldet ist.",
