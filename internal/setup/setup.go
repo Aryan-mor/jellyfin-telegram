@@ -16,6 +16,7 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
@@ -75,8 +76,11 @@ type Verifier func(ctx context.Context, apiID int, apiHash string, channel int64
 
 // Status is shown while the service prepares itself, and at the end.
 type Status struct {
-	Stage    string   `json:"stage"`
-	Percent  int      `json:"percent"`
+	Stage   string `json:"stage"`
+	Percent int    `json:"percent"`
+	// Detail says what the stage is doing right now: bytes done, a speed, or a hint that a wait is
+	// normal. The page shows it under the bar, so a quiet stage does not look frozen.
+	Detail   string   `json:"detail,omitempty"`
 	Ready    bool     `json:"ready"`
 	Error    string   `json:"error,omitempty"`
 	URLs     []string `json:"urls,omitempty"`
@@ -86,6 +90,12 @@ type Status struct {
 	Seerr bool `json:"seerr,omitempty"`
 	// Fladder is true when the web client is served under /fladder/.
 	Fladder bool `json:"fladder,omitempty"`
+}
+
+// statusResponse is what the page polls: the status and the log so far.
+type statusResponse struct {
+	Status
+	Log []string `json:"log"`
 }
 
 // Wizard serves the page. Every request must carry a code printed on this machine's console. The
@@ -103,6 +113,8 @@ type Wizard struct {
 	auto   Auto
 	st     autoState
 	notify func(Status)
+
+	log []string
 
 	// AutoFilter serves the auto-add filter under /setup. Set it before Handler or Waiting.
 	AutoFilter Mounter
@@ -142,9 +154,40 @@ func (w *Wizard) Notify(fn func(Status)) {
 	}
 }
 
-// SetStatus updates what the page shows.
+// maxLog is how many lines of the install log the page can ask for.
+const maxLog = 300
+
+// Logf adds a line to the log the page shows while it installs. It is kept in memory only.
+func (w *Wizard) Logf(format string, args ...any) {
+	line := time.Now().Format("15:04:05") + "  " + fmt.Sprintf(format, args...)
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.addLogLocked(line)
+}
+
+// LogLines returns the log so far, oldest first.
+func (w *Wizard) LogLines() []string {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return append([]string(nil), w.log...)
+}
+
+func (w *Wizard) addLogLocked(line string) {
+	w.log = append(w.log, line)
+	if len(w.log) > maxLog {
+		w.log = append([]string(nil), w.log[len(w.log)-maxLog:]...)
+	}
+}
+
+// SetStatus updates what the page shows. A new stage, and a failure, also go into the log.
 func (w *Wizard) SetStatus(s Status) {
 	w.mu.Lock()
+	if s.Stage != "" && s.Stage != w.status.Stage {
+		w.addLogLocked(time.Now().Format("15:04:05") + "  " + s.Stage)
+	}
+	if s.Error != "" && s.Error != w.status.Error {
+		w.addLogLocked(time.Now().Format("15:04:05") + "  Error: " + s.Error)
+	}
 	w.status = s
 	fn := w.notify
 	w.mu.Unlock()
@@ -164,13 +207,14 @@ func (w *Wizard) Handler() http.Handler {
 	w.autoRoutes(mux)
 	mux.HandleFunc("POST /setup/folder", w.guard(w.handleFolder))
 	mux.HandleFunc("GET /setup/folder", w.guard(w.handleFolderDefault))
+	mux.HandleFunc("GET /setup/folder/browse", w.guard(w.handleBrowse))
 	mux.HandleFunc("POST /setup/verify", w.guard(w.handleVerify))
 	mux.HandleFunc("POST /setup/save", w.guard(w.handleSave))
 	mux.HandleFunc("GET /setup/status", w.guard(func(rw http.ResponseWriter, _ *http.Request) {
 		w.mu.Lock()
-		s := w.status
+		out := statusResponse{Status: w.status, Log: append([]string(nil), w.log...)}
 		w.mu.Unlock()
-		writeJSON(rw, http.StatusOK, s)
+		writeJSON(rw, http.StatusOK, out)
 	}))
 	if w.AutoFilter != nil {
 		w.AutoFilter.Mount(mux, "/setup", w.guard)

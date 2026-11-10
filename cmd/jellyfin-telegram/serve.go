@@ -197,6 +197,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	if err := waitForBots(ctx, pool, log); err != nil {
 		return err
 	}
+	wizard.Logf("Telegram is connected")
 
 	var creds managed.Credentials
 	if cfg.JellyfinManaged {
@@ -215,13 +216,16 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 			server.Run(ctx)
 		}()
 		armDone()
-		wizard.SetStatus(setup.Status{Stage: "Starting Jellyfin", Percent: 90})
+		wizard.SetStatus(setup.Status{Stage: "Starting Jellyfin", Percent: 45, Detail: "The first start builds its database and can take a minute or two."})
 		if err := server.WaitReady(ctx, managedStartTimeout); err != nil {
 			return err
 		}
+		wizard.Logf("Jellyfin is running")
+		wizard.SetStatus(setup.Status{Stage: "Setting up Jellyfin", Percent: 50, Detail: "Creating the libraries and the admin user."})
 		if creds, err = finishManaged(ctx, cfg, server); err != nil {
 			return err
 		}
+		wizard.Logf("Jellyfin is set up")
 		cfg.JellyfinAPIKey = creds.APIKey
 	}
 
@@ -374,6 +378,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	setupMirror(ctx, cfg, envPath, cat, pool, users, wizard, log)
 
 	addresses := reachableAddresses(cfg.GatewayListen)
+	wizard.Logf("Everything is ready")
 	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password, Seerr: seerrTarget != nil, Fladder: fladderTarget != nil})
 	fmt.Printf("\nJellyfin is ready at:\n")
 	for _, a := range addresses {
@@ -839,13 +844,8 @@ func startManaged(ctx context.Context, cfg config.Config, wizard *setup.Wizard, 
 		return nil, managed.Credentials{}, err
 	}
 	client := &http.Client{Timeout: 30 * time.Minute}
-	paths, err := managed.Install(ctx, filepath.Join(base, "bin"), release, client, func(name string, done, total int64) {
-		percent := 5
-		if total > 0 {
-			percent = 5 + int(80*done/total)
-		}
-		wizard.SetStatus(setup.Status{Stage: "Downloading " + name, Percent: percent})
-	})
+	wizard.SetStatus(setup.Status{Stage: "Preparing Jellyfin", Percent: 5})
+	paths, err := managed.Install(ctx, filepath.Join(base, "bin"), release, client, newInstallReporter(wizard, 5, 30, 40).Progress)
 	if err != nil {
 		return nil, managed.Credentials{}, err
 	}
@@ -878,8 +878,9 @@ func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credential
 	if err != nil {
 		return "", err
 	}
-	wizard.SetStatus(setup.Status{Stage: "Downloading Seerr", Percent: 92})
-	bundle, err := seerr.Install(ctx, root, http.DefaultClient, nil)
+	wizard.SetStatus(setup.Status{Stage: "Preparing Seerr", Percent: 55})
+	// The bundle is a few hundred MB, so the download gets a client with a long timeout.
+	bundle, err := seerr.Install(ctx, root, &http.Client{Timeout: 30 * time.Minute}, newInstallReporter(wizard, 55, 70, 85).Progress)
 	if err != nil {
 		return "", err
 	}
@@ -891,11 +892,12 @@ func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credential
 		srv.Run(ctx)
 	}()
 	armDone()
-	wizard.SetStatus(setup.Status{Stage: "Starting Seerr", Percent: 96})
+	wizard.SetStatus(setup.Status{Stage: "Starting Seerr", Percent: 88, Detail: "The first start builds its database and takes about a minute."})
 	if err := srv.WaitReady(ctx, managedStartTimeout); err != nil {
 		return "", err
 	}
-	wizard.SetStatus(setup.Status{Stage: "Setting up Seerr", Percent: 98})
+	wizard.Logf("Seerr is running")
+	wizard.SetStatus(setup.Status{Stage: "Setting up Seerr", Percent: 94, Detail: "Connecting it to Jellyfin."})
 	host, port, err := seerrJellyfin(cfg)
 	if err != nil {
 		return "", err
@@ -927,6 +929,7 @@ func startSeerr(ctx context.Context, cfg config.Config, creds managed.Credential
 	if err != nil {
 		return "", err
 	}
+	wizard.Logf("Seerr is set up")
 	return srv.URL(), nil
 }
 
@@ -936,7 +939,7 @@ func startFladder(ctx context.Context, cfg config.Config, wizard *setup.Wizard, 
 	if err != nil {
 		return "", err
 	}
-	wizard.SetStatus(setup.Status{Stage: "Downloading Fladder", Percent: 99})
+	wizard.SetStatus(setup.Status{Stage: "Downloading Fladder", Percent: 96})
 	if err := fladder.Pull(ctx, log); err != nil {
 		return "", err
 	}

@@ -27,8 +27,12 @@ type Paths struct {
 	FFprobe string
 }
 
-// Progress reports a download: its name, and bytes done of the total, which may be unknown.
+// Progress reports a download: its name, and bytes done of the total, which may be unknown. The
+// unpacking that follows is reported with the name prefixed by UnpackPrefix.
 type Progress func(name string, done, total int64)
+
+// UnpackPrefix starts the name of a Progress report that is about unpacking, not downloading.
+const UnpackPrefix = "Unpacking "
 
 // Install makes sure a release is present below root and returns where it is. A finished install
 // is marked, so an interrupted one starts over instead of running a partial copy.
@@ -117,7 +121,32 @@ func fetch(ctx context.Context, a Artifact, name, into string, client *http.Clie
 	if _, err := tmp.Seek(0, io.SeekStart); err != nil {
 		return err
 	}
-	return extract(a.URL, tmp, into)
+	unpack := func(done, total int64) {
+		if progress != nil {
+			progress(UnpackPrefix+name, done, total)
+		}
+	}
+	unpack(0, 1)
+	if err := extract(a.URL, tmp, into, unpack); err != nil {
+		return err
+	}
+	unpack(1, 1)
+	return nil
+}
+
+// countingReader reports how much of a file an unpacker has read.
+type countingReader struct {
+	r      io.Reader
+	done   int64
+	total  int64
+	report func(done, total int64)
+}
+
+func (c *countingReader) Read(p []byte) (int, error) {
+	n, err := c.r.Read(p)
+	c.done += int64(n)
+	c.report(c.done, c.total)
+	return n, err
 }
 
 type countingWriter struct {
@@ -135,24 +164,27 @@ func (c *countingWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-func extract(name string, f *os.File, into string) error {
+// extract unpacks an archive. report is told how far it is: the bytes of a tar archive read so
+// far, or the bytes of the files written for a zip.
+func extract(name string, f *os.File, into string, report func(done, total int64)) error {
 	base := path.Base(name)
+	st, err := f.Stat()
+	if err != nil {
+		return err
+	}
+	counted := &countingReader{r: f, total: st.Size(), report: report}
 	switch {
 	case strings.HasSuffix(base, ".zip"):
-		st, err := f.Stat()
-		if err != nil {
-			return err
-		}
-		return extractZip(f, st.Size(), into)
+		return extractZip(f, st.Size(), into, report)
 	case strings.HasSuffix(base, ".tar.gz"):
-		gz, err := gzip.NewReader(f)
+		gz, err := gzip.NewReader(counted)
 		if err != nil {
 			return err
 		}
 		defer gz.Close()
 		return extractTar(gz, into)
 	case strings.HasSuffix(base, ".tar.xz"):
-		xr, err := xz.NewReader(f)
+		xr, err := xz.NewReader(counted)
 		if err != nil {
 			return err
 		}
@@ -173,10 +205,14 @@ func target(into, name string) (string, error) {
 	return filepath.Join(into, local), nil
 }
 
-func extractZip(r io.ReaderAt, size int64, into string) error {
+func extractZip(r io.ReaderAt, size int64, into string, report func(done, total int64)) error {
 	zr, err := zip.NewReader(r, size)
 	if err != nil {
 		return err
+	}
+	var total, done int64
+	for _, f := range zr.File {
+		total += int64(f.UncompressedSize64)
 	}
 	for _, f := range zr.File {
 		dest, err := target(into, f.Name)
@@ -198,6 +234,8 @@ func extractZip(r io.ReaderAt, size int64, into string) error {
 		if err != nil {
 			return err
 		}
+		done += int64(f.UncompressedSize64)
+		report(done, total)
 	}
 	return nil
 }

@@ -104,7 +104,14 @@ func TestInstallVerifiesAndIsIdempotent(t *testing.T) {
 	root := t.TempDir()
 	rel := Release{Version: "1.0", Server: Artifact{URL: srv.URL + "/a.zip", SHA256: sum(archive)}}
 	var seen int64
-	paths, err := Install(context.Background(), root, rel, srv.Client(), func(_ string, done, _ int64) { seen = done })
+	var unpacked, unpackTotal int64
+	paths, err := Install(context.Background(), root, rel, srv.Client(), func(name string, done, total int64) {
+		if strings.HasPrefix(name, UnpackPrefix) {
+			unpacked, unpackTotal = done, total
+			return
+		}
+		seen = done
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,6 +120,9 @@ func TestInstallVerifiesAndIsIdempotent(t *testing.T) {
 	}
 	if seen != int64(len(archive)) {
 		t.Errorf("progress reported %d of %d bytes", seen, len(archive))
+	}
+	if unpackTotal == 0 || unpacked != unpackTotal {
+		t.Errorf("unpacking ended at %d of %d", unpacked, unpackTotal)
 	}
 	if _, err := Install(context.Background(), root, rel, srv.Client(), nil); err != nil {
 		t.Fatal(err)
@@ -161,7 +171,7 @@ func TestInterruptedInstallStartsOver(t *testing.T) {
 func TestArchivesCannotEscapeTheirFolder(t *testing.T) {
 	dir := t.TempDir()
 	evil := zipBytes(t, map[string]string{"../evil.txt": "x"})
-	if err := extractZip(bytes.NewReader(evil), int64(len(evil)), dir); err == nil {
+	if err := extractZip(bytes.NewReader(evil), int64(len(evil)), dir, func(int64, int64) {}); err == nil {
 		t.Error("zip entry with .. was accepted")
 	}
 	name := "../evil.txt"

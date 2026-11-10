@@ -104,3 +104,34 @@ func TestFolderEndpointsNeedTheCode(t *testing.T) {
 		t.Errorf("default: %d %s", rec.Code, rec.Body.String())
 	}
 }
+
+func TestStatusCarriesTheDetailAndTheLog(t *testing.T) {
+	w, _ := New(filepath.Join(t.TempDir(), ".env"), nil)
+	w.SetStatus(Status{Stage: "Downloading Seerr", Percent: 60, Detail: "50.0 MB of 100.0 MB · 4.0 MB/s"})
+	w.Logf("Downloading Seerr: 50%%")
+	w.SetStatus(Status{Stage: "Starting Seerr", Percent: 88})
+	w.SetStatus(Status{Stage: "Could not start", Error: "port in use"})
+
+	rec := httptest.NewRecorder()
+	w.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/setup/status?code="+w.Code(), nil))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("%d", rec.Code)
+	}
+	body := rec.Body.String()
+	for _, want := range []string{`"stage":"Could not start"`, `"log":[`, "Downloading Seerr", "Downloading Seerr: 50%", "Starting Seerr", "Error: port in use"} {
+		if !strings.Contains(body, want) {
+			t.Errorf("status has no %q:\n%s", want, body)
+		}
+	}
+}
+
+func TestTheLogKeepsOnlyTheNewestLines(t *testing.T) {
+	w, _ := New(filepath.Join(t.TempDir(), ".env"), nil)
+	for i := 0; i < maxLog+50; i++ {
+		w.Logf("line %d", i)
+	}
+	lines := w.LogLines()
+	if len(lines) != maxLog || !strings.HasSuffix(lines[len(lines)-1], "line 349") || !strings.HasSuffix(lines[0], "line 50") {
+		t.Errorf("%d lines, first %q, last %q", len(lines), lines[0], lines[len(lines)-1])
+	}
+}

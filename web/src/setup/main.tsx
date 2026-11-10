@@ -23,7 +23,62 @@ function randomMirror() {
 
 type Found = { channel_id: number; title: string; bots: string[]; skipped?: string[] }
 type Job = { running: boolean; progress: { text: string; state: string }[]; error?: string; owned?: { username: string; name?: string }[]; kept?: string[]; found?: Found }
-type Status = { stage: string; percent: number; ready: boolean; error?: string; urls?: string[]; user?: string; password?: string; seerr?: boolean; fladder?: boolean }
+type Status = { stage: string; percent: number; detail?: string; log?: string[]; ready: boolean; error?: string; urls?: string[]; user?: string; password?: string; seerr?: boolean; fladder?: boolean }
+
+type Listing = { path: string; parent: string; top?: boolean; dirs: string[]; cut?: boolean }
+
+// FolderPicker lists the folders of this computer through the program, because a web page cannot
+// learn the real path of a folder by itself.
+function FolderPicker({ start, onPick, onClose }: { start: string; onPick: (path: string) => void; onClose: () => void }) {
+  const [list, setList] = useState<Listing | null>(null)
+  const [error, setError] = useState("")
+
+  function open(path: string, fallback = false) {
+    setError("")
+    void api<Listing>("/setup/folder/browse?path=" + encodeURIComponent(path))
+      .then(setList)
+      .catch((e) => {
+        if (fallback) { open(""); return }
+        setError(e instanceof Error ? e.message : t("Something went wrong"))
+      })
+  }
+
+  // The listing opens where the field was when the picker was opened. Typing afterwards must not reload it.
+  const first = useRef(start)
+  useEffect(() => { open(first.current, true) }, [])
+
+  const name = (p: string) => p.replace(/[\\/]+$/, "").split(/[\\/]/).pop() || p
+  return (
+    <div className="space-y-2 rounded-lg border bg-card p-3">
+      <div className="flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate text-sm font-medium" dir="ltr">{list ? (list.top ? t("This computer") : list.path) : "…"}</div>
+        <Button size="sm" variant="ghost" onClick={onClose}>{t("Close")}</Button>
+      </div>
+      {error && <p className="text-sm text-destructive">{error}</p>}
+      {list && <div className="flex gap-2">
+        {!list.top && <Button size="sm" variant="outline" onClick={() => open(list.parent)}>{t("Up")}</Button>}
+        {!list.top && <Button size="sm" onClick={() => { onPick(list.path); onClose() }}>{t("Use this folder")}</Button>}
+      </div>}
+      {list && <div className="max-h-48 overflow-auto rounded-md border" dir="ltr">
+        {list.dirs.length === 0 && <p className="p-2 text-sm text-muted-foreground">{t("No folders here")}</p>}
+        {list.dirs.map((d) => (
+          <button key={d} type="button" className="block w-full truncate px-2 py-1.5 text-start text-sm hover:bg-accent" onClick={() => open(d)}>{name(d)}</button>
+        ))}
+      </div>}
+      {list?.cut && <p className="text-xs text-muted-foreground">{t("More folders exist than are shown. Type the path instead.")}</p>}
+    </div>
+  )
+}
+
+// LogBox shows what the install has done so far and keeps the newest line in view.
+function LogBox({ lines }: { lines: string[] }) {
+  const ref = useRef<HTMLPreElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [lines.length])
+  return <pre ref={ref} dir="ltr" className="max-h-56 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-xs leading-5">{lines.join("\n")}</pre>
+}
 type Step = "language" | "login" | "channel" | "bots" | "prefs" | "filter" | "done"
 
 function languagePicked() {
@@ -52,6 +107,8 @@ function Setup() {
   const [mirror, setMirror] = useState(randomMirror)
   const [ownJellyfin, setOwnJellyfin] = useState(false)
   const [status, setStatus] = useState<Status | null>(null)
+  const stageSince = useRef({ stage: "", at: 0 })
+  const [stageSeconds, setStageSeconds] = useState(0)
   const [busy, setBusy] = useState<string | null>(null)
   const lock = useRef(false)
   const [own, setOwn] = useState(false)
@@ -60,6 +117,7 @@ function Setup() {
   const [signedIn, setSignedIn] = useState(false)
   const [folder, setFolder] = useState("")
   const [folderDefault, setFolderDefault] = useState("")
+  const [picking, setPicking] = useState(false)
   const [folderInfo, setFolderInfo] = useState<{ free?: number; low?: boolean; exists?: boolean; error?: string } | null>(null)
 
   useEffect(() => {
@@ -94,7 +152,11 @@ function Setup() {
     if (step !== "bots" && step !== "done") return
     const id = setInterval(() => {
       if (step === "bots") void api<Job>("/setup/auto/job").then((j) => { setJob(j); if (j.owned?.length) setOwned(j.owned); if (j.found) { setFound(j.found); setStep("prefs") } })
-      if (step === "done") void api<Status>("/setup/status").then(setStatus)
+      if (step === "done") void api<Status>("/setup/status").then((s) => {
+        if (s.stage !== stageSince.current.stage) stageSince.current = { stage: s.stage, at: Date.now() }
+        setStageSeconds(Math.floor((Date.now() - stageSince.current.at) / 1000))
+        setStatus(s)
+      })
     }, 1000)
     return () => clearInterval(id)
   }, [step])
@@ -264,7 +326,11 @@ function Setup() {
           <div className="space-y-2 border-t pt-3">
             <div className="text-sm font-semibold">{t("Where to keep the files")}</div>
             <p className="text-sm text-muted-foreground">{t("One folder for Jellyfin, Seerr, the cache and the library. Pick a drive with enough free space.")}</p>
-            <Input value={folder} placeholder={folderDefault} onChange={(e) => setFolder(e.target.value)} />
+            <div className="flex gap-2">
+              <Input value={folder} placeholder={folderDefault} onChange={(e) => setFolder(e.target.value)} />
+              <Button type="button" size="sm" variant="outline" disabled={picking} onClick={() => setPicking(true)}>{t("Browse")}</Button>
+            </div>
+            {picking && <FolderPicker start={folder || folderDefault} onPick={setFolder} onClose={() => setPicking(false)} />}
             {folderInfo?.error && <p className="text-sm text-destructive">{folderInfo.error}</p>}
             {folderInfo && !folderInfo.error && folderInfo.free !== undefined && (folderInfo.low
               ? <p className="text-sm text-destructive">{t("Only {{free}} free. At least 10 GB is recommended.", { free: bytes(folderInfo.free) })}</p>
@@ -305,8 +371,15 @@ function Setup() {
         </>}
         {step === "done" && !(status?.ready && !status.error) && <>
           <h1 className="text-lg font-semibold">{status?.stage || t("Installing")}</h1>
-          <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary" style={{ width: (status?.percent ?? 0) + "%" }} /></div>
-          {status?.error && <p className="text-sm text-destructive">{status.error}</p>}
+          <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: (status?.percent ?? 0) + "%" }} /></div>
+          <div className="flex flex-wrap justify-between gap-x-3 text-xs text-muted-foreground">
+            <span>{status?.detail}</span>
+            <span>{status?.percent ?? 0}%{status && !status.error ? " · " + t("{{s}} s on this step", { s: stageSeconds }) : ""}</span>
+          </div>
+          {status?.error
+            ? <p className="text-sm text-destructive">{status.error}</p>
+            : <p className="text-sm text-muted-foreground">{t("The first install downloads a few hundred MB and can take several minutes. Keep this window open.")}</p>}
+          {!!status?.log?.length && <LogBox lines={status.log} />}
         </>}
       </CardBody></Card>
     </div>
