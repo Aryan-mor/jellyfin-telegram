@@ -75,6 +75,7 @@ type live struct {
 }
 
 type call struct {
+	ctx  context.Context
 	fn   func(context.Context, *tg.Client) (any, error)
 	resp chan result
 }
@@ -169,7 +170,9 @@ func (m *Manager) Connect(ctx context.Context) error {
 
 func (m *Manager) start(parent context.Context, store *fileStore, meta Meta) {
 	ctx, cancel := context.WithCancel(parent)
-	lv := &live{store: store, meta: meta, ops: make(chan call), run: cancel}
+	// Buffered so a long job (a flood rest, a forward, an upload) can take the next
+	// call without the caller giving up. The loop still runs one call at a time.
+	lv := &live{store: store, meta: meta, ops: make(chan call, 16), run: cancel}
 	lv.errText.Store("")
 	m.mu.Lock()
 	if old := m.sessions[meta.UserID]; old != nil {
@@ -237,8 +240,8 @@ func (m *Manager) serveOnce(ctx context.Context, lv *live) error {
 	client := telegram.NewClient(m.apiID, m.apiHash, telegram.Options{
 		SessionStorage: lv.store,
 		NoUpdates:      true,
-		Middlewares: []telegram.Middleware{floodWait(func() {
-			m.noteFlood(lv)
+		Middlewares: []telegram.Middleware{floodWait(func(wait time.Duration) {
+			m.noteFlood(lv, wait)
 		})},
 	})
 	err := client.Run(ctx, func(ctx context.Context) error {
@@ -249,24 +252,7 @@ func (m *Manager) serveOnce(ctx context.Context, lv *live) error {
 		lv.connected.Store(true)
 		lv.errText.Store("")
 		_ = lv.store.writeMeta(lv.meta)
-		for {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case op := <-lv.ops:
-				if err := lv.clock.wait(ctx); err != nil {
-					op.resp <- result{nil, err}
-					continue
-				}
-				val, err := op.fn(ctx, api)
-				if wait, ok := tgerr.AsFloodWait(err); ok && wait > 0 {
-					// The wait belongs to the account, not to the job that tripped it.
-					lv.clock.hold(wait + 2*time.Second)
-					m.noteFlood(lv)
-				}
-				op.resp <- result{val, err}
-			}
-		}
+		return m.serveCalls(ctx, lv, api)
 	})
 	lv.connected.Store(false)
 	if ctx.Err() == nil && err != nil {
@@ -277,6 +263,53 @@ func (m *Manager) serveOnce(ctx context.Context, lv *live) error {
 		m.log.Warn("user session stopped", "user", lv.meta.UserID, "err", err)
 	}
 	return err
+}
+
+// serveCalls runs queued Telegram calls one at a time. A flood rest stays in the timer
+// case, so the loop keeps accepting new calls instead of looking dead.
+func (m *Manager) serveCalls(ctx context.Context, lv *live, api *tg.Client) error {
+	var queued []call
+	for {
+		if err := ctx.Err(); err != nil {
+			failCalls(queued, err)
+			return err
+		}
+		if lv.clock.remaining() <= 0 && len(queued) > 0 {
+			op := queued[0]
+			queued = queued[1:]
+			if op.ctx.Err() != nil {
+				op.resp <- result{nil, op.ctx.Err()}
+				continue
+			}
+			val, err := op.fn(op.ctx, api)
+			if wait, ok := tgerr.AsFloodWait(err); ok && wait > 0 {
+				// The wait belongs to the account, not to the job that tripped it.
+				lv.clock.hold(wait + 2*time.Second)
+				m.noteFlood(lv, wait)
+			}
+			// One controller, one pace. The next job on this account waits, whatever called.
+			lv.clock.hold(callGap)
+			op.resp <- result{val, err}
+			continue
+		}
+		var timer *time.Timer
+		var wake <-chan time.Time
+		if d := lv.clock.remaining(); d > 0 {
+			timer = time.NewTimer(d)
+			wake = timer.C
+		}
+		select {
+		case <-ctx.Done():
+			stopTimer(timer)
+			err := ctx.Err()
+			failCalls(queued, err)
+			return err
+		case op := <-lv.ops:
+			queued = append(queued, op)
+		case <-wake:
+		}
+		stopTimer(timer)
+	}
 }
 
 func (m *Manager) prepare(ctx context.Context, api *tg.Client, lv *live) error {
@@ -335,7 +368,7 @@ func clientStatus(ctx context.Context, api *tg.Client) (selfUser, error) {
 	return selfUser{ID: user.ID, Username: user.Username, Phone: user.Phone, Premium: user.Premium}, nil
 }
 
-func (m *Manager) noteFlood(lv *live) {
+func (m *Manager) noteFlood(lv *live, wait time.Duration) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	today := time.Now().Format("2006-01-02")
@@ -348,7 +381,7 @@ func (m *Manager) noteFlood(lv *live) {
 	}
 	lv.meta.FloodMul *= 2
 	_ = lv.store.writeMeta(lv.meta)
-	m.log.Warn("telegram asked this account to slow down; its rest is doubled for the rest of the day", "user", lv.meta.UserID, "factor", lv.meta.FloodMul)
+	m.log.Warn("telegram asked this account to slow down; its rest is doubled for the rest of the day", "user", lv.meta.UserID, "wait", wait.Round(time.Second).String(), "factor", lv.meta.FloodMul)
 }
 
 // Views lists sessions for the panel.
@@ -555,23 +588,55 @@ func (m *Manager) call(ctx context.Context, lv *live, fn func(context.Context, *
 	if !lv.connected.Load() {
 		return nil, errors.New("session is not connected")
 	}
-	op := call{fn: fn, resp: make(chan result, 1)}
-	// Only a running connection reads lv.ops. If it ended after the check above, nobody ever will,
-	// so the wait is bounded instead of holding the caller for good.
-	timer := time.NewTimer(30 * time.Second)
-	defer timer.Stop()
-	select {
-	case lv.ops <- op:
-	case <-timer.C:
-		return nil, errors.New("session is not answering")
-	case <-ctx.Done():
-		return nil, ctx.Err()
+	op := call{ctx: ctx, fn: fn, resp: make(chan result, 1)}
+	// A busy account, or one sitting out a flood rest, still accepts the call. Give up only when
+	// this job is cancelled or the connection is actually gone. A fixed 30s send used to report
+	// "session is not answering" while the account was alive and busy.
+	tick := time.NewTicker(time.Second)
+	defer tick.Stop()
+	sent := false
+	for {
+		if !sent {
+			select {
+			case lv.ops <- op:
+				sent = true
+			case <-ctx.Done():
+				return nil, ctx.Err()
+			case <-tick.C:
+				if !lv.connected.Load() {
+					return nil, errors.New("session is not connected")
+				}
+			}
+			continue
+		}
+		select {
+		case res := <-op.resp:
+			return res.val, res.err
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-tick.C:
+			if !lv.connected.Load() {
+				return nil, errors.New("session is not connected")
+			}
+		}
 	}
-	select {
-	case res := <-op.resp:
-		return res.val, res.err
-	case <-ctx.Done():
-		return nil, ctx.Err()
+}
+
+func failCalls(queued []call, err error) {
+	for _, op := range queued {
+		op.resp <- result{nil, err}
+	}
+}
+
+func stopTimer(t *time.Timer) {
+	if t == nil {
+		return
+	}
+	if !t.Stop() {
+		select {
+		case <-t.C:
+		default:
+		}
 	}
 }
 

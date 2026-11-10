@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gotd/td/tg"
 	"github.com/gotd/td/tgerr"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/actlog"
@@ -25,9 +26,12 @@ const (
 	acquirePollDelay = 25 * time.Millisecond
 	floodMargin      = time.Second
 	warmBytes        = 4096
-	// botGap is the rest after one call on a bot. The next call on that same bot
-	// waits, so several jobs do not each keep a timer.
-	botGap = 500 * time.Millisecond
+	// botReadGap is the rest after a file-block read. Playback stays usable.
+	botReadGap = 500 * time.Millisecond
+	// botAPIGap is the rest after a channel call (history, send, forward, delete).
+	// Those are what made the bots answer FLOOD_WAIT every minute. One bot runs
+	// one of them at a time, then waits.
+	botAPIGap = 3 * time.Second
 )
 
 // ErrMessageGone means the message no longer holds the expected document.
@@ -217,7 +221,7 @@ func (p *Pool) FetchIn(ctx context.Context, channelID int64, messageID int, docI
 // MessagesIn looks up message ids in channelID. Videos and photos sent as files are returned.
 func (p *Pool) MessagesIn(ctx context.Context, channelID int64, ids []int) ([]media.Message, error) {
 	var out []media.Message
-	err := p.call(ctx, 0, func(w worker) error {
+	err := p.callAPI(ctx, 0, func(w worker) error {
 		in, ok := w.(inChannel)
 		if !ok {
 			return errors.New("this bot cannot read another channel")
@@ -232,7 +236,7 @@ func (p *Pool) MessagesIn(ctx context.Context, channelID int64, ids []int) ([]me
 // Messages looks up message ids in the channel.
 func (p *Pool) Messages(ctx context.Context, ids []int) ([]media.Message, error) {
 	var out []media.Message
-	err := p.call(ctx, 0, func(w worker) error {
+	err := p.callAPI(ctx, 0, func(w worker) error {
 		var err error
 		out, err = w.messages(ctx, ids)
 		return err
@@ -256,7 +260,7 @@ func (p *Pool) Download(ctx context.Context, messageID int, docID, size int64) (
 // SendDocument posts a file to the channel and returns the new message id.
 func (p *Pool) SendDocument(ctx context.Context, name, caption string, data []byte, replyTo int) (int, error) {
 	var id int
-	err := p.callDid(ctx, 0, "send file", name, func(w worker) error {
+	err := p.callDid(ctx, 0, botAPIGap, "send file", name, func(w worker) error {
 		var err error
 		id, err = w.sendDocument(ctx, name, caption, data, replyTo)
 		return err
@@ -266,7 +270,7 @@ func (p *Pool) SendDocument(ctx context.Context, name, caption string, data []by
 
 // DeleteMessages removes messages from the channel.
 func (p *Pool) DeleteMessages(ctx context.Context, ids []int) error {
-	return p.callDid(ctx, 0, "delete", fmt.Sprintf("%d messages", len(ids)), func(w worker) error {
+	return p.callDid(ctx, 0, botAPIGap, "delete", fmt.Sprintf("%d messages", len(ids)), func(w worker) error {
 		return w.deleteMessages(ctx, ids)
 	})
 }
@@ -281,15 +285,20 @@ func (p *Pool) ReadyBot() (int64, error) {
 	return 0, errors.New("no bot is connected")
 }
 
-func (p *Pool) callOn(botID int64, fn func(*bot) error) error {
-	b, err := p.findBot(botID)
+func (p *Pool) callOn(ctx context.Context, botID int64, fn func(*bot) error) error {
+	s, b, err := p.findSlot(botID)
 	if err != nil {
 		return err
 	}
 	if !b.status().Ready {
 		return fmt.Errorf("bot %d is not connected", botID)
 	}
-	return fn(b)
+	if err := p.acquireSlot(ctx, s); err != nil {
+		return err
+	}
+	err = fn(b)
+	p.finish(s, err, botAPIGap)
+	return err
 }
 
 // PublishAbout writes the platform key into every connected bot's About text.
@@ -302,7 +311,7 @@ func (p *Pool) PublishAbout(ctx context.Context, line string) error {
 			continue
 		}
 		ready++
-		if err := b.setOwnAbout(ctx, line); err != nil {
+		if err := p.callOn(ctx, b.id, func(b *bot) error { return b.setOwnAbout(ctx, line) }); err != nil {
 			errs = append(errs, fmt.Errorf("bot %d: %w", b.id, err))
 		}
 	}
@@ -327,7 +336,7 @@ func (p *Pool) About(ctx context.Context, userID, accessHash int64) (string, err
 		return "", err
 	}
 	var about string
-	err = p.callOn(id, func(b *bot) error {
+	err = p.callOn(ctx, id, func(b *bot) error {
 		var err error
 		about, err = b.about(ctx, userID, accessHash)
 		return err
@@ -342,7 +351,7 @@ func (p *Pool) PublicKey(ctx context.Context, username string) (ed25519.PublicKe
 		return nil, err
 	}
 	var pub ed25519.PublicKey
-	err = p.callOn(id, func(b *bot) error {
+	err = p.callOn(ctx, id, func(b *bot) error {
 		var err error
 		pub, err = b.publicKeyOf(ctx, username)
 		return err
@@ -353,7 +362,7 @@ func (p *Pool) PublicKey(ctx context.Context, username string) (ed25519.PublicKe
 // SendText posts a text message, such as a claim card, as one bot.
 func (p *Pool) SendText(ctx context.Context, botID int64, text string) (int, error) {
 	var id int
-	err := p.callOn(botID, func(b *bot) error {
+	err := p.callOn(ctx, botID, func(b *bot) error {
 		var err error
 		id, err = b.sendText(ctx, text)
 		return err
@@ -368,14 +377,14 @@ func (p *Pool) React(ctx context.Context, messageID int, emoji string) error {
 	if err != nil {
 		return err
 	}
-	return p.callOn(id, func(b *bot) error { return b.react(ctx, messageID, emoji) })
+	return p.callOn(ctx, id, func(b *bot) error { return b.react(ctx, messageID, emoji) })
 }
 
 // Repost posts a document that is already in the channel again, with a new caption.
 // The document id stays the same.
 func (p *Pool) Repost(ctx context.Context, botID int64, sourceID int, caption string) (int, error) {
 	var id int
-	err := p.callOn(botID, func(b *bot) error {
+	err := p.callOn(ctx, botID, func(b *bot) error {
 		var err error
 		id, err = b.repostDocument(ctx, sourceID, caption)
 		return err
@@ -386,7 +395,7 @@ func (p *Pool) Repost(ctx context.Context, botID int64, sourceID int, caption st
 
 // EditCaption replaces the caption of a post this bot sent.
 func (p *Pool) EditCaption(ctx context.Context, botID int64, messageID int, caption string) error {
-	err := p.callOn(botID, func(b *bot) error { return b.editCaption(ctx, messageID, caption) })
+	err := p.callOn(ctx, botID, func(b *bot) error { return b.editCaption(ctx, messageID, caption) })
 	p.didID(botID, "edit caption", fmt.Sprintf("message %d", messageID), err)
 	return err
 }
@@ -394,11 +403,12 @@ func (p *Pool) EditCaption(ctx context.Context, botID int64, messageID int, capt
 // AcceptMirror checks that botID can post in the named channel and is an admin of the main
 // channel. It returns the channel's bare id and title.
 func (p *Pool) AcceptMirror(ctx context.Context, botID, channelID int64, username string) (int64, string, error) {
-	b, err := p.findBot(botID)
-	if err != nil {
-		return 0, "", err
-	}
-	ch, err := b.openChannel(ctx, channelID, username)
+	var ch *tg.Channel
+	err := p.callOn(ctx, botID, func(b *bot) error {
+		var err error
+		ch, err = b.openChannel(ctx, channelID, username)
+		return err
+	})
 	if err != nil {
 		return 0, "", err
 	}
@@ -412,16 +422,15 @@ func (p *Pool) AcceptMirror(ctx context.Context, botID, channelID int64, usernam
 // CopyMessage forwards one message from the main channel into channelID with that bot.
 // The author line is dropped. The returned id is zero when Telegram does not report one.
 func (p *Pool) CopyMessage(ctx context.Context, botID int64, messageID int, channelID int64) (int, error) {
-	b, err := p.findBot(botID)
-	if err != nil {
-		return 0, err
-	}
-	ch, err := b.openChannel(ctx, channelID, "")
-	if err != nil {
-		p.didID(botID, "copy message", fmt.Sprintf("message %d", messageID), err)
-		return 0, err
-	}
-	id, err := b.forwardTo(ctx, messageID, ch)
+	var id int
+	err := p.callOn(ctx, botID, func(b *bot) error {
+		ch, err := b.openChannel(ctx, channelID, "")
+		if err != nil {
+			return err
+		}
+		id, err = b.forwardTo(ctx, messageID, ch)
+		return err
+	})
 	p.didID(botID, "copy message", fmt.Sprintf("message %d", messageID), err)
 	return id, err
 }
@@ -445,12 +454,17 @@ func (p *Pool) Warm(ctx context.Context, messageID int, docID int64) {
 			continue
 		}
 		wg.Add(1)
-		go func(w worker) {
+		go func(s *slot) {
 			defer wg.Done()
-			if _, err := w.getBlock(ctx, messageID, docID, 0, warmBytes); err != nil {
-				p.log.Debug("warm-up read failed", "bot", w.status().ID, "err", err)
+			if err := p.acquireSlot(ctx, s); err != nil {
+				return
 			}
-		}(s.w)
+			_, err := s.w.getBlock(ctx, messageID, docID, 0, warmBytes)
+			p.finish(s, err, botReadGap)
+			if err != nil && p.log != nil {
+				p.log.Debug("warm-up read failed", "bot", s.w.status().ID, "err", err)
+			}
+		}(s)
 	}
 	wg.Wait()
 }
@@ -458,7 +472,7 @@ func (p *Pool) Warm(ctx context.Context, messageID int, docID int64) {
 // Thumbnail returns the largest thumbnail of a document.
 func (p *Pool) Thumbnail(ctx context.Context, messageID int) ([]byte, error) {
 	var out []byte
-	err := p.call(ctx, messageID, func(w worker) error {
+	err := p.callAPI(ctx, messageID, func(w worker) error {
 		var err error
 		out, err = w.thumbnail(ctx, messageID)
 		return err
@@ -467,9 +481,9 @@ func (p *Pool) Thumbnail(ctx context.Context, messageID int) ([]byte, error) {
 }
 
 // callDid runs fn on a bot and records which bot did the work.
-func (p *Pool) callDid(ctx context.Context, messageID int, action, detail string, fn func(worker) error) error {
+func (p *Pool) callDid(ctx context.Context, messageID int, gap time.Duration, action, detail string, fn func(worker) error) error {
 	var who worker
-	err := p.call(ctx, messageID, func(w worker) error {
+	err := p.callGap(ctx, messageID, gap, func(w worker) error {
 		who = w
 		return fn(w)
 	})
@@ -501,6 +515,15 @@ func (p *Pool) didID(id int64, action, detail string, err error) {
 // call runs fn on a free bot and retries on another bot when Telegram refuses.
 // Flood waits do not count as attempts, so ctx must carry a deadline.
 func (p *Pool) call(ctx context.Context, messageID int, fn func(worker) error) error {
+	return p.callGap(ctx, messageID, botReadGap, fn)
+}
+
+// callAPI is call with the slower rest used for channel methods.
+func (p *Pool) callAPI(ctx context.Context, messageID int, fn func(worker) error) error {
+	return p.callGap(ctx, messageID, botAPIGap, fn)
+}
+
+func (p *Pool) callGap(ctx context.Context, messageID int, gap time.Duration, fn func(worker) error) error {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; {
 		s, err := p.acquire(ctx)
@@ -511,7 +534,7 @@ func (p *Pool) call(ctx context.Context, messageID int, fn func(worker) error) e
 			return err
 		}
 		err = fn(s.w)
-		p.release(s, err == nil)
+		p.finish(s, err, gap)
 		if err == nil {
 			return nil
 		}
@@ -523,9 +546,7 @@ func (p *Pool) call(ctx context.Context, messageID int, fn func(worker) error) e
 		}
 		lastErr = err
 
-		if d, ok := tgerr.AsFloodWait(err); ok {
-			p.bench(s, d+floodMargin, true)
-			p.log.Warn("bot hit a flood wait", "bot", s.w.status().ID, "wait", d)
+		if _, ok := tgerr.AsFloodWait(err); ok {
 			continue
 		}
 		attempt++
@@ -583,13 +604,61 @@ func (p *Pool) tryAcquire(now time.Time) *slot {
 	return best
 }
 
-func (p *Pool) release(s *slot, ok bool) {
+func (p *Pool) findSlot(id int64) (*slot, *bot, error) {
+	for _, s := range p.slots {
+		b, ok := s.w.(*bot)
+		if ok && b.id == id {
+			return s, b, nil
+		}
+	}
+	return nil, nil, errors.New("that bot is not listed")
+}
+
+func (p *Pool) acquireSlot(ctx context.Context, s *slot) error {
+	for {
+		if p.tryTake(s, time.Now()) {
+			return nil
+		}
+		select {
+		case <-time.After(acquirePollDelay):
+		case <-ctx.Done():
+			return fmt.Errorf("bot is busy: %w", ctx.Err())
+		}
+	}
+}
+
+func (p *Pool) tryTake(s *slot, now time.Time) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-	s.inflight--
+	if s.inflight >= p.concurrency || now.Before(s.floodUntil) || now.Before(s.benchUntil) || now.Before(s.gapUntil) || !s.w.status().Ready {
+		return false
+	}
+	s.inflight++
+	return true
+}
+
+// finish returns the bot to the queue. A success starts the rest. A flood wait benches it.
+func (p *Pool) finish(s *slot, err error, gap time.Duration) {
+	p.release(s, err == nil, gap)
+	if d, ok := tgerr.AsFloodWait(err); ok {
+		p.bench(s, d+floodMargin, true)
+		if p.log != nil {
+			p.log.Warn("bot hit a flood wait", "bot", s.w.status().ID, "wait", d)
+		}
+	}
+}
+
+func (p *Pool) release(s *slot, ok bool, gap time.Duration) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if s.inflight > 0 {
+		s.inflight--
+	}
 	if ok {
 		s.calls++
-		s.gapUntil = time.Now().Add(botGap)
+		if gap > 0 {
+			s.gapUntil = time.Now().Add(gap)
+		}
 	}
 }
 

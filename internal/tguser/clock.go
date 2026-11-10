@@ -13,6 +13,10 @@ const (
 	resolverGap = 3 * time.Second
 	// searchGap is the rest after one global search.
 	searchGap = 8 * time.Second
+	// callGap is the rest after every job on an account. The session loop applies it,
+	// so a caller that forgets its own hold still cannot start the next job immediately.
+	// A longer hold, including a FLOOD_WAIT, wins.
+	callGap = 2 * time.Second
 )
 
 // forwardGap is the rest after copying n messages. Several files from one channel share it.
@@ -35,10 +39,19 @@ type clock struct {
 	until time.Time
 }
 
-func (c *clock) wait(ctx context.Context) error {
+// remaining is how long the next job still has to wait. Zero means it can run.
+func (c *clock) remaining() time.Duration {
 	c.mu.Lock()
+	defer c.mu.Unlock()
 	d := time.Until(c.until)
-	c.mu.Unlock()
+	if d < 0 {
+		return 0
+	}
+	return d
+}
+
+func (c *clock) wait(ctx context.Context) error {
+	d := c.remaining()
 	if d <= 0 {
 		return nil
 	}

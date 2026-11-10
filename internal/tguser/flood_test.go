@@ -25,7 +25,7 @@ func (s *scripted) Invoke(_ context.Context, input bin.Encoder, output bin.Decod
 
 func TestFloodWaitRetriesUploadSave(t *testing.T) {
 	var waited int
-	next := floodWait(func() { waited++ })
+	next := floodWait(func(time.Duration) { waited++ })
 	inv := next.Handle(&scripted{})
 	err := inv.Invoke(context.Background(), &tg.UploadSaveFilePartRequest{}, discard{})
 	if err != nil || waited != 1 {
@@ -34,7 +34,7 @@ func TestFloodWaitRetriesUploadSave(t *testing.T) {
 }
 
 func TestFloodWaitDoesNotHideOtherMethods(t *testing.T) {
-	next := floodWait(func() {})
+	next := floodWait(func(time.Duration) {})
 	inv := next.Handle(invokeFunc(func(context.Context, bin.Encoder, bin.Decoder) error {
 		return tgerr.New(420, "FLOOD_WAIT_1")
 	}))

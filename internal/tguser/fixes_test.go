@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/gotd/td/tg"
 )
 
 func TestBeginLoginSkipsWhenTheAccountIsConnected(t *testing.T) {
@@ -92,6 +94,51 @@ func TestAnAbandonedSignInDoesNotBlockTheNextOne(t *testing.T) {
 	m.clearPending(p)
 	if m.pending != nil {
 		t.Fatal("the finished sign-in still blocks a new one")
+	}
+}
+
+func TestCallStopsWhenTheSessionDrops(t *testing.T) {
+	m := &Manager{}
+	lv := &live{ops: make(chan call)}
+	lv.connected.Store(true)
+	go func() {
+		time.Sleep(100 * time.Millisecond)
+		lv.connected.Store(false)
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	_, err := m.call(ctx, lv, func(context.Context, *tg.Client) (any, error) { return nil, nil })
+	if err == nil || err.Error() != "session is not connected" {
+		t.Fatal(err)
+	}
+}
+
+func TestCallWaitsOutAFloodRest(t *testing.T) {
+	m := &Manager{}
+	lv := &live{ops: make(chan call, 2)}
+	lv.connected.Store(true)
+	lv.clock.hold(150 * time.Millisecond)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	go func() {
+		_ = m.serveCalls(ctx, lv, nil)
+		close(done)
+	}()
+	callCtx, stop := context.WithTimeout(context.Background(), 3*time.Second)
+	defer stop()
+	val, err := m.call(callCtx, lv, func(context.Context, *tg.Client) (any, error) { return "made", nil })
+	if err != nil {
+		t.Fatal(err)
+	}
+	if val != "made" {
+		t.Fatalf("%v", val)
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("session loop did not stop")
 	}
 }
 

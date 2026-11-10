@@ -30,13 +30,19 @@ func (l *Lent) UserID() int64 { return l.lv.meta.UserID }
 func PostFrom(msg *tg.Message) (Post, bool) { return postFrom(msg) }
 
 func lent[T any](ctx context.Context, l *Lent, fn func(context.Context, *tg.Client) (T, error)) (T, error) {
-	val, err := l.m.call(ctx, l.lv, func(ctx context.Context, api *tg.Client) (any, error) { return fn(ctx, api) })
+	val, err := l.m.call(ctx, l.lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		out, err := fn(ctx, api)
+		if err == nil {
+			// Hold before the call returns, so the session loop sees the rest
+			// before it starts the next job.
+			l.lv.clock.hold(resolverGap)
+		}
+		return out, err
+	})
 	var zero T
 	if err != nil {
 		return zero, err
 	}
-	// A link can take several calls. They share this account's clock.
-	l.lv.clock.hold(resolverGap)
 	out, _ := val.(T)
 	return out, nil
 }

@@ -288,3 +288,19 @@ func TestConcurrencyIsCappedPerBotAndSpread(t *testing.T) {
 		t.Errorf("ReadyCount = %d", p.ReadyCount())
 	}
 }
+
+func TestGapHoldsTheSameBot(t *testing.T) {
+	w := &fakeWorker{id: 1, onGet: full}
+	p := pool(1, w)
+	s := p.slots[0]
+	if !p.tryTake(s, time.Now()) {
+		t.Fatal("free bot was not taken")
+	}
+	p.release(s, true, time.Second)
+	if p.tryTake(s, time.Now()) {
+		t.Fatal("bot ran again during its rest")
+	}
+	if !p.tryTake(s, time.Now().Add(time.Second)) {
+		t.Fatal("bot stayed blocked after the rest")
+	}
+}

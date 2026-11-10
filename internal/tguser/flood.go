@@ -12,7 +12,7 @@ import (
 
 // floodWait sleeps out FLOOD_WAIT on the upload save methods and tells the caller,
 // which then lengthens this session's rest until the end of the day.
-func floodWait(onWait func()) telegram.Middleware {
+func floodWait(onWait func(time.Duration)) telegram.Middleware {
 	return telegram.MiddlewareFunc(func(next tg.Invoker) telegram.InvokeFunc {
 		return func(ctx context.Context, input bin.Encoder, output bin.Decoder) error {
 			for {
@@ -25,7 +25,7 @@ func floodWait(onWait func()) telegram.Middleware {
 					return err
 				}
 				if onWait != nil {
-					onWait()
+					onWait(wait)
 				}
 				if wait <= 0 {
 					continue
