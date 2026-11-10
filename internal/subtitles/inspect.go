@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/proc"
 )
 
 const (
@@ -91,7 +92,7 @@ func exeName(name string) string {
 func (t Tools) Inspect(ctx context.Context, url string) (Inspection, error) {
 	ctx, cancel := context.WithTimeout(ctx, toolTimeout)
 	defer cancel()
-	out, err := exec.CommandContext(ctx, t.FFprobe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format",
+	out, err := proc.Command(ctx, t.FFprobe, "-v", "error", "-print_format", "json", "-show_streams", "-show_format",
 		"-probesize", "32000000", "-analyzeduration", "10000000", url).Output()
 	if err != nil {
 		// The error text can hold the URL with its token, so only the kind is reported.
@@ -191,7 +192,7 @@ func (t Tools) SniffLanguage(ctx context.Context, url, code string, tracks []Tra
 	defer os.Remove(sample)
 	for _, c := range candidates {
 		cctx, cancel := context.WithTimeout(ctx, toolTimeout)
-		out, err := exec.CommandContext(cctx, t.FFmpeg, "-v", "quiet", "-i", sample,
+		out, err := proc.Command(cctx, t.FFmpeg, "-v", "quiet", "-i", sample,
 			"-map", fmt.Sprintf("0:%d", c.Index), "-f", "srt", "-").Output()
 		cancel()
 		if err == nil && lang.IsLanguage(code, string(out)) {

@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/proc"
 )
 
 // BackgroundHeader marks a request as background work, so the gateway limits its speed and pauses
@@ -36,7 +38,7 @@ func (t Tools) ExtractTracks(ctx context.Context, url string, tracks []ExtractTr
 		args = append(args, "-map", "0:"+strconv.Itoa(tr.Position), "-an", "-vn", "-c:s", codec,
 			filepath.Join(dir, strconv.Itoa(tr.Position)+"."+tr.Ext))
 	}
-	if err := exec.CommandContext(ctx, t.FFmpeg, args...).Run(); err != nil {
+	if err := proc.Command(ctx, t.FFmpeg, args...).Run(); err != nil {
 		// The error text can hold the URL with its token, so only the kind is reported.
 		var exit *exec.ExitError
 		if errors.As(err, &exit) {

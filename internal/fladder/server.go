@@ -12,6 +12,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/proc"
 )
 
 // Server runs the pinned Fladder image. The browser talks to Jellyfin and Seerr, so the
@@ -31,13 +33,13 @@ func Pull(ctx context.Context, log *slog.Logger) error {
 	if _, err := exec.LookPath("docker"); err != nil {
 		return errors.New("Fladder needs Docker. Install Docker, or set FLADDER_MANAGED=false")
 	}
-	if exec.CommandContext(ctx, "docker", "image", "inspect", Image).Run() == nil {
+	if proc.Command(ctx, "docker", "image", "inspect", Image).Run() == nil {
 		return nil
 	}
 	if log != nil {
 		log.Info("downloading Fladder", "image", Image)
 	}
-	out, err := exec.CommandContext(ctx, "docker", "pull", Image).CombinedOutput()
+	out, err := proc.Command(ctx, "docker", "pull", Image).CombinedOutput()
 	if err != nil {
 		return fmt.Errorf("download Fladder: %w (%s)", err, tail(out))
 	}
@@ -46,7 +48,7 @@ func Pull(ctx context.Context, log *slog.Logger) error {
 
 // Prepare removes a container left from the previous process before anything waits for it.
 func (s *Server) Prepare(ctx context.Context) {
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", ContainerName).Run()
+	_ = proc.Command(ctx, "docker", "rm", "-f", ContainerName).Run()
 }
 
 // Run keeps the container alive until ctx ends.
@@ -80,11 +82,11 @@ func (s *Server) runOnce(ctx context.Context) error {
 		return err
 	}
 	defer console.Close()
-	_ = exec.CommandContext(ctx, "docker", "rm", "-f", ContainerName).Run()
-	cmd := exec.CommandContext(ctx, "docker", dockerArgs(s.JellyfinURL, s.SeerrURL)...)
+	_ = proc.Command(ctx, "docker", "rm", "-f", ContainerName).Run()
+	cmd := proc.Command(ctx, "docker", dockerArgs(s.JellyfinURL, s.SeerrURL)...)
 	cmd.Stdout, cmd.Stderr = console, console
 	cmd.Cancel = func() error {
-		_ = exec.Command("docker", "stop", "-t", "10", ContainerName).Run()
+		_ = proc.Command(context.Background(), "docker", "stop", "-t", "10", ContainerName).Run()
 		if cmd.Process != nil {
 			return cmd.Process.Kill()
 		}

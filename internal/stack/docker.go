@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+
+	"github.com/Aryan-mor/jellyfin-telegram/internal/proc"
 )
 
 // Available reports whether the docker command is on PATH.
@@ -28,7 +30,7 @@ func docker(ctx context.Context, args ...string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	cmd := exec.CommandContext(ctx, bin, args...)
+	cmd := proc.Command(ctx, bin, args...)
 	var buf bytes.Buffer
 	cmd.Stdout = &buf
 	cmd.Stderr = &buf
@@ -48,7 +50,7 @@ func dockerOK(ctx context.Context, args ...string) bool {
 	if err != nil {
 		return false
 	}
-	return exec.CommandContext(ctx, bin, args...).Run() == nil
+	return proc.Command(ctx, bin, args...).Run() == nil
 }
 
 func ensureNetwork(ctx context.Context) error {
