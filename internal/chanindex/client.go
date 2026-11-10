@@ -7,11 +7,19 @@ package chanindex
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ErrLimited means the index refused another introduction today.
+var ErrLimited = errors.New("the index is rate limiting this sender")
+
+// ErrRejected means the index will not list that channel.
+var ErrRejected = errors.New("the index refused that channel")
 
 // Talker sends a message to a bot and returns its answer.
 type Talker interface {
@@ -80,6 +88,32 @@ func (c *Client) Vote(ctx context.Context, ref, tag string, value int) error {
 		return fmt.Errorf("the index answered: %s", firstLine(reply))
 	}
 	return nil
+}
+
+// Introduce registers a public channel under tags. The username has no @.
+// A reply of "ok" or "pending" both count. The index checks the channel itself.
+func (c *Client) Introduce(ctx context.Context, username string, tags []string) error {
+	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
+	if username == "" || len(tags) == 0 {
+		return errors.New("a public channel and a tag are required")
+	}
+	list := append([]string(nil), tags...)
+	slices.Sort(list)
+	reply, err := c.TG.TalkToBot(ctx, c.Bot, "/add @"+username+" "+strings.Join(list, " "), c.wait())
+	if err != nil {
+		return err
+	}
+	reply = strings.TrimSpace(reply)
+	if strings.HasPrefix(reply, "ok ") || strings.HasPrefix(reply, "pending ") {
+		return nil
+	}
+	if reply == "limited" {
+		return ErrLimited
+	}
+	if reply == "no" {
+		return ErrRejected
+	}
+	return fmt.Errorf("the index answered: %s", firstLine(reply))
 }
 
 func parseSearch(reply string) (Page, error) {

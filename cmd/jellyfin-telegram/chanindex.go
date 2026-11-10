@@ -23,6 +23,7 @@ func startChannelIndex(ctx context.Context, cfg config.Config, cat *catalog.Cata
 	idx := &chanindex.Client{Bot: cfg.ChannelIndexBot, TG: pool}
 	go watchChannelIndex(ctx, cat, idx, log)
 	go autoAddChannels(ctx, cat, sources, news, users, idx, log)
+	go introduceChannels(ctx, cat, idx, log)
 	log.Info("channel index on", "bot", "@"+cfg.ChannelIndexBot)
 	return idx
 }

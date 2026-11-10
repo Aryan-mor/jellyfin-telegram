@@ -2,6 +2,7 @@ package chanindex
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -68,5 +69,24 @@ func TestVoteUsesTheChannelForm(t *testing.T) {
 	}
 	if !strings.HasSuffix(b.sent[1], "/reject c/5 direct-file") {
 		t.Fatal(b.sent)
+	}
+}
+
+func TestIntroduce(t *testing.T) {
+	b := &bot{answers: []string{"pending @pub film series"}}
+	err := (&Client{Bot: "idx", TG: b}).Introduce(context.Background(), "pub", []string{"series", "film"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b.sent[0] != "idx: /add @pub film series" {
+		t.Fatal(b.sent)
+	}
+	b.answers = []string{"limited"}
+	if err := (&Client{Bot: "idx", TG: b}).Introduce(context.Background(), "pub", []string{"news"}); !errors.Is(err, ErrLimited) {
+		t.Fatal(err)
+	}
+	b.answers = []string{"no"}
+	if err := (&Client{Bot: "idx", TG: b}).Introduce(context.Background(), "pub", []string{"news"}); !errors.Is(err, ErrRejected) {
+		t.Fatal(err)
 	}
 }
