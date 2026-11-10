@@ -111,7 +111,14 @@ func (s *Service) settingsLocked(ctx context.Context) (Settings, error) {
 	if err != nil {
 		return Defaults(), err
 	}
-	s.set, s.loaded = decodeSettings(raw), true
+	set, cleared := decodeSettings(raw)
+	s.set, s.loaded = set, true
+	// Keep the retired cap from being shown and saved again by the settings page.
+	if cleared {
+		if b, err := json.Marshal(s.set); err == nil {
+			_ = s.Cat.SetStateValue(ctx, settingsKey, string(b))
+		}
+	}
 	return s.set, nil
 }
 
@@ -304,6 +311,7 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings) er
 		cutoff = s.now().AddDate(0, 0, -set.LookBackDays)
 	}
 	floor := w.Watermark
+	var edge edgeMsg
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
@@ -326,9 +334,12 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings) er
 				take = append(take, p)
 			}
 		}
-		if err := s.copyPosts(ctx, src, take, set); err != nil {
+		// edge is the message directly under the newest post of this page: the oldest message of
+		// the page already read. The subtitle archive is posted under its video, so it is seen first.
+		if err := s.copyPosts(ctx, src, take, set, subsBelow(page, edge)); err != nil {
 			return err
 		}
+		edge = oldestEdge(page)
 		if done {
 			if w.ScanTop > w.Watermark {
 				w.Watermark = w.ScanTop
@@ -358,8 +369,9 @@ func covers(have, want int) bool {
 	}
 }
 
-// copyPosts forwards the posts that pass the rules, oldest first and ten at a time.
-func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tguser.Post, set Settings) error {
+// copyPosts forwards the posts that pass the rules, oldest first, a few at a time.
+// subs maps a video message to the subtitle document posted directly under it.
+func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tguser.Post, set Settings, subs map[int]tguser.Post) error {
 	if src.Strict {
 		set.NeedTitle = true
 	}
@@ -391,9 +403,25 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 	for len(want) > 0 {
 		// A short random burst goes out, then a random rest, so the beat is never the same twice.
 		// The account clock in tguser spaces the request itself; this rest is on top of that.
-		n := min(pace.Burst(), len(want))
-		batch := want[:n]
-		want = want[n:]
+		// A subtitle under a video shares that video's place in the burst, so the pair is one forward.
+		budget := pace.Burst()
+		var batch []tguser.Post
+		used := 0
+		for len(want) > 0 {
+			need := 1
+			if sub, ok := subs[want[0].ID]; ok && !sub.NoForward && sub.ID != want[0].ID {
+				need = 2
+			}
+			if used > 0 && used+need > budget {
+				break
+			}
+			batch = append(batch, want[0])
+			used += need
+			want = want[1:]
+			if used >= budget {
+				break
+			}
+		}
 		if set.MaxPerDay > 0 {
 			day := s.now()
 			start := time.Date(day.Year(), day.Month(), day.Day(), 0, 0, 0, 0, day.Location())
@@ -410,7 +438,7 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 				batch = batch[:room]
 			}
 		}
-		if err := s.copyBatch(ctx, src, ref, batch); err != nil {
+		if err := s.copyBatch(ctx, src, ref, batch, subs); err != nil {
 			return err
 		}
 		if len(want) > 0 && set.PauseSeconds > 0 {
@@ -422,7 +450,7 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 	return nil
 }
 
-func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.SourceRef, batch []tguser.Post) error {
+func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.SourceRef, batch []tguser.Post, subs map[int]tguser.Post) error {
 	var ids []int
 	var send []tguser.Post
 	for _, p := range batch {
@@ -446,6 +474,9 @@ func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.
 		}
 		ids = append(ids, p.ID)
 		send = append(send, p)
+		if sub, ok := subs[p.ID]; ok && !sub.NoForward && sub.ID != p.ID {
+			ids = append(ids, sub.ID)
+		}
 	}
 	if len(ids) == 0 {
 		return nil

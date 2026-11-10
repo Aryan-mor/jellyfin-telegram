@@ -214,6 +214,92 @@ func TestLookBackStopsAtTheCutoff(t *testing.T) {
 	}
 }
 
+func TestCopiesTheSubtitleDirectlyBelow(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	tg := &fakeTG{free: true}
+	film := movie(10, now)
+	film.DocID = 555
+	// A note sits under the film, so the archive one message further down is not taken.
+	note := tguser.Post{ID: 11, Date: now, DocID: 8, Size: 20, MIME: "text/plain", Name: "note.txt"}
+	late := tguser.Post{ID: 12, Date: now, DocID: 9, Size: 2000, MIME: "application/zip", Name: archiveName(film.DocID)}
+	// This archive is the next message, so it is forwarded with the film.
+	other := movie(20, now)
+	other.DocID = 777
+	sub := tguser.Post{ID: 21, Date: now, DocID: 4, Size: 2000, MIME: "application/zip", Name: archiveName(other.DocID)}
+	tg.posts = []tguser.Post{film, note, late, other, sub}
+	s, _ := newService(t, tg, now)
+	enable(t, s, func(set *Settings) { set.MaxPerDay = 0 })
+	s.Pass(context.Background())
+	if got := tg.all(); len(got) != 3 || got[0] != 10 || got[1] != 20 || got[2] != 21 {
+		t.Fatalf("copied %v, want the two films and only the archive under the second", got)
+	}
+	var paired bool
+	for _, batch := range tg.copied {
+		hasFilm, hasSub := false, false
+		for _, id := range batch {
+			if id == 20 {
+				hasFilm = true
+			}
+			if id == 21 {
+				hasSub = true
+			}
+		}
+		paired = paired || (hasFilm && hasSub)
+	}
+	if !paired {
+		t.Fatalf("archive was not forwarded with its film: %v", tg.copied)
+	}
+}
+
+func TestSubtitleOnTheNewerPageIsKept(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	tg := &fakeTG{free: true}
+	film := movie(50, now)
+	film.DocID = 777
+	tg.posts = append(tg.posts, film)
+	tg.posts = append(tg.posts, tguser.Post{ID: 51, Date: now, DocID: 4, Size: 2000, MIME: "application/zip", Name: archiveName(film.DocID)})
+	for i := 52; i <= 150; i++ {
+		tg.posts = append(tg.posts, movie(i, now))
+	}
+	s, _ := newService(t, tg, now)
+	enable(t, s, func(set *Settings) { set.MaxPerDay = 0; set.LookBackDays = 0 })
+	s.Pass(context.Background())
+	var paired bool
+	for _, batch := range tg.copied {
+		hasFilm, hasSub := false, false
+		for _, id := range batch {
+			if id == 50 {
+				hasFilm = true
+			}
+			if id == 51 {
+				hasSub = true
+			}
+		}
+		paired = paired || (hasFilm && hasSub)
+	}
+	if !paired {
+		t.Fatalf("archive on the newer page was not forwarded with message 50: %v", tg.copied)
+	}
+}
+
+func TestStoredDailyCapOf500IsCleared(t *testing.T) {
+	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
+	tg := &fakeTG{free: true}
+	s, _ := newService(t, tg, now)
+	raw := `{"enabled":true,"max_per_day":500,"every_minutes":30,"look_back_days":7,"min_minutes":15,"min_mb":100,"pause_seconds":120,"skip_words":"trailer,teaser,sample,promo","auto_add":true}`
+	if err := s.Cat.SetStateValue(context.Background(), "tgsource_settings", raw); err != nil {
+		t.Fatal(err)
+	}
+	s.loaded = false
+	got, err := s.Settings(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.MaxPerDay != 0 {
+		t.Fatalf("stored cap %d, want unlimited", got.MaxPerDay)
+	}
+}
+
 func TestDailyCapStopsAndResumes(t *testing.T) {
 	now := time.Date(2026, 11, 4, 12, 0, 0, 0, time.UTC)
 	tg := &fakeTG{free: true}

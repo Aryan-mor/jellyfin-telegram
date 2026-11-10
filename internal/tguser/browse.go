@@ -54,6 +54,8 @@ type Post struct {
 	Round     bool
 	Animated  bool
 	NoForward bool
+	// ReplyTo is the message this document replies to, or zero.
+	ReplyTo int
 }
 
 var (
@@ -222,6 +224,8 @@ type Page struct {
 	Posts []Post
 	// Links are bot start URLs found in the same page. The post itself is not a video.
 	Links []StartHit
+	// IDs lists every message on the page, newest first, including ones without a document.
+	IDs []int
 	// Highest and Lowest are the newest and oldest message ids on the page, documents or not.
 	Highest, Lowest int
 	// Oldest is the date of the oldest message on the page.
@@ -250,6 +254,7 @@ func (m *Manager) History(ctx context.Context, ref SourceRef, offsetID, limit in
 		msgs := searchMessages(res)
 		out := Page{More: len(msgs) >= limit}
 		see := func(id, date int) {
+			out.IDs = append(out.IDs, id)
 			if out.Lowest == 0 || id < out.Lowest {
 				out.Lowest = id
 			}
@@ -299,6 +304,9 @@ func postFrom(msg *tg.Message) (Post, bool) {
 		ID: msg.ID, Date: time.Unix(int64(msg.Date), 0).UTC(), DocID: doc.ID, Size: doc.Size,
 		Caption: msg.Message, MIME: doc.MimeType, NoForward: msg.Noforwards,
 	}
+	if h, ok := msg.ReplyTo.(*tg.MessageReplyHeader); ok {
+		p.ReplyTo = h.ReplyToMsgID
+	}
 	for _, attr := range doc.Attributes {
 		switch a := attr.(type) {
 		case *tg.DocumentAttributeFilename:
@@ -328,6 +336,49 @@ func extFor(mime string) string {
 		return ".mov"
 	}
 	return ""
+}
+
+// Next returns the document posted just after afterID, the message below it in the channel.
+// ok is false when that message is missing or is not a document.
+func (m *Manager) Next(ctx context.Context, ref SourceRef, afterID int) (Post, bool, error) {
+	if afterID <= 0 {
+		return Post{}, false, nil
+	}
+	lv, err := m.pick(ctx)
+	if err != nil {
+		return Post{}, false, err
+	}
+	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		peer, err := lv.peer(ctx, api, ref)
+		if err != nil {
+			return nil, err
+		}
+		// add_offset -1 steps one message newer than afterID, and limit 1 keeps only that message.
+		res, err := api.MessagesGetHistory(ctx, &tg.MessagesGetHistoryRequest{
+			Peer: peer, OffsetID: afterID, AddOffset: -1, Limit: 1,
+		})
+		if err != nil {
+			delete(lv.hashes, ref.ChannelID)
+			return nil, err
+		}
+		lv.clock.hold(historyGap)
+		for _, raw := range searchMessages(res) {
+			msg, ok := raw.(*tg.Message)
+			if !ok || msg.ID <= afterID {
+				continue
+			}
+			if p, ok := postFrom(msg); ok {
+				return p, nil
+			}
+			return Post{}, nil
+		}
+		return Post{}, nil
+	})
+	if err != nil {
+		return Post{}, false, err
+	}
+	p, _ := val.(Post)
+	return p, p.ID > afterID, nil
 }
 
 // Copy posts the listed messages of a source channel into the library channel without the author

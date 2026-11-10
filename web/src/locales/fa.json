@@ -47,6 +47,7 @@
   "3 months": "3 ماه",
   "6 months": "6 ماه",
   "A bot is an account that reads the videos. The token is its password. This program never shows the full token again.": "ربات حسابی است که ویدیوها را می خواند. رمز رمز عبور آن است. این برنامه دیگر هرگز توکن کامل را نشان نمی دهد.",
+  "A saved bot is not connected yet. Restart so it starts working.": "یک ربات ذخیره شده ولی هنوز وصل نیست. راه‌اندازی دوباره تا شروع به کار کند.",
   "A channel you already own. The bot is made an admin there with your account, so nothing has to be done by hand.": "کانالی که قبلاً مالک آن هستید. ربات در آنجا با حساب شما یک ادمین می شود، بنابراین هیچ کاری نباید با دست انجام شود.",
   "A file larger than the account can send is refused, not split. Sign-in works from this computer or over Tailscale only. The session is stored in data/users and is not encrypted, so keep that folder like a password.": "فایل بزرگتر از آن که حساب می تواند ارسال کند، رد می شود، تقسیم نمی شود. ورود به سیستم فقط از این رایانه یا بیش از Tailscale کار می کند. جلسه در داده/کاربران ذخیره می شود و رمزگذاری نشده است، بنابراین آن پوشه را مانند یک رمز عبور نگه دارید.",
   "A Jellyfin server is created for you.": "یک سرور Jellyfin برای شما ساخته می‌شود.",

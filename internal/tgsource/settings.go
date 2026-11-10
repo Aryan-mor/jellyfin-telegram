@@ -31,20 +31,24 @@ type Settings struct {
 	// NeedTitle keeps only files whose name shows a year or a season and episode.
 	NeedTitle bool `json:"need_title"`
 	// MaxPerDay caps how many videos are copied per day across every channel.
+	// Zero means no cap. The old default of 500 is treated as zero.
 	MaxPerDay int `json:"max_per_day"`
-	// PauseSeconds is the longest rest between bursts of 4 to 8 videos. Each rest is a random
-	// time between 20 seconds and this. Zero means no extra rest; the account clock still waits.
+	// PauseSeconds is the longest rest between bursts of 3 to 5 videos. Each rest is a random
+	// time between 30 seconds and this. Zero means no extra rest; the account clock still waits.
 	PauseSeconds int `json:"pause_seconds"`
 	// AutoAdd asks the channel index once a day and adds a channel whose recent posts look useful.
 	// It stays on unless a person turns it off. Nothing is added while Enabled is off.
 	AutoAdd bool `json:"auto_add"`
 }
 
-// Defaults are cautious: a week back, no short clips, and a steady pace.
+// legacyDailyCap is the old default. A saved 500 is the untouched default, so it becomes unlimited.
+const legacyDailyCap = 500
+
+// Defaults are cautious: a week back, no short clips, and a steady pace. Copying is not capped per day.
 func Defaults() Settings {
 	return Settings{
 		LookBackDays: 7, EveryMinutes: 30, MinMinutes: 15, MinMB: 100,
-		SkipWords: "trailer,teaser,sample,promo", MaxPerDay: 500, PauseSeconds: 120,
+		SkipWords: "trailer,teaser,sample,promo", PauseSeconds: 180,
 		AutoAdd: true,
 	}
 }
@@ -65,15 +69,20 @@ func (s Settings) Validate() error {
 	return nil
 }
 
-func decodeSettings(raw string) Settings {
+// decodeSettings reads saved rules. The bool is true when the retired daily cap of 500 was cleared.
+func decodeSettings(raw string) (Settings, bool) {
 	s := Defaults()
 	if raw == "" {
-		return s
+		return s, false
 	}
 	if err := json.Unmarshal([]byte(raw), &s); err != nil || s.Validate() != nil {
-		return Defaults()
+		return Defaults(), false
 	}
-	return s
+	if s.MaxPerDay == legacyDailyCap {
+		s.MaxPerDay = 0
+		return s, true
+	}
+	return s, false
 }
 
 var videoExt = map[string]bool{

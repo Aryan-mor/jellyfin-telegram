@@ -129,7 +129,7 @@ func (s *Service) takeFile(ctx context.Context, q Query, hits []tguser.SearchHit
 			}
 			continue
 		}
-		err = s.TG.Copy(ctx, tguser.SourceRef{ChannelID: hit.ChannelID, AccessHash: hit.AccessHash}, []int{hit.MessageID})
+		err = s.TG.Copy(ctx, tguser.SourceRef{ChannelID: hit.ChannelID, AccessHash: hit.AccessHash}, s.withSubtitle(ctx, hit))
 		if err != nil {
 			s.warn("copy "+tag, err)
 			s.markSeen(ctx, tag, catalog.SeenTried)

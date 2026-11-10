@@ -20,13 +20,14 @@ const (
 )
 
 // forwardGap is the rest after copying n messages. Several files from one channel share it.
+// The daily copy cap is off by default, so this rest is what keeps a long run from looking like a flood.
 func forwardGap(n int) time.Duration {
-	d := time.Duration(n) * 2 * time.Second
-	if d < 8*time.Second {
-		return 8 * time.Second
+	d := time.Duration(n) * 3 * time.Second
+	if d < 15*time.Second {
+		return 15 * time.Second
 	}
-	if d > 45*time.Second {
-		return 45 * time.Second
+	if d > 60*time.Second {
+		return 60 * time.Second
 	}
 	return d
 }

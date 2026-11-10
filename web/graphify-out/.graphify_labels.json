@@ -1,7 +1,7 @@
 {
-  "0": "pages.tsx",
+  "0": "t",
   "1": "ui.tsx",
-  "2": "RulesPage",
+  "2": "pages.tsx",
   "3": "devDependencies",
   "4": "shell.tsx",
   "5": "dependencies",
@@ -11,6 +11,7 @@
   "9": ".oxlintrc.json",
   "10": "React + TypeScript + Vite",
   "11": "tsconfig.json",
-  "12": "widgets.tsx",
-  "13": "setup/main.tsx"
+  "12": "panel/main.tsx",
+  "13": "setup/main.tsx",
+  "14": "scripts"
 }

@@ -145,6 +145,7 @@ export function Shell() {
     )
   }
   const signed = (s?.telegram?.sessions?.length ?? 0) > 0
+  const botPending = (s?.bots ?? []).some((b) => !b.connected)
   const botBad = (s?.bots ?? []).some((b) => b.connected && (!b.ok || !b.admin || b.error))
   const nav = (
     <nav className="flex h-full flex-col gap-4 text-sm">
@@ -160,7 +161,7 @@ export function Shell() {
       </Group>
       <Group title="Telegram">
         <Nav to="/telegram" label={t("Accounts")} icon={<UserRound className="size-4" />} dot={!signed} />
-        <Nav to="/bots" label={t("Bots")} icon={<Bot className="size-4" />} dot={botBad} />
+        <Nav to="/bots" label={t("Bots")} icon={<Bot className="size-4" />} dot={botBad || botPending} />
         <Nav to="/logs" label={t("Logs")} icon={<ScrollText className="size-4" />} />
         <Nav to="/api" label={t("API")} icon={<Cable className="size-4" />} />
       </Group>
@@ -205,9 +206,11 @@ export function Shell() {
             </span>
           </div>
         )}
-        {restart && (
-          <div className="flex items-center justify-between gap-3 bg-amber-500/15 px-4 py-2 text-sm">
-            <span>{t("Restart needed. New settings apply the next time the program starts.")}</span>
+        {(restart || botPending) && (
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-amber-500/15 px-4 py-2 text-sm">
+            <span>{botPending
+              ? t("A saved bot is not connected yet. Restart so it starts working.")
+              : t("Restart needed. New settings apply the next time the program starts.")}</span>
             <Button size="sm" disabled={restarting} onClick={() => void restartProgram(setRestarting)}>{restarting ? t("Restarting") : t("Restart")}</Button>
           </div>
         )}

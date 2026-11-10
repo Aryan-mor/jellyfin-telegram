@@ -47,6 +47,7 @@
   "3 months": "3 Monate",
   "6 months": "6 Monate",
   "A bot is an account that reads the videos. The token is its password. This program never shows the full token again.": "Ein Bot ist ein Konto, das die Videos liest. Der Token ist sein Passwort. Dieses Programm zeigt nie wieder den vollständigen Token an.",
+  "A saved bot is not connected yet. Restart so it starts working.": "Ein gespeicherter Bot ist noch nicht verbunden. Starte neu, damit er arbeitet.",
   "A channel you already own. The bot is made an admin there with your account, so nothing has to be done by hand.": "Ein Kanal, der dir bereits gehört. Der Bot wird dort mit deinem Konto zum Admin gemacht, sodass nichts manuell erledigt werden muss.",
   "A file larger than the account can send is refused, not split. Sign-in works from this computer or over Tailscale only. The session is stored in data/users and is not encrypted, so keep that folder like a password.": "Eine Datei, die größer ist als das, was das Konto senden kann, wird abgelehnt und nicht geteilt. Die Anmeldung geht nur von diesem Computer oder über Tailscale. Die Sitzung liegt in data/users und ist nicht verschlüsselt. Behandle den Ordner wie ein Passwort.",
   "A Jellyfin server is created for you.": "Ein Jellyfin-Server wird für dich angelegt.",

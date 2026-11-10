@@ -46,15 +46,13 @@ func main() {
 		cmd, args = flag.Arg(0), flag.Args()[1:]
 	}
 
+	// Read the restart flag before waitForPredecessor clears it. A panel restart
+	// inherits the old process environment, including TELEGRAM_BOT_TOKENS from the
+	// previous start. Reload lets the settings file win. A normal start still lets
+	// a real environment win.
+	load := settingsLoader()
 	waitForPredecessor()
 
-	// A panel restart inherits the old process environment. Those values were copied
-	// from the settings file at the previous start, so they would hide bots added since.
-	// Reload lets the file win. A normal start still lets a real environment win.
-	load := config.Load
-	if os.Getenv(restartWaitEnv) != "" {
-		load = config.Reload
-	}
 	cfg, err := load(*env)
 	// A first run has no settings at all. The setup page asks for them.
 	if err != nil && !(cmd == "serve" && cfg.NeedsSetup()) {
@@ -82,6 +80,15 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+}
+
+// settingsLoader must run before waitForPredecessor. That wait removes
+// JFTG_RESTART_WAIT, and checking the variable afterwards always misses a panel restart.
+func settingsLoader() func(string) (config.Config, error) {
+	if os.Getenv(restartWaitEnv) != "" {
+		return config.Reload
+	}
+	return config.Load
 }
 
 func newPool(cfg config.Config, tokens []string, log *slog.Logger) (*tgpool.Pool, error) {

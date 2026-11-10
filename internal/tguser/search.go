@@ -21,6 +21,8 @@ type SearchHit struct {
 	Duration int
 	// Name is the file name when the message has one.
 	Name string
+	// DocID is the Telegram document id. A subtitle archive names the video by this id.
+	DocID int64
 }
 
 // TextPost is one channel post found by a text search. Links are the bot start URLs in it.
@@ -91,7 +93,7 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 func hitFrom(channelID, accessHash int64, post Post) SearchHit {
 	return SearchHit{
 		ChannelID: channelID, AccessHash: accessHash,
-		MessageID: post.ID, Caption: post.Caption, Name: post.Name, Size: post.Size,
+		MessageID: post.ID, Caption: post.Caption, Name: post.Name, Size: post.Size, DocID: post.DocID,
 		Video:     post.MIME == "video/mp4" || post.MIME == "video/x-matroska" || post.MIME == "video/webm" || post.Duration > 0,
 		NoForward: post.NoForward, Duration: int(post.Duration.Seconds()),
 	}
