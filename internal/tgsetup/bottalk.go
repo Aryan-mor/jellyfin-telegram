@@ -7,14 +7,16 @@ import (
 )
 
 // EnableBotToBot turns on Bot-to-Bot Communication Mode for a bot this account owns.
-// @BotFather is walked by its buttons. A bot this account does not own returns ErrNotOwner.
+// @BotFather no longer puts that switch on the Bot Settings keyboard. The switch lives in
+// the BotFather Mini App, and the chat command /setbot2bot still toggles it with buttons.
+// A bot this account does not own returns ErrNotOwner.
 func EnableBotToBot(ctx context.Context, m Menu, username string) error {
 	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
 	if username == "" {
 		return fmt.Errorf("a bot username is required")
 	}
 	_, _ = say(ctx, m, "/cancel")
-	after, err := m.Send(ctx, "/mybots")
+	after, err := m.Send(ctx, "/setbot2bot")
 	if err != nil {
 		return err
 	}
@@ -22,10 +24,16 @@ func EnableBotToBot(ctx context.Context, m Menu, username string) error {
 	if err != nil {
 		return err
 	}
+	if err := classify(text); err != nil && len(buttons) == 0 {
+		return err
+	}
+	if botTalkOn(text, buttons) {
+		return nil
+	}
+	if on := matchButton(buttons, enableScore); on != nil {
+		return pressEnable(ctx, m, msgID, on.Data)
+	}
 	for page := 0; page < 6; page++ {
-		if err := classify(text); err != nil && len(buttons) == 0 {
-			return err
-		}
 		if b := matchButton(buttons, func(s string) int {
 			if strings.Contains(strings.ToLower(s), strings.ToLower(username)) {
 				return 2
@@ -36,7 +44,7 @@ func EnableBotToBot(ctx context.Context, m Menu, username string) error {
 			if err != nil {
 				return err
 			}
-			return enableOnBotPage(ctx, m, text, msgID, buttons)
+			return turnBotTalkOn(ctx, m, text, msgID, buttons)
 		}
 		next := findNav(buttons, true)
 		if next == nil || len(next.Data) == 0 {
@@ -47,26 +55,63 @@ func EnableBotToBot(ctx context.Context, m Menu, username string) error {
 			return err
 		}
 	}
-	return ErrNotOwner
+	if pickerShown(text, buttons) {
+		return ErrNotOwner
+	}
+	after, err = m.Send(ctx, "@"+username)
+	if err != nil {
+		return err
+	}
+	text, msgID, buttons, err = m.Marked(ctx, after)
+	if err != nil {
+		return err
+	}
+	return turnBotTalkOn(ctx, m, text, msgID, buttons)
 }
 
-func enableOnBotPage(ctx context.Context, m Menu, text string, msgID int, buttons []Button) error {
+func turnBotTalkOn(ctx context.Context, m Menu, text string, msgID int, buttons []Button) error {
 	if err := classify(text); err != nil && len(buttons) == 0 {
 		return err
 	}
-	settings := matchButton(buttons, settingsScore)
-	if settings == nil {
-		return fmt.Errorf("@BotFather has no bot settings button: %s", firstLine(text))
+	if botTalkOn(text, buttons) {
+		return nil
 	}
-	text, msgID, buttons, err := m.Press(ctx, msgID, settings.Data)
+	if on := matchButton(buttons, enableScore); on != nil {
+		return pressEnable(ctx, m, msgID, on.Data)
+	}
+	// Older BotFather still nests the switch under Bot Settings.
+	if settings := matchButton(buttons, settingsScore); settings != nil {
+		text, msgID, buttons, err := m.Press(ctx, msgID, settings.Data)
+		if err != nil {
+			return err
+		}
+		return enableFromSettings(ctx, m, text, msgID, buttons)
+	}
+	return fmt.Errorf("@BotFather has no bot-to-bot button: %s", firstLine(text))
+}
+
+func pressEnable(ctx context.Context, m Menu, msgID int, data []byte) error {
+	text, _, _, err := m.Press(ctx, msgID, data)
 	if err != nil {
+		return err
+	}
+	return classify(text)
+}
+
+func pickerShown(text string, buttons []Button) bool {
+	found, rest := ownedFrom(text, buttons)
+	return len(found) > 0 || len(rest) > 0
+}
+
+func enableFromSettings(ctx context.Context, m Menu, text string, msgID int, buttons []Button) error {
+	if err := classify(text); err != nil && len(buttons) == 0 {
 		return err
 	}
 	talk := matchButton(buttons, botTalkScore)
 	if talk == nil {
 		return fmt.Errorf("@BotFather has no bot-to-bot button: %s", firstLine(text))
 	}
-	text, msgID, buttons, err = m.Press(ctx, msgID, talk.Data)
+	text, msgID, buttons, err := m.Press(ctx, msgID, talk.Data)
 	if err != nil {
 		return err
 	}

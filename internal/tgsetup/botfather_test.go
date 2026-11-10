@@ -3,6 +3,7 @@ package tgsetup
 import (
 	"context"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -209,6 +210,22 @@ func TestListBotsFollowsTheNextPage(t *testing.T) {
 	}
 	if len(got) != 2 || got[0].Username != "alpha_bot" || got[1].Username != "beta_bot" {
 		t.Fatalf("got %+v", got)
+	}
+}
+
+func TestEnableBotToBotUsesSetBot2Bot(t *testing.T) {
+	m := &menuFake{
+		page: answer{text: "Choose a bot to change bot-to-bot mode.", id: 4, buttons: []Button{{Text: "@lib_bot", Data: []byte("bot")}}},
+		press: map[string]answer{
+			"bot": {text: "Bot to Bot communication is disabled.", id: 5, buttons: []Button{{Text: "Enable", Data: []byte("on")}}},
+			"on":  {text: "Success. Bot to Bot communication enabled.", id: 6},
+		},
+	}
+	if err := EnableBotToBot(context.Background(), m, "@lib_bot"); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(m.sent, "/setbot2bot") {
+		t.Fatalf("sent %v", m.sent)
 	}
 }
 
