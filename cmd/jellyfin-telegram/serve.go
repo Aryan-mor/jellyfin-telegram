@@ -311,7 +311,16 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	sources := startSources(cfg, cat, users)
 	news := startNews(ctx, cfg, cat, users, sources, log)
 	tagIndex := startHashIndex(ctx, cfg, cat, users, log)
-	go startSearch(cfg, envPath, cat, sources, users, tagIndex, log).Run(ctx)
+	search := startSearch(cfg, envPath, cat, sources, users, tagIndex, news, log)
+	if seerrTarget != nil {
+		key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
+		if err != nil {
+			log.Warn("Seerr library scan is off", "err", err)
+		} else {
+			search.Scan = seerrScan(seerrTarget.String(), key, log)
+		}
+	}
+	go search.Run(ctx)
 	// A failed group setup must not stop playback. The library then runs as a plain channel, and
 	// the panel shows what went wrong.
 	hub := newGroupHub(ctx, log, cfg.SignedLibrary, func(ctx context.Context) (*intake.Service, error) {
@@ -417,6 +426,9 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 
 	idx := indexer.New(pool, cat, lib, store, log)
+	if search.Scan != nil {
+		idx.OnStrm = func(ctx context.Context) { _ = search.Scan(ctx) }
+	}
 	hub.SetIndexer(idx)
 	if cfg.JellyfinEnabled() {
 		idx.SetIdentifier(jellyfin.Identifier{Client: jellyfin.New(cfg.JellyfinURL, cfg.JellyfinAPIKey)})

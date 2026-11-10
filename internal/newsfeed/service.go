@@ -258,6 +258,92 @@ func covers(have, want int) bool {
 	}
 }
 
+// OpenStart opens one bot link the way a news pass does and returns the videos the resolver
+// delivered. A link that was already finished is not opened again.
+func (s *Service) OpenStart(ctx context.Context, src catalog.Source, hit tguser.StartHit) ([]tguser.Post, error) {
+	if s == nil || s.Cat == nil || s.Open == nil {
+		return nil, errors.New("news resolver is not available")
+	}
+	set, err := s.Settings(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx = tguser.WithUser(ctx, set.UserID)
+	row, ok, err := s.Cat.GetNewsLink(ctx, hit.URL)
+	if err != nil {
+		return nil, err
+	}
+	if ok && (row.State == "done" || row.State == "skipped" || row.State == "gave_up") {
+		return nil, nil
+	}
+	if ok && row.State == "fetched" {
+		if err := s.forward(ctx, src, row, nil); err != nil {
+			return nil, err
+		}
+		return nil, nil
+	}
+	if !ok {
+		row = catalog.NewsLink{URL: hit.URL, SourceID: src.ID, MessageID: hit.ID, State: "pending"}
+	}
+	if row.Tries >= 3 {
+		row.State = "gave_up"
+		return nil, s.Cat.PutNewsLink(ctx, row)
+	}
+	s.setNote("Opening " + hit.URL)
+	posts, err := s.Open.Open(ctx, hit.URL)
+	if err != nil {
+		if errors.Is(err, ErrSlowDown) {
+			row.State, row.Detail = "pending", ""
+			if perr := s.Cat.PutNewsLink(ctx, row); perr != nil {
+				return nil, perr
+			}
+			return nil, err
+		}
+		row.Tries++
+		row.Detail = err.Error()
+		row.State = "pending"
+		if row.Tries >= 3 {
+			row.State = "gave_up"
+		}
+		if perr := s.Cat.PutNewsLink(ctx, row); perr != nil {
+			return nil, perr
+		}
+		s.setNote(err.Error())
+		return nil, nil
+	}
+	return posts, nil
+}
+
+// FinishStart forwards the files that matched a request and records the link so it is not opened again.
+// An empty list marks the link skipped.
+func (s *Service) FinishStart(ctx context.Context, src catalog.Source, hit tguser.StartHit, posts []tguser.Post) error {
+	if s == nil || s.Cat == nil {
+		return errors.New("news resolver is not available")
+	}
+	row, ok, err := s.Cat.GetNewsLink(ctx, hit.URL)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		row = catalog.NewsLink{URL: hit.URL, SourceID: src.ID, MessageID: hit.ID}
+	}
+	if len(posts) == 0 {
+		row.State, row.Detail = "skipped", "no file matched the request"
+		return s.Cat.PutNewsLink(ctx, row)
+	}
+	var ids []int
+	for _, p := range posts {
+		if p.ID != 0 {
+			ids = append(ids, p.ID)
+		}
+	}
+	row.State, row.SavedID, row.Detail = "fetched", ids, ""
+	if err := s.Cat.PutNewsLink(ctx, row); err != nil {
+		return err
+	}
+	return s.forward(ctx, src, row, posts)
+}
+
 func (s *Service) one(ctx context.Context, src catalog.Source, hit tguser.StartHit, set Settings) error {
 	row, ok, err := s.Cat.GetNewsLink(ctx, hit.URL)
 	if err != nil {

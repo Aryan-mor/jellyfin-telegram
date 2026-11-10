@@ -69,25 +69,32 @@ func Verify(q Query, hit tguser.SearchHit, tag string, th Thresholds) Verdict {
 		v.Reason = "the signature line cannot be read"
 		return v
 	}
-	if th.MinBytes > 0 && hit.Size > 0 && hit.Size < th.MinBytes {
-		v.Reason = fmt.Sprintf("the file is only %d bytes, so it looks like a sample", hit.Size)
+	if ok, reason := checkFile(q, hit, duration, th); !ok {
+		v.Reason = reason
 		return v
+	}
+	v.OK = true
+	return v
+}
+
+// checkFile applies the size, length and runtime limits. It does not require a hashtag, so a
+// file found by title in a direct channel can use the same limits as a hashtag hit.
+func checkFile(q Query, hit tguser.SearchHit, duration int, th Thresholds) (bool, string) {
+	if th.MinBytes > 0 && hit.Size > 0 && hit.Size < th.MinBytes {
+		return false, fmt.Sprintf("the file is only %d bytes, so it looks like a sample", hit.Size)
 	}
 	if duration > 0 {
 		if th.MinSeconds > 0 && duration < th.MinSeconds {
-			v.Reason = fmt.Sprintf("it runs %d seconds, so it looks like a sample or a trailer", duration)
-			return v
+			return false, fmt.Sprintf("it runs %d seconds, so it looks like a sample or a trailer", duration)
 		}
 		if q.Movie && q.Runtime > 0 && th.RuntimeTolerance > 0 {
 			want := float64(q.Runtime * 60)
 			if diff := float64(duration) - want; diff > want*th.RuntimeTolerance || -diff > want*th.RuntimeTolerance {
-				v.Reason = fmt.Sprintf("it runs %d seconds but the film runs about %d minutes", duration, q.Runtime)
-				return v
+				return false, fmt.Sprintf("it runs %d seconds but the film runs about %d minutes", duration, q.Runtime)
 			}
 		}
 	}
-	v.OK = true
-	return v
+	return true, ""
 }
 
 func hasSignatureLine(caption string) bool { return strings.Contains(caption, "jftg:") }

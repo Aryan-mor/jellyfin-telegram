@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/stack"
 )
 
@@ -128,11 +129,7 @@ func (s *Source) Scan(ctx context.Context) error {
 	if s.SeerrBase == "" {
 		return fmt.Errorf("Seerr is not running, so the file stays on disk")
 	}
-	err := s.post(ctx, s.SeerrBase, s.SeerrKey, "/api/v1/settings/jobs/jellyfin-recently-added-scan/run", nil)
-	if err != nil && strings.Contains(err.Error(), "404") {
-		return s.post(ctx, s.SeerrBase, s.SeerrKey, "/api/v1/settings/jobs/availability-sync/run", nil)
-	}
-	return err
+	return seerr.ScanLibrary(ctx, s.SeerrBase, s.SeerrKey)
 }
 
 func (s *Source) Unmonitor(ctx context.Context, item Item) error {

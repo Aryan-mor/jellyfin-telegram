@@ -62,6 +62,28 @@ func (s *Searcher) SearchHashtag(ctx context.Context, query string) ([]tguser.Se
 	return hits, nil
 }
 
+// SearchChannel searches one direct channel through the signed-in account.
+func (s *Searcher) SearchChannel(ctx context.Context, ref tguser.SourceRef, query string, limit int) ([]tguser.SearchHit, error) {
+	c, ok := s.Account.(interface {
+		SearchChannel(context.Context, tguser.SourceRef, string, int) ([]tguser.SearchHit, error)
+	})
+	if !ok || c == nil {
+		return nil, nil
+	}
+	return c.SearchChannel(ctx, ref, query, limit)
+}
+
+// SearchPosts searches one news channel through the signed-in account.
+func (s *Searcher) SearchPosts(ctx context.Context, ref tguser.SourceRef, query string, limit int) ([]tguser.TextPost, error) {
+	c, ok := s.Account.(interface {
+		SearchPosts(context.Context, tguser.SourceRef, string, int) ([]tguser.TextPost, error)
+	})
+	if !ok || c == nil {
+		return nil, nil
+	}
+	return c.SearchPosts(ctx, ref, query, limit)
+}
+
 // History reads a channel through the signed-in account, so a found channel can be checked at once.
 func (s *Searcher) History(ctx context.Context, ref tguser.SourceRef, offsetID, limit int) (tguser.Page, error) {
 	h, ok := s.Account.(interface {

@@ -24,6 +24,14 @@ type Query struct {
 	Movie bool
 	// Runtime is the film's running time in minutes when known, otherwise zero.
 	Runtime int
+	// Title is the name Seerr shows, and AltTitle is the original name when it differs.
+	Title, AltTitle string
+	Year            int
+	IMDb            string
+	// DigitalOut is true once a digital or physical release date has arrived.
+	DigitalOut bool
+	// Release is that date, or the premiere when no digital date is known yet.
+	Release time.Time
 }
 
 // Text is the hashtag Telegram is asked for.
@@ -82,7 +90,8 @@ type Limits struct {
 	DenyAfter int
 	// MaxCopyTries is how many times a failing copy is tried for one file.
 	MaxCopyTries int
-	// QueryCooldown is how long a title is left alone after it was searched. Negative turns it off.
+	// QueryCooldown negative turns the growing wait off, so every pass searches again.
+	// Any other value uses that wait: 6 hours on the first day, then longer.
 	QueryCooldown time.Duration
 	// QueryGap is the pause between two global searches in one pass.
 	QueryGap time.Duration
@@ -125,6 +134,18 @@ type Service struct {
 	Store Store
 	// Promote adds a trusted channel to the direct file channels. Nil turns promotion off.
 	Promote Promoter
+	// Lists are the direct file channels and the news channels. Nil skips those steps.
+	Lists interface {
+		Sources(ctx context.Context) ([]catalog.Source, error)
+		NewsChannels(ctx context.Context) ([]catalog.Source, error)
+	}
+	// News opens a bot start link and forwards the files that match. Nil skips news search.
+	News interface {
+		OpenStart(ctx context.Context, src catalog.Source, hit tguser.StartHit) ([]tguser.Post, error)
+		FinishStart(ctx context.Context, src catalog.Source, hit tguser.StartHit, posts []tguser.Post) error
+	}
+	// Scan asks Seerr to notice a file once it is in the library. Nil skips it.
+	Scan func(ctx context.Context) error
 	// Now and Sleep are for tests.
 	Now   func() time.Time
 	Sleep func(ctx context.Context, d time.Duration) error
@@ -132,7 +153,7 @@ type Service struct {
 	// The maps back the state when Store is nil, and cache trust during a pass.
 	seen       map[string]string
 	tries      map[string]int
-	searched   map[string]time.Time
+	sched      map[string]string
 	trust      map[string]catalog.Trust
 	backoffTil time.Time
 }
@@ -206,36 +227,6 @@ func (s *Service) markSeen(ctx context.Context, key, state string) {
 	}
 }
 
-func queryKey(q Query) string { return "tgsearch.q." + q.Text() }
-
-// coolingDown reports that this title was searched lately.
-func (s *Service) coolingDown(ctx context.Context, q Query) bool {
-	cool := s.Limits.withDefaults().QueryCooldown
-	if cool < 0 {
-		return false
-	}
-	var last time.Time
-	if s.Store != nil {
-		raw, err := s.Store.StateValue(ctx, queryKey(q))
-		if unix, perr := strconv.ParseInt(raw, 10, 64); err == nil && perr == nil {
-			last = time.Unix(unix, 0)
-		}
-	} else {
-		last = s.searched[queryKey(q)]
-	}
-	return !last.IsZero() && s.now().Sub(last) < cool
-}
-
-func (s *Service) noteSearched(ctx context.Context, q Query) {
-	if s.searched == nil {
-		s.searched = map[string]time.Time{}
-	}
-	s.searched[queryKey(q)] = s.now()
-	if s.Store != nil {
-		s.warn("store search time", s.Store.SetStateValue(ctx, queryKey(q), strconv.FormatInt(s.now().Unix(), 10)))
-	}
-}
-
 func (s *Service) loadTrust(ctx context.Context) {
 	s.trust = map[string]catalog.Trust{}
 	if s.Store == nil {
@@ -276,7 +267,7 @@ func (s *Service) pass(ctx context.Context) {
 	}
 	queries, err := s.Want.Queries(ctx)
 	if err != nil {
-		s.warn("telegram search", err)
+		s.warn("list wanted titles", err)
 		return
 	}
 	s.loadTrust(ctx)
@@ -288,21 +279,90 @@ func (s *Service) pass(ctx context.Context) {
 		if q.Text() == "" || s.coolingDown(ctx, q) {
 			continue
 		}
-		// One global search at a time, with a pause between them.
-		if searches > 0 && s.sleep(ctx, s.Limits.QueryGap) != nil {
+		before := copied
+		var notes []stepNote
+		found, stop := s.searchHashtag(ctx, q, &searches, &copied)
+		notes = append(notes, stepNote{"hashtag", found, copied > before})
+		if stop {
+			s.logSteps(ctx, q, notes)
 			return
 		}
-		searches++
-		hits, err := s.TG.SearchHashtag(ctx, q.Text())
-		if err != nil {
-			s.searchFailed(err)
-			return
+		// Films that the hashtag did not copy are looked up in the direct channels, then in news.
+		if copied == before && q.Movie {
+			before = copied
+			var have bool
+			found, stop, have = s.searchDirect(ctx, q, &searches, &copied)
+			notes = append(notes, stepNote{"direct", found, copied > before})
+			if stop {
+				s.logSteps(ctx, q, notes)
+				return
+			}
+			if copied == before && !have {
+				found, stop = s.searchNews(ctx, q, &searches, &copied)
+				notes = append(notes, stepNote{"news", found, copied > before})
+				if stop {
+					s.logSteps(ctx, q, notes)
+					return
+				}
+			}
 		}
 		s.noteSearched(ctx, q)
-		if !s.handle(ctx, q, hits, &copied) {
-			return
-		}
+		s.logSteps(ctx, q, notes)
 	}
+}
+
+type stepNote struct {
+	step   string
+	found  int
+	copied bool
+}
+
+func (s *Service) logSteps(ctx context.Context, q Query, notes []stepNote) {
+	if s.Log == nil {
+		return
+	}
+	next := ""
+	if due := s.dueAt(ctx, q); !due.IsZero() {
+		next = due.UTC().Format(time.RFC3339)
+	}
+	for _, n := range notes {
+		s.Log.Info("searched title", "tmdb", q.TMDB, "step", n.step, "found", n.found, "copied", n.copied, "next", next)
+	}
+}
+
+func (s *Service) searchHashtag(ctx context.Context, q Query, searches, copied *int) (int, bool) {
+	if !s.gap(ctx, searches) {
+		return 0, true
+	}
+	hits, err := s.TG.SearchHashtag(ctx, q.Text())
+	if err != nil {
+		s.searchFailed(err)
+		return 0, true
+	}
+	if !s.handle(ctx, q, hits, copied) {
+		return len(hits), true
+	}
+	return len(hits), false
+}
+
+// gap pauses between Telegram searches in one pass. The first search of the pass does not wait.
+func (s *Service) gap(ctx context.Context, searches *int) bool {
+	if *searches > 0 && s.sleep(ctx, s.Limits.QueryGap) != nil {
+		return false
+	}
+	*searches++
+	return true
+}
+
+func (s *Service) scanLibrary() {
+	if s.Scan == nil {
+		return
+	}
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
+		defer cancel()
+		s.warn("ask Seerr to scan the library", s.Scan(ctx))
+	}()
 }
 
 // searchFailed backs off for as long as Telegram asked when it answered with a flood wait.
@@ -360,6 +420,7 @@ func (s *Service) handle(ctx context.Context, q Query, hits []tguser.SearchHit, 
 		skip[tag] = true
 		s.markSeen(ctx, tag, catalog.SeenDone)
 		*copied++
+		s.scanLibrary()
 		s.reward(ctx, hit, v, lim)
 		if s.Log != nil {
 			s.Log.Info("copied a file found on Telegram", "tag", tag, "channel", hit.ChannelID)

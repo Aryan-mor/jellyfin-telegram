@@ -78,6 +78,9 @@ type Indexer struct {
 	// place of the raw file it was made from. A file with no line is indexed as it always was.
 	signed Signed
 	fmu    sync.RWMutex
+
+	// OnStrm runs after a .strm file is written. Nil does nothing.
+	OnStrm func(ctx context.Context)
 }
 
 // Signed is the shared-library mode.
@@ -111,6 +114,12 @@ func New(src Source, cat *catalog.Catalog, lib *library.Library, blocks BlockRem
 // SetIdentifier turns on title lookup for movies that come without a year or id. Without it such
 // movies get local metadata from their caption.
 func (x *Indexer) SetIdentifier(i Identifier) { x.ident = i }
+
+func (x *Indexer) wrote(ctx context.Context) {
+	if x.OnStrm != nil {
+		x.OnStrm(ctx)
+	}
+}
 
 // Sync walks ids after the last seen message and stops after window empty ids.
 // It returns how many videos were added.
@@ -368,6 +377,7 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	if _, err := x.lib.WriteStrm(rel, f.MessageID); err != nil {
 		return err
 	}
+	x.wrote(ctx)
 	if fromTitle > 0 {
 		if err := x.lib.WriteTMDBSidecar(f.RelPath, fromTitle); err != nil {
 			x.log.Warn("cannot write TMDB id", "message", f.MessageID, "err", err)

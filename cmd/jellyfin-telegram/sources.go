@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/joho/godotenv"
@@ -26,7 +27,7 @@ import (
 
 // startSearch looks up wanted titles on Telegram and copies a file that passes verification. It
 // stays quiet until Seerr has a request, or trending is on, and the switch is on.
-func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, sources *tgsource.Service, users *tguser.Manager, idx *hashindex.Client, log *slog.Logger) *tgsearch.Service {
+func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, sources *tgsource.Service, users *tguser.Manager, idx *hashindex.Client, news *newsfeed.Service, log *slog.Logger) *tgsearch.Service {
 	svc := &tgsearch.Service{LibraryChannel: cfg.ChannelID, Log: log, On: tgsearch.Switch(envPath)}
 	if users != nil {
 		svc.TG = users
@@ -46,13 +47,21 @@ func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, source
 	}
 	if cat != nil {
 		svc.Store = cat
+		svc.Lists = cat
+	}
+	if news != nil {
+		svc.News = news
 	}
 	if sources != nil {
 		svc.Promote = sources
 	}
 	var want tgsearch.Multi
 	if cfg.SeerrManaged {
-		want = append(want, &tgsearch.Seerr{Base: (&seerr.Server{}).URL(), Root: filepath.Join(cfg.DataDir, "seerr")})
+		req := &tgsearch.Seerr{Base: (&seerr.Server{}).URL(), Root: filepath.Join(cfg.DataDir, "seerr")}
+		if cat != nil {
+			req.Store = cat
+		}
+		want = append(want, req)
 	}
 	if cfg.TrendingSearch && strings.TrimSpace(cfg.TMDBAPIKey) != "" {
 		// Only trending is filtered. Seerr requests above are always searched.
@@ -71,6 +80,28 @@ func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, source
 		svc.Want = want
 	}
 	return svc
+}
+
+// seerrScan asks Seerr to look at Jellyfin a short while after a .strm appears. Repeated calls
+// share one wait, so a burst of new files becomes one scan.
+func seerrScan(base, key string, log *slog.Logger) func(context.Context) error {
+	var mu sync.Mutex
+	var timer *time.Timer
+	return func(context.Context) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if timer != nil {
+			timer.Stop()
+		}
+		timer = time.AfterFunc(20*time.Second, func() {
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
+			if err := seerr.ScanLibrary(ctx, base, key); err != nil && log != nil {
+				log.Warn("ask Seerr to scan the library", "err", err)
+			}
+		})
+		return nil
+	}
 }
 
 // startSources prepares the copier of films and series from other Telegram channels. It stays idle

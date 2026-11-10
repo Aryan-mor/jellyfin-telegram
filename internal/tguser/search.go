@@ -3,6 +3,7 @@ package tguser
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/gotd/td/tg"
 )
@@ -18,6 +19,17 @@ type SearchHit struct {
 	NoForward  bool
 	// Duration is the running time in seconds, or zero when Telegram gave none.
 	Duration int
+	// Name is the file name when the message has one.
+	Name string
+}
+
+// TextPost is one channel post found by a text search. Links are the bot start URLs in it.
+type TextPost struct {
+	ChannelID  int64
+	AccessHash int64
+	MessageID  int
+	Text       string
+	Links      []string
 }
 
 // SearchHashtag searches every chat this account can see for query, which is a hashtag such as
@@ -79,10 +91,119 @@ func (m *Manager) SearchHashtag(ctx context.Context, query string) ([]SearchHit,
 func hitFrom(channelID, accessHash int64, post Post) SearchHit {
 	return SearchHit{
 		ChannelID: channelID, AccessHash: accessHash,
-		MessageID: post.ID, Caption: post.Caption, Size: post.Size,
+		MessageID: post.ID, Caption: post.Caption, Name: post.Name, Size: post.Size,
 		Video:     post.MIME == "video/mp4" || post.MIME == "video/x-matroska" || post.MIME == "video/webm" || post.Duration > 0,
 		NoForward: post.NoForward, Duration: int(post.Duration.Seconds()),
 	}
+}
+
+// SearchChannel searches one channel for query and returns its video and document files.
+// It is the in-channel form of SearchHashtag.
+func (m *Manager) SearchChannel(ctx context.Context, ref SourceRef, query string, limit int) ([]SearchHit, error) {
+	query = strings.TrimSpace(query)
+	if m == nil || query == "" || (ref.ChannelID == 0 && ref.Username == "") {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	lv, err := m.pick(ctx)
+	if err != nil {
+		return nil, err
+	}
+	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		peer, err := lv.peer(ctx, api, ref)
+		if err != nil {
+			return nil, err
+		}
+		if peer.ChannelID == m.channelID {
+			return []SearchHit(nil), nil
+		}
+		res, err := api.MessagesSearch(ctx, &tg.MessagesSearchRequest{
+			Peer:   peer,
+			Q:      query,
+			Filter: &tg.InputMessagesFilterDocument{},
+			Limit:  limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var hits []SearchHit
+		for _, raw := range searchMessages(res) {
+			msg, ok := raw.(*tg.Message)
+			if !ok {
+				continue
+			}
+			post, ok := postFrom(msg)
+			if !ok || post.Animated || post.Round {
+				continue
+			}
+			hits = append(hits, hitFrom(peer.ChannelID, peer.AccessHash, post))
+		}
+		lv.clock.hold(searchGap)
+		return hits, nil
+	})
+	if err != nil {
+		m.did(lv, "search channel", query, err)
+		return nil, err
+	}
+	hits, _ := val.([]SearchHit)
+	m.did(lv, "search channel", fmt.Sprintf("%s · %d", query, len(hits)), nil)
+	return hits, nil
+}
+
+// SearchPosts searches one channel for text posts. News channels post a start link instead of a file.
+func (m *Manager) SearchPosts(ctx context.Context, ref SourceRef, query string, limit int) ([]TextPost, error) {
+	query = strings.TrimSpace(query)
+	if m == nil || query == "" || (ref.ChannelID == 0 && ref.Username == "") {
+		return nil, nil
+	}
+	if limit <= 0 {
+		limit = 20
+	}
+	lv, err := m.pick(ctx)
+	if err != nil {
+		return nil, err
+	}
+	val, err := m.call(ctx, lv, func(ctx context.Context, api *tg.Client) (any, error) {
+		peer, err := lv.peer(ctx, api, ref)
+		if err != nil {
+			return nil, err
+		}
+		res, err := api.MessagesSearch(ctx, &tg.MessagesSearchRequest{
+			Peer:   peer,
+			Q:      query,
+			Filter: &tg.InputMessagesFilterEmpty{},
+			Limit:  limit,
+		})
+		if err != nil {
+			return nil, err
+		}
+		var posts []TextPost
+		for _, raw := range searchMessages(res) {
+			msg, ok := raw.(*tg.Message)
+			if !ok || msg.ID == 0 {
+				continue
+			}
+			links := StartURLs(msg.Message, append(textURL(msg), buttonURLs(msg)...))
+			if strings.TrimSpace(msg.Message) == "" && len(links) == 0 {
+				continue
+			}
+			posts = append(posts, TextPost{
+				ChannelID: peer.ChannelID, AccessHash: peer.AccessHash,
+				MessageID: msg.ID, Text: msg.Message, Links: links,
+			})
+		}
+		lv.clock.hold(searchGap)
+		return posts, nil
+	})
+	if err != nil {
+		m.did(lv, "search posts", query, err)
+		return nil, err
+	}
+	posts, _ := val.([]TextPost)
+	m.did(lv, "search posts", fmt.Sprintf("%s · %d", query, len(posts)), nil)
+	return posts, nil
 }
 
 func messageChats(res tg.MessagesMessagesClass) []tg.ChatClass {
