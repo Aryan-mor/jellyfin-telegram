@@ -122,7 +122,6 @@ export function Overview() {
   const phone = s.addresses.find((a) => !a.away && !/localhost|127\.0\.0\.1/.test(a.url))
   const share = phone ? phone.url.replace(/\/$/, "") + "/panel?code=" + panelCode() : ""
   const forum = s.forum as Forum | null
-  const dl = s.downloads as { enabled?: boolean; queue?: unknown[] } | null
   const mirrors = s.mirrors?.length ?? 0
   const apps = appsOf(s)
   let forumValue = t("Off"), forumSub = t("Plain channel")
@@ -151,11 +150,9 @@ export function Overview() {
         <Stat label={t("Bots")} value={botsOk + " / " + s.bots.length} sub={botsOk === s.bots.length ? t("All ready") : t("Some need a look")} to="/bots" />
         <Stat label={t("Channel")} value={s.channel_title || channelID(s.channel_id)} tip={channelID(s.channel_id)} sub={(s.language ? t("Subtitles {{language}}", { language: s.language }) : t("No subtitles")) + (mirrors ? " · " + plural(mirrors, "mirror") : "")} to="/channel" />
         <Stat label={t("Shared library")} value={forumValue} sub={forumSub} to="/channel/shared" />
-        {s.downloads && <Stat label={t("Downloads")} value={dl?.enabled ? t("On") : t("Off")} sub={dl?.enabled ? t("{{count}} in the queue", { count: dl.queue?.length ?? 0 }) : t("Files in the channel still play")} to={signed ? "/downloads" : undefined} />}
       </div>
       <Section title={t("Open from another device")} text={t("On this computer, open /panel. From a phone on the same Wi-Fi, open this link. The part after code= is the secret that keeps the panel private.")}>
         <CopyField label={t("Share link")} value={share || t("No network address yet")} />
-        {s.fladder && <a className="text-sm underline underline-offset-2" href="https://github.com/DonutWare/Fladder/releases" target="_blank" rel="noreferrer">{t("Download other Fladder versions")}</a>}
       </Section>
     </Page>
   )
@@ -165,14 +162,9 @@ type AppAccount = { app: string; path: string; user?: string; password?: string;
 
 function appsOf(s: PanelState): AppAccount[] {
   const list: AppAccount[] = (s.accounts ?? []).slice()
-  // Radarr and Sonarr belong to the downloads feature, so their accounts come from its status.
-  const d = (s.downloads ?? null) as { radarr_user?: string; radarr_password?: string; sonarr_user?: string; sonarr_password?: string } | null
-  if (d?.radarr_user) list.push({ app: "Radarr", path: "/radarr/", user: d.radarr_user, password: d.radarr_password, note: t("Looks for films. Only needed to check on a download.") })
-  if (d?.sonarr_user) list.push({ app: "Sonarr", path: "/sonarr/", user: d.sonarr_user, password: d.sonarr_password, note: t("Looks for series. Only needed to check on a download.") })
   if (!list.length) {
     list.push({ app: "Jellyfin", path: "/", note: t("Watch your library") })
     if (s.seerr) list.push({ app: "Seerr", path: "/seerr/", note: t("Request films and series") })
-    if (s.fladder) list.push({ app: "Fladder", path: "/fladder/", note: t("A nicer web client") })
   }
   return list
 }
@@ -537,7 +529,7 @@ export function Telegram() {
   const [open, setOpen] = useState(false)
   const list = s?.telegram?.sessions ?? []
   return (
-    <Page title={t("Telegram account")} text={t("Sign in first. Torrents, Channels and the other tools open once an account is signed in. The account must be an admin of the library channel with permission to post.")}>
+    <Page title={t("Telegram account")} text={t("Sign in first. Channels and the other tools open once an account is signed in. The account must be an admin of the library channel with permission to post.")}>
       <Card>
         <div className="flex items-center justify-between gap-2 border-b px-4 py-3">
           <h2 className="font-medium">{t("Accounts")}</h2>
@@ -574,7 +566,7 @@ function SessionRow({ ses, onDone }: { ses: Session; onDone: () => Promise<unkno
       <TD className="pr-4 text-right">
         <Button size="sm" variant="ghost" disabled={busy === "out"} onClick={() => void run("out", async () => {
           if (!(await confirmDialog(t("Sign out {{name}}?", { name }), t("The session on this computer is ended. Tools that need an account stop until one is signed in again."), t("Sign out")))) return
-          await api("/panel/downloads/logout", { user_id: ses.user_id }); toast(t("Signed out")); await onDone()
+          await api("/panel/accounts/logout", { user_id: ses.user_id }); toast(t("Signed out")); await onDone()
         })}>{t("Sign out")}</Button>
       </TD>
     </TR>
@@ -1105,29 +1097,24 @@ function FileRow({ f, actions }: { f: LocalFile; actions: LocalActions }) {
   )
 }
 
-// ---------- Torrents ----------
+// ---------- Upload pace ----------
 
-type DL = {
-  enabled?: boolean; dir?: string; free_bytes?: number; error?: string; warning?: string; pace?: Record<string, number | string>
-  search_every_minutes?: number; last_search?: number; crawler?: boolean
-  containers?: { name: string; running: boolean }[]; queue?: { name?: string; state?: string; error?: string }[]
-}
+type Pace = Record<string, number | string>
 
-function num(pace: Record<string, number | string> | undefined, a: string, b: string) {
+function num(pace: Pace | undefined, a: string, b: string) {
   return Number(pace?.[a] ?? pace?.[b] ?? 0)
 }
 
-export function Downloads() {
+export function UploadPace() {
   const { data: s } = usePanel()
-  const refresh = useRefreshState()
-  const d = (s?.downloads ?? null) as DL | null
+  const d = (s?.pace ?? undefined) as Pace | undefined
   const pace = useDirty({
-    mb_per_sec: num(d?.pace, "mb_per_sec", "MBPerSec"),
-    rest_minutes: num(d?.pace, "rest_minutes", "RestMinutes"),
-    long_every_gb: num(d?.pace, "long_every_gb", "LongEveryGB"),
-    long_rest_minutes: num(d?.pace, "long_rest_minutes", "LongRestMinutes"),
-    daily_gb: num(d?.pace, "daily_gb", "DailyGB"),
-    hours: String(d?.pace?.hours ?? d?.pace?.Hours ?? ""),
+    mb_per_sec: num(d, "mb_per_sec", "MBPerSec"),
+    rest_minutes: num(d, "rest_minutes", "RestMinutes"),
+    long_every_gb: num(d, "long_every_gb", "LongEveryGB"),
+    long_rest_minutes: num(d, "long_rest_minutes", "LongRestMinutes"),
+    daily_gb: num(d, "daily_gb", "DailyGB"),
+    hours: String(d?.hours ?? d?.Hours ?? ""),
   })
   const { busy, run } = useBusy()
   if (!d) return null
@@ -1135,16 +1122,9 @@ export function Downloads() {
     <div className="space-y-1.5"><FieldLabel>{label}</FieldLabel><Input value={String(pace.value[k])} placeholder={placeholder} inputMode={k === "hours" ? undefined : "decimal"}
       onChange={(e) => pace.set({ ...pace.value, [k]: k === "hours" ? e.target.value : Number(e.target.value) })} /></div>
   )
-  const queueTone = (st: string, err?: string): Tone => (/err|fail|stall/i.test(st) || err ? "bad" : /done|complete|upload|seed/i.test(st) ? "ok" : "info")
   return (
-    <Page title={t("Torrents")} text={t("One switch for the whole chain. It is off until you turn it on.")}>
-      <Section>
-        <Row title={d.enabled ? t("Torrent downloads are on") : t("Torrent downloads are off")} text={[d.dir, d.free_bytes ? t("{{gib}} GiB free", { gib: (d.free_bytes / 1024 ** 3).toFixed(1) }) : ""].filter(Boolean).join(" · ")}>
-          <SwitchBox label={t("Torrent downloads")} checked={!!d.enabled} onCheckedChange={(enabled) => void api("/panel/automation", { enabled }).then(() => { toast(enabled ? t("Starting. Playback is not interrupted.") : t("Stopped. Files already in the channel still play.")); return refresh() }).catch(fail)} />
-        </Row>
-        {d.enabled && <Alert tone="warn">{t("Torrents connect this computer to strangers and can be illegal where you live. Your address is visible to other people in the swarm. Leave this off unless you accept that.")}</Alert>}
-      </Section>
-      <Section title={t("Pace")} text={t("How fast and when files go to Telegram, so the account is not flagged.")}>
+    <Page title={t("Upload pace")} text={t("How fast and when files go to Telegram, so the account is not flagged.")}>
+      <Section title={t("Pace")}>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {field(t("Megabytes per second"), "mb_per_sec")}
           {field(t("Minutes between files"), "rest_minutes")}
@@ -1153,23 +1133,8 @@ export function Downloads() {
           {field(t("Daily GB per account"), "daily_gb")}
           {field(t("Hours"), "hours", "01-08")}
         </div>
-        <div className="flex justify-end"><Button size="sm" disabled={!pace.dirty || busy === "pace"} onClick={() => void run("pace", async () => { await api("/panel/downloads/pace", pace.value); pace.saved(); toast(t("Pace saved")) })}>{t("Save pace")}</Button></div>
+        <div className="flex justify-end"><Button size="sm" disabled={!pace.dirty || busy === "pace"} onClick={() => void run("pace", async () => { await api("/panel/accounts/pace", pace.value); pace.saved(); toast(t("Pace saved")) })}>{t("Save pace")}</Button></div>
       </Section>
-      <Section title={t("Stack")}>
-        {d.error && <Alert tone="bad">{d.error}</Alert>}
-        {d.warning && <Alert tone="warn">{d.warning}</Alert>}
-        {!!d.search_every_minutes && <p className="text-sm text-muted-foreground">{d.last_search ? t("Looked again for missing titles at {{time}}, then every {{minutes}} minutes.", { time: new Date(d.last_search * 1000).toLocaleTimeString(), minutes: d.search_every_minutes }) : t("Will look again for missing titles every {{minutes}} minutes.", { minutes: d.search_every_minutes })}</p>}
-        {(d.enabled || !!d.containers?.length) && <Row title={d.crawler ? t("Bitmagnet is crawling the DHT.") : t("Bitmagnet search is on. The DHT crawler is paused because the database reached its cap.")}><StatusBadge tone={d.crawler ? "ok" : "warn"}>{d.crawler ? t("crawling") : t("paused")}</StatusBadge></Row>}
-        {(d.containers ?? []).map((c) => <Row key={c.name} title={c.name}><StatusBadge ok={c.running}>{c.running ? t("running") : t("stopped")}</StatusBadge></Row>)}
-        {!d.enabled && !d.containers?.length && <Empty>{t("Nothing is running yet.")}</Empty>}
-      </Section>
-      <Card>
-        <div className="border-b px-4 py-3"><h2 className="font-medium">{t("Queue")}</h2></div>
-        <Table><TBody>{(d.queue ?? []).map((item, i) => (
-          <TR key={i}><TD className="pl-4"><div className="truncate">{item.name}</div>{item.error && <div className="text-xs text-destructive">{item.error}</div>}</TD><TD className="pr-4 text-right"><StatusBadge tone={queueTone(item.state || "", item.error)}>{item.state || t("queued")}</StatusBadge></TD></TR>
-        ))}</TBody></Table>
-        {!d.queue?.length && <Empty>{t("Nothing queued.")}</Empty>}
-      </Card>
     </Page>
   )
 }

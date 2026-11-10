@@ -45,15 +45,14 @@ CREATE TABLE IF NOT EXISTS uploads (
 	UNIQUE(kind, remote_id)
 );`
 
-// KindLocal marks an upload row for a video that was already on this computer, not one that
-// Radarr or Sonarr imported. Its RemoteID is a stable number made from the file's path.
+// KindLocal marks an upload row for a video that was already on this computer. Its RemoteID is a stable number made from the file's path.
 const KindLocal = "local"
 
 // KindHome marks a file a person chose to send to the personal channel.
 const KindHome = "home"
 
-// Upload is one file on its way to the channel. Kind is movie or episode for a file that Radarr or
-// Sonarr imported, and KindLocal for a file the person chose in the panel.
+// Upload is one file on its way to the channel. Kind is KindLocal for a file the person chose in the
+// panel. Older databases may still hold rows of other kinds, which nothing uploads any more.
 type Upload struct {
 	ID          int64
 	Kind        string

@@ -49,12 +49,6 @@ type Options struct {
 	// SeerrState says how far Seerr is. Seerr starts in the background and takes minutes the first
 	// time, so until it is ready /seerr/ shows that instead of an error. Nil means always ready.
 	SeerrState func() SeerrState
-	// Fladder is the web client, served under /fladder/. Nil leaves that path to Jellyfin.
-	Fladder *url.URL
-	// Radarr and Sonarr are the download apps, served under /radarr/ and /sonarr/.
-	// Their own url base is that path, so the request is forwarded unchanged.
-	Radarr *url.URL
-	Sonarr *url.URL
 	// StreamBase is the address written into .strm files.
 	StreamBase string
 }
@@ -88,20 +82,7 @@ func Handler(o Options) http.Handler {
 		mux.HandleFunc("/seerr", func(w http.ResponseWriter, r *http.Request) {
 			http.Redirect(w, r, "/seerr/", http.StatusTemporaryRedirect)
 		})
-		// Fladder stores this Seerr as http://this-port/seerr, then calls an absolute
-		// /api/v1 path. That join drops /seerr, so the browser asks this port for /api/v1.
-		// Seerr is what answers there. Jellyfin has no such path.
-		mux.Handle("/api/v1/", passThrough(o.Seerr))
 	}
-	if o.Fladder != nil {
-		proxy := passThrough(o.Fladder)
-		mux.Handle("/fladder/", proxy)
-		mux.HandleFunc("/fladder", func(w http.ResponseWriter, r *http.Request) {
-			http.Redirect(w, r, "/fladder/", http.StatusTemporaryRedirect)
-		})
-	}
-	mount(mux, "/radarr", o.Radarr)
-	mount(mux, "/sonarr", o.Sonarr)
 	if o.Jellyfin == nil {
 		return mux
 	}
@@ -189,16 +170,6 @@ func trustLocalProxy(pr *httputil.ProxyRequest) {
 	if v := pr.In.Header.Get("X-Forwarded-For"); v != "" {
 		pr.Out.Header.Set("X-Forwarded-For", v)
 	}
-}
-
-func mount(mux *http.ServeMux, prefix string, target *url.URL) {
-	if target == nil {
-		return
-	}
-	mux.Handle(prefix+"/", passThrough(target))
-	mux.HandleFunc(prefix, func(w http.ResponseWriter, r *http.Request) {
-		http.Redirect(w, r, prefix+"/", http.StatusTemporaryRedirect)
-	})
 }
 
 func fromLoopback(r *http.Request) bool {

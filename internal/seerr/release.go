@@ -11,10 +11,6 @@ import (
 // Version is the Seerr release this program runs.
 const Version = "3.5.1"
 
-// ContainerName is only read by the optional torrent stack, which joins a Seerr container to its
-// Docker network. Seerr itself no longer runs in a container.
-const ContainerName = "jellyfin-telegram-seerr"
-
 // Port is where Seerr listens on this machine. Only this program connects to it.
 const Port = 15055
 

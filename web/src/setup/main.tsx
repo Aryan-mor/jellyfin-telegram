@@ -23,7 +23,7 @@ function randomMirror() {
 
 type Found = { channel_id: number; title: string; bots: string[]; skipped?: string[] }
 type Job = { running: boolean; progress: { text: string; state: string }[]; error?: string; owned?: { username: string; name?: string }[]; kept?: string[]; found?: Found }
-type Status = { stage: string; percent: number; detail?: string; log?: string[]; ready: boolean; error?: string; urls?: string[]; user?: string; password?: string; seerr?: boolean; fladder?: boolean }
+type Status = { stage: string; percent: number; detail?: string; log?: string[]; ready: boolean; error?: string; urls?: string[]; user?: string; password?: string; seerr?: boolean }
 
 type Listing = { path: string; parent: string; top?: boolean; dirs: string[]; cut?: boolean }
 
@@ -100,7 +100,7 @@ function Setup() {
   const [bots, setBots] = useState(5)
   const [channel, setChannel] = useState("")
   const [manual, setManual] = useState({ api_id: "", api_hash: "", channel: "", bots: "" })
-  const [prefs, setPrefs] = useState({ fladder: false, seerr: true, downloads: false, group: true, telegram_search: true, jellyfin_url: "", jellyfin_key: "" })
+  const [prefs, setPrefs] = useState({ seerr: true, group: true, telegram_search: true, jellyfin_url: "", jellyfin_key: "" })
   const [mirrorOn, setMirrorOn] = useState(true)
   const [mirrorMode, setMirrorMode] = useState<"auto" | "have">("auto")
   const [mirrorLink, setMirrorLink] = useState("")
@@ -179,7 +179,7 @@ function Setup() {
   async function save(auto: boolean) {
     if (mirrorOn && mirrorMode === "have" && !mirrorLink.trim()) throw new Error(t("Paste the public channel link, or choose automatic"))
     await api("/setup/save", {
-      auto, ...manual, language: langs.join(","), ui_language: uiLang(), ...prefs, downloads: false,
+      auto, ...manual, language: langs.join(","), ui_language: uiLang(), ...prefs,
       folder: folder.trim(),
       jellyfin_url: ownJellyfin ? prefs.jellyfin_url : "",
       jellyfin_key: ownJellyfin ? prefs.jellyfin_key : "",
@@ -329,7 +329,6 @@ function Setup() {
           </div>
           <label className="flex items-center justify-between text-sm">{t("Shared library")} <SwitchBox label={t("Shared library")} checked={prefs.group} onCheckedChange={(group) => setPrefs({ ...prefs, group })} /></label>
           <label className="flex items-center justify-between text-sm">{t("Telegram search")} <SwitchBox label={t("Telegram search")} checked={prefs.telegram_search} onCheckedChange={(telegram_search) => setPrefs({ ...prefs, telegram_search })} /></label>
-          <label className="flex items-center justify-between text-sm">Fladder <SwitchBox label="Fladder" checked={prefs.fladder} onCheckedChange={(fladder) => setPrefs({ ...prefs, fladder })} /></label>
           <label className="flex items-center justify-between text-sm">Seerr <SwitchBox label="Seerr" checked={prefs.seerr} onCheckedChange={(seerr) => setPrefs({ ...prefs, seerr })} /></label>
           <div className="space-y-2 border-t pt-3">
             <div className="text-sm font-semibold">{t("Where to keep the files")}</div>

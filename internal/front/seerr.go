@@ -32,17 +32,6 @@ var seerrPaths = []string{
 	"/logo_",
 }
 
-// passThrough forwards the request path unchanged. Fladder is already configured for /fladder.
-func passThrough(target *url.URL) http.Handler {
-	return &httputil.ReverseProxy{
-		Rewrite: func(pr *httputil.ProxyRequest) {
-			pr.SetURL(target)
-			pr.Out.Host = target.Host
-		},
-		FlushInterval: -1,
-	}
-}
-
 func seerrProxy(target *url.URL) http.Handler {
 	transport := http.DefaultTransport.(*http.Transport).Clone()
 	transport.DisableCompression = true

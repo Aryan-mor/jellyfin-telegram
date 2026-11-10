@@ -50,8 +50,8 @@ func TestUsableAddress(t *testing.T) {
 
 func TestSignInDetails(t *testing.T) {
 	managedCreds := managed.Credentials{User: "admin", Password: "pw"}
-	got := signInDetails(config.Config{}, managedCreds, true, true)
-	if len(got) != 3 || got[0].App != "Jellyfin" || got[0].User != "admin" || got[0].Password != "pw" || got[1].App != "Seerr" || got[1].User != "admin" {
+	got := signInDetails(config.Config{}, managedCreds, true)
+	if len(got) != 2 || got[0].App != "Jellyfin" || got[0].User != "admin" || got[0].Password != "pw" || got[1].App != "Seerr" || got[1].User != "admin" {
 		t.Fatalf("managed: %+v", got)
 	}
 	dir := t.TempDir()
@@ -61,11 +61,11 @@ func TestSignInDetails(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "seerr", "jellyfin.json"), []byte(`{"user":"seerr","password":"s3"}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	own := signInDetails(config.Config{DataDir: dir}, managed.Credentials{}, true, false)
+	own := signInDetails(config.Config{DataDir: dir}, managed.Credentials{}, true)
 	if len(own) != 2 || own[0].User != "" || own[1].User != "seerr" || own[1].Password != "s3" {
 		t.Fatalf("own Jellyfin: %+v", own)
 	}
-	if none := signInDetails(config.Config{DataDir: t.TempDir()}, managed.Credentials{}, true, false); none[1].User != "" {
+	if none := signInDetails(config.Config{DataDir: t.TempDir()}, managed.Credentials{}, true); none[1].User != "" {
 		t.Fatalf("an account that was never made was shown: %+v", none[1])
 	}
 }

@@ -21,7 +21,7 @@ A clear description of what is wrong.
 - jellyfin-telegram commit:
 - Go version (if built from source):
 - Jellyfin version, managed or your own:
-- Extras enabled (Seerr, Fladder, Downloads, Channels, Local media):
+- Extras enabled (Seerr, Channels, Local media):
 
 **Logs**
 Output of `jellyfin-telegram check` and relevant log lines (run with `-v`).

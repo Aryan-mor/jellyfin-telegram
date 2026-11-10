@@ -96,7 +96,7 @@ message and what to do. Everything else in this file is optional detail.
 - Everything on one port (8097): Jellyfin, streams, setup page and web panel
 - Automatic Movies/Shows naming with TMDB matching
 - Subtitle detection, online fetching and one-time extraction of embedded tracks
-- Optional Seerr, Fladder, torrent download chain, channel forwarding and local media upload
+- Optional Seerr, channel forwarding and local media upload
 
 ## Languages
 
@@ -127,7 +127,7 @@ A new language is a new `web/src/locales/<code>.json` file. The page only offers
 - [What you get](#what-you-get)
 - [Requirements](#requirements)
 - [Quick start](#quick-start-about-two-minutes)
-- [Install from source](#install) ([Windows](#windows), [Linux](#linux), [Docker for the extras](#docker-for-the-extras))
+- [Install from source](#install) ([Windows](#windows), [Linux](#linux))
 - [First run and setup](#first-run-and-setup)
 - [Using the panel](#using-the-panel)
 - [Using your own Jellyfin](#using-your-own-jellyfin)
@@ -141,6 +141,7 @@ A new language is a new `web/src/locales/<code>.json` file. The page only offers
 - [Development](#development)
 - [Contributing](#contributing)
 - [Security](#security)
+- [Legal and acceptable use](#legal-and-acceptable-use)
 - [License](#license)
 - [Thanks](#thanks)
 
@@ -170,9 +171,7 @@ A new language is a new `web/src/locales/<code>.json` file. The page only offers
 
 | Extra | What it does | Needs |
 |---|---|---|
-| Fladder | A nicer Jellyfin web client at `/fladder/` | Docker |
 | Seerr | Request films and shows from a web page, at `/seerr/` | Nothing. It is downloaded once, about 150 MB, and runs as a normal process |
-| Downloads | **Paused for now.** Seerr request, then Radarr/Sonarr, Bitmagnet and qBittorrent fetch it, then a Telegram account uploads it to your channel and the disk copy is deleted | Docker, a Telegram user account |
 | Channels | Forward films and series from other Telegram channels into your library channel, server side, with nothing downloaded here | A Telegram user account |
 | Local media | List videos already on this computer, upload the ones you pick, optionally delete the local copy afterwards | Nothing extra |
 
@@ -187,7 +186,6 @@ The list below is what Manual setup needs, and the setup page creates all of it 
 - `api_id` and `api_hash` from [my.telegram.org](https://my.telegram.org) under *API development tools*
 - **Go 1.26 or newer**, only to build from source
 - Jellyfin **10.11.8** or **12.4** (the tested versions). The managed mode downloads 12.4 for you.
-- **Docker**, only for Fladder (and Downloads, which are paused). Jellyfin and Seerr do not need it.
 - Optional: `ffprobe` for subtitle detection. The service looks in `PATH` and in the Jellyfin
   install folder, so the managed Jellyfin usually covers it.
 
@@ -224,8 +222,6 @@ already sets up start-at-login: a Task Scheduler task on Windows, a systemd user
 
 3. Windows may ask to allow the program through the firewall the first time another device
    connects. Allow it on private networks.
-4. Optional, only for Fladder: install [Docker Desktop](https://www.docker.com/products/docker-desktop/)
-   and leave it running. Seerr needs no Docker.
 
 To start it automatically at logon, create a Task Scheduler task that runs
 `jellyfin-telegram.exe serve` with the project folder as the start directory. The service does
@@ -271,12 +267,6 @@ not start by itself after a reboot.
 
 The program reads `.env` and writes `data/` and `library/` in its working directory, so always run
 it from the same folder (or pass `-env /path/to/.env`).
-
-### Docker for the extras
-
-Fladder, Seerr and the whole download chain run as containers that the program starts and stops
-for you. You only need a working Docker. Turning an extra off removes its containers and leaves
-playback alone.
 
 ## First run and setup
 
@@ -365,22 +355,22 @@ embedded in the Go binary, so `go build` does not need Node. A commit rebuilds t
 | Page | Use it to |
 |---|---|
 | Overview | See the addresses, the apps, and whether a restart is waiting |
-| Sign in details | Copy the Jellyfin, Seerr and Fladder passwords |
+| Sign in details | Copy the Jellyfin and Seerr passwords |
 | Main channel | Change the library channel |
 | Mirrors | Create a channel, or add one you already have, and choose what is copied there |
 | Shared library | Share the library with another group |
 | Home videos | Send videos from a folder on this computer |
 | Subtitles | Choose subtitle languages, in the order you want them |
-| Accounts | Sign in the Telegram user accounts used by Torrents, Channels and Local files |
+| Accounts | Sign in the Telegram user accounts used by Channels and Local files |
 | Bots | Create a bot here, or paste a token. A new bot connects on the next start |
 | API | Change `api_id` and `api_hash` |
 | Direct files | Copy films and series from other Telegram channels |
 | News | Watch channels that post a bot link instead of the film |
 | Local files | Add folders of videos on this computer and upload what you choose |
-| Torrents | Turn on the download chain (Radarr, Sonarr, qBittorrent, Bitmagnet) |
+| Upload pace | Set how fast and when files go to Telegram |
 | Away from home | Follow the steps to reach Jellyfin from another network |
 
-Local files stays hidden until that feature is on. Direct files, News and Torrents stay hidden
+Local files stays hidden until that feature is on. Direct files, News and Upload pace stay hidden
 until a Telegram account is signed in. Creating a mirror or a bot, and making a mirror public
 or private, only work from this computer or over Tailscale.
 
@@ -447,8 +437,7 @@ Every setting is explained inside [.env.example](.env.example). The ones you wil
 | `SYNC_INTERVAL_SECONDS` | How often to look for new channel messages (default 60) |
 | `SUBTITLE_LANGUAGE` | Your language code: `en`, `de`, `fr`, `fa`, `ja`, ... Empty turns subtitles off |
 | `SUBTITLES_ONLINE` | Allow fetching from sub-plus.ir |
-| `SEERR_MANAGED`, `FLADDER_MANAGED` | Turn on Seerr or Fladder (Fladder needs Docker, Seerr does not) |
-| `DOWNLOADS_ENABLED` | The download chain. Paused: it has no effect in this version |
+| `SEERR_MANAGED` | Turn on Seerr. It needs no Docker |
 | `LOCAL_MEDIA_DIRS` | Folders of local videos, separated by `\|` |
 
 ## How files are named
@@ -498,7 +487,7 @@ restarts.
 
 ### Embedded subtitles
 
-Many clients, including Jellyfin Web and stock Fladder, request an embedded subtitle as a
+Many clients, including Jellyfin Web, request an embedded subtitle as a
 separate file, and Jellyfin would read the whole video to extract it. To avoid that, the service
 does the work once per file:
 
@@ -515,26 +504,11 @@ also deletes its archive. When Jellyfin runs in Docker or on another machine, se
 
 ## Optional extras
 
-### Seerr and Fladder
+### Seerr
 
-Tick them on the setup page, in the panel, or set `SEERR_MANAGED=true` and `FLADDER_MANAGED=true`.
-Seerr opens at `/seerr/` and is signed in to your Jellyfin (use the same user). Fladder opens at
-`/fladder/` with Seerr already filled in. Fladder needs Docker. Seerr does not.
-
-### Downloads (Torrents tab)
-
-One switch turns on a private Radarr, Sonarr, qBittorrent and Bitmagnet. Seerr requests a film or
-episode, qBittorrent downloads it, and a Telegram account you sign in on that tab posts it to the
-channel. Playback still goes through the same `.strm` file. The copy on disk is deleted after
-Jellyfin has probed the message.
-
-- A file larger than that account can send is refused and is not split.
-- Sign-in is accepted only from this computer or over Tailscale. The session file is not
-  encrypted and is full access to the account, so use a separate account.
-- More accounts drain the queue faster. One file still uses one account.
-- Bitmagnet only knows what it overheard on the DHT, so old popular releases may take a while.
-- Your home IP is visible to peers and the DHT. There is no VPN in this setup.
-- Set `DOWNLOADS_MIN_FREE_GB` so qBittorrent pauses when the disk is nearly full.
+Tick it on the setup page, in the panel, or set `SEERR_MANAGED=true`. Seerr opens at `/seerr/` and
+is signed in to your Jellyfin (use the same user). It needs no Docker. A request is not fetched
+by this program: it only starts the Telegram search described below, when that is turned on.
 
 ### Channels
 
@@ -698,6 +672,27 @@ Feel free to contribute! Bug fixes, ideas and pull requests are all welcome. Ple
 ## Security
 
 Please do not report vulnerabilities in public issues. See [SECURITY.md](SECURITY.md).
+
+## Legal and acceptable use
+
+jellyfin-telegram is open source software that you run yourself. The project does not host, store,
+index or distribute any media, and it does not operate any service. Everything runs on your own
+computer, with your own Telegram account and bots.
+
+- Use it only for media you own or have the right to use, such as your own recordings and
+  backups, and content you are licensed to store and watch.
+- You are responsible for what you store, forward or play, and for following the laws where you
+  live and Telegram's [Terms of Service](https://telegram.org/tos) and
+  [API Terms](https://core.telegram.org/api/terms).
+- Features that search or forward from other Telegram channels only reach what those channels
+  already publish. The project does not check or endorse that content.
+- The software is provided as is, without warranty. See [LICENSE](LICENSE).
+
+### Telegram account warning
+
+Telegram can limit or ban accounts that automate uploads, forwards or logins. Sign in with a
+spare account, not your main one, and expect that it could be restricted. The session file is not
+encrypted and gives full access to the account.
 
 ## License
 

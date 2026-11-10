@@ -298,12 +298,12 @@ func TestLoginIsLocalOrTailscaleOnly(t *testing.T) {
 	}
 	h := New(Options{
 		Code: "secret", EnvPath: path,
-		DownloadDo: func(*http.Request, string, map[string]any) (any, error) {
+		AccountDo: func(*http.Request, string, map[string]any) (any, error) {
 			t.Fatal("login should not run")
 			return nil, nil
 		},
 	})
-	req := httptest.NewRequest(http.MethodPost, "/panel/downloads/login?code=secret", strings.NewReader(`{"phone":"+1"}`))
+	req := httptest.NewRequest(http.MethodPost, "/panel/accounts/login?code=secret", strings.NewReader(`{"phone":"+1"}`))
 	req.RemoteAddr = "192.168.1.9:1234"
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, req)
@@ -312,37 +312,14 @@ func TestLoginIsLocalOrTailscaleOnly(t *testing.T) {
 	}
 }
 
-func TestEnableNeedsASession(t *testing.T) {
-	path := filepath.Join(t.TempDir(), ".env")
-	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
-		t.Fatal(err)
-	}
-	h := New(Options{
-		Code: "secret", EnvPath: path,
-		DownloadDo: func(_ *http.Request, action string, _ map[string]any) (any, error) {
-			if action == "enable" {
-				return nil, os.ErrInvalid
-			}
-			return map[string]any{"ok": true}, nil
-		},
-	})
-	req := httptest.NewRequest(http.MethodPost, "/panel/automation?code=secret", strings.NewReader(`{"enabled":true}`))
-	req.RemoteAddr = "127.0.0.1:9"
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, req)
-	if rec.Code != http.StatusBadRequest {
-		t.Fatalf("status %d", rec.Code)
-	}
-}
-
 func TestATunnelOnThisMachineIsNotTrusted(t *testing.T) {
-	local := httptest.NewRequest(http.MethodPost, "/panel/downloads/login", nil)
+	local := httptest.NewRequest(http.MethodPost, "/panel/accounts/login", nil)
 	local.RemoteAddr = "127.0.0.1:5000"
 	if !setup.TrustedClient(local) {
 		t.Fatal("this computer was refused")
 	}
 	for _, header := range []string{"X-Forwarded-For", "Forwarded", "X-Real-Ip"} {
-		tunnel := httptest.NewRequest(http.MethodPost, "/panel/downloads/login", nil)
+		tunnel := httptest.NewRequest(http.MethodPost, "/panel/accounts/login", nil)
 		tunnel.RemoteAddr = "127.0.0.1:5000"
 		tunnel.Header.Set(header, "203.0.113.9")
 		if setup.TrustedClient(tunnel) {
@@ -366,7 +343,7 @@ func TestStateListsHowToSignInToEachApp(t *testing.T) {
 		t.Fatal(err)
 	}
 	h := New(Options{Code: "secret", EnvPath: path, Accounts: func() []Account {
-		return []Account{{App: "Jellyfin", Path: "/", User: "admin", Password: "pw"}, {App: "Fladder", Path: "/fladder/"}}
+		return []Account{{App: "Jellyfin", Path: "/", User: "admin", Password: "pw"}}
 	}})
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/panel/state?code=secret", nil))
@@ -376,7 +353,7 @@ func TestStateListsHowToSignInToEachApp(t *testing.T) {
 	if err := json.Unmarshal(rec.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	if len(got.Accounts) != 2 || got.Accounts[0].User != "admin" || got.Accounts[0].Password != "pw" || got.Accounts[1].User != "" {
+	if len(got.Accounts) != 1 || got.Accounts[0].User != "admin" || got.Accounts[0].Password != "pw" {
 		t.Fatalf("accounts %+v", got.Accounts)
 	}
 	if !strings.Contains(webui.Source(), "Sign in details") {
@@ -507,7 +484,7 @@ func TestChannelsTab(t *testing.T) {
 
 func TestPageHasTheChannelsAndProviderTabs(t *testing.T) {
 	text := webui.Source()
-	for _, want := range []string{"Direct files", "News channels", "@id_bot", "@getidsbot", "/panel/sources/", "Telegram account", "General video", "Create mirror", "Subtitles", "Tailscale", "Add a bot", "/newbot", "does not offer a public ID", "You're using the default. Replace it here if you want your own.", "https://github.com/DonutWare/Fladder/releases"} {
+	for _, want := range []string{"Direct files", "News channels", "@id_bot", "@getidsbot", "/panel/sources/", "Telegram account", "General video", "Create mirror", "Subtitles", "Tailscale", "Add a bot", "/newbot", "does not offer a public ID", "You're using the default. Replace it here if you want your own."} {
 		if !strings.Contains(text, want) {
 			t.Errorf("the page lacks %s", want)
 		}

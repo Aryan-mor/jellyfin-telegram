@@ -51,10 +51,6 @@ do {
     Start-Sleep -Milliseconds 400
 } while ((Get-Date) -lt $deadline)
 
-if (Get-Command docker -ErrorAction SilentlyContinue) {
-    docker rm -f jellyfin-telegram-seerr jellyfin-telegram-fladder 2>$null | Out-Null
-}
-
 Write-Host "starting $exe"
 & $exe serve
 exit $LASTEXITCODE

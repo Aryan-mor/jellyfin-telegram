@@ -2,11 +2,11 @@ import { useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import {
-  Bot, Cable, CloudDownload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
+  Bot, Cable, CloudUpload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Menu, Moon, Newspaper,
   Radio, ScrollText, Send, Share2, Sun, Tv, UserRound,
 } from "lucide-react"
 import { toast } from "sonner"
-import { api, panelCode, pollingPaused } from "@/lib/api"
+import { api, panelCode, pausePolling, pollingPaused } from "@/lib/api"
 import { adoptServerLanguage, t, UiLanguageSelect, useUiLang } from "@/lib/i18n"
 import { Button, Sheet } from "@/components/ui"
 import { confirmDialog } from "@/components/widgets"
@@ -22,8 +22,7 @@ export type PanelState = {
   bots: { id: number; name: string; hint: string; ok: boolean; admin: boolean; connected: boolean; error?: string }[]
   addresses: { url: string; away: boolean }[]
   seerr: boolean
-  fladder: boolean
-  downloads?: Record<string, unknown> | null
+  pace?: Record<string, unknown> | null
   telegram_search: boolean
   mirrors?: { id: number; channel_id: number; title: string; bot_id: number; kinds: string[]; error: string; sent: number; username?: string }[]
   local: boolean
@@ -132,7 +131,7 @@ export function Shell() {
         {s?.sources && signed && <Nav to="/sources" label={t("Direct files")} icon={<Film className="size-4" />} />}
         {s?.sources && signed && <Nav to="/news" label={t("News channels")} icon={<Newspaper className="size-4" />} />}
         {s?.local && <Nav to="/local" label={t("Local files")} icon={<HardDrive className="size-4" />} />}
-        {s?.downloads && signed && <Nav to="/downloads" label={t("Torrents")} icon={<CloudDownload className="size-4" />} />}
+        {s?.pace && signed && <Nav to="/upload-pace" label={t("Upload pace")} icon={<CloudUpload className="size-4" />} />}
       </Group>
       <Group title={t("Access")}>
         <Nav to="/away" label={t("Away from home")} icon={<Globe className="size-4" />} />
@@ -175,7 +174,7 @@ export function Shell() {
           </div>
         )}
         <main className="mx-auto max-w-4xl space-y-4 p-4">
-          {state.isError && <p className="text-sm text-destructive">{(state.error as Error).message}</p>}
+          {state.isError && !installing && !restarting && <p className="text-sm text-destructive">{(state.error as Error).message}</p>}
           <Outlet />
         </main>
       </div>
@@ -183,7 +182,9 @@ export function Shell() {
   )
 }
 
-async function waitUntilBack() {
+// giveUpIfSteady stops waiting when the program never went away. A real failure
+// (download rejected, already installed) leaves it up. A restart takes it down first.
+async function waitUntilBack(giveUpIfSteady = false) {
   let sawDown = false
   for (let i = 0; i < 90; i++) {
     await new Promise((r) => setTimeout(r, 1000))
@@ -196,6 +197,7 @@ async function waitUntilBack() {
     }
     if (!up) sawDown = true
     else if (sawDown) return true
+    else if (giveUpIfSteady && i >= 4) return false
   }
   return false
 }
@@ -204,6 +206,7 @@ async function installUpdate(setBusy: (v: boolean) => void) {
   const ok = await confirmDialog(t("Install this update?"), t("Playback stops while the new version is installed. This usually takes under a minute."), t("Install update"), false)
   if (!ok) return
   setBusy(true)
+  pausePolling(true)
   try {
     await api("/panel/update", {})
     toast(t("Installing"))
@@ -214,8 +217,15 @@ async function installUpdate(setBusy: (v: boolean) => void) {
     toast.error(t("The program did not come back. Start it again from this computer."))
     setBusy(false)
   } catch (e) {
+    // The reply is often lost because the program restarts while the browser is still reading it.
+    if (await waitUntilBack(true)) {
+      location.reload()
+      return
+    }
     toast.error(e instanceof Error ? e.message : t("The update failed"))
     setBusy(false)
+  } finally {
+    pausePolling(false)
   }
 }
 
@@ -223,6 +233,7 @@ async function restartProgram(setBusy: (v: boolean) => void) {
   const ok = await confirmDialog(t("Restart now?"), t("Playback stops until the program is back. This usually takes under a minute."), t("Restart"), false)
   if (!ok) return
   setBusy(true)
+  pausePolling(true)
   try {
     await api("/panel/restart", {})
     toast(t("Restarting"))
@@ -233,8 +244,14 @@ async function restartProgram(setBusy: (v: boolean) => void) {
     toast.error(t("The program did not come back. Start it again from this computer."))
     setBusy(false)
   } catch (e) {
+    if (await waitUntilBack(true)) {
+      location.reload()
+      return
+    }
     toast.error(e instanceof Error ? e.message : t("Restart failed"))
     setBusy(false)
+  } finally {
+    pausePolling(false)
   }
 }
 

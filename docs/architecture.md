@@ -16,15 +16,13 @@
 | `internal/lang` | Language codes, names, scripts, encodings and text detection for any language |
 | `internal/managed` | Downloads a pinned Jellyfin build, runs it on loopback, completes its first-run wizard |
 | `internal/seerr` | Downloads a pinned Seerr bundle (Seerr and the Node it needs, built in the `seerr-bundles` repository), runs it as a child process and finishes its setup with that Jellyfin as the media server. No Docker |
-| `internal/fladder` | Runs the Fladder web client with this Jellyfin and Seerr already filled in |
-| `internal/front` | One port for streams, the setup page, the panel, Seerr under `/seerr/`, Fladder under `/fladder/`, and a reverse proxy to Jellyfin |
+| `internal/front` | One port for streams, the setup page, the panel, Seerr under `/seerr/`, and a reverse proxy to Jellyfin |
 | `internal/setup` | Browser wizard that writes `.env` after checking the bots against the channel |
 | `internal/panel` | Settings pages: channel, mirrors, bots, sources, local files, downloads |
 | `internal/webui` | Embedded built panel and setup pages. Scripts and CSS are served at `/ui/` |
 | `web/` | Vite and React source for those pages. `pnpm build` writes `internal/webui/dist`, which is committed so a Go build needs no Node |
 | `internal/tguser` | User-account sessions that post a finished download into the channel. Separate from the bot pool |
-| `internal/stack` | qBittorrent, Radarr, Sonarr, Bitmagnet and Postgres, started on demand and configured over their APIs |
-| `internal/autoupload` | Polls Radarr and Sonarr, uploads one file per session, and deletes the disk copy after a probe |
+| `internal/autoupload` | Uploads the local files a person chose, one file per session, and reads each back with a bot |
 | `internal/downloads` | Panel switch. A failure here is logged and does not stop playback |
 | `internal/tgsource` | Walks other Telegram channels with a signed-in account and forwards films and series into the library channel server side. Progress and what was copied live in the catalog |
 | `internal/newsfeed` | Watches a separate list of channels that post bot links, asks telegram-file-resolver to open each link, and forwards a video that passes the copy rules |
@@ -165,7 +163,7 @@ commands reach only one tab. Use a single tab when testing, or seeking appears b
 **Subtitle extraction.** When a client asks for an embedded text subtitle as a separate document,
 Jellyfin runs ffmpeg over the whole file. One 960 MiB MKV took 69 s unlimited. With an `Embed`
 subtitle profile, `PlaybackInfo` reports delivery `Embed`, gives no subtitle URL and starts no
-extraction, but Jellyfin Web and stock Fladder ask for `External`. See the subtitle archive below.
+extraction, but Jellyfin Web asks for `External`. See the subtitle archive below.
 
 **Remux and transcode.** ffmpeg reads as fast as it can, not at playback speed. Jellyfin's Throttle
 Transcodes setting does not help: its code requires a local input file, and a measured remux read
@@ -264,51 +262,6 @@ Measured with 4 real files, on Jellyfin 10.11.8:
 | Fetching all 33 tracks through Jellyfin afterwards | 3.6 s, 0 video blocks, 0 extractions |
 | Replacing the gateway token | 0 cache deletions, 0 extractions, old token refused |
 | Playing in Web with an embedded track selected | No extraction |
-
-## Downloads
-
-**Paused.** `config.DownloadsAvailable` is false, so the switch cannot be turned on and nothing in this section runs. The code stays for when it returns. Seerr no longer runs in Docker, so the stack's step that joins a Seerr container to its network would need rewriting first.
-
-Off by default. The panel turns it on only when at least one signed-in user is an admin who can post, Docker is installed, and the download folder is writable with enough free space. The stack runs in a goroutine after the player is already serving, and an error there is shown in the panel.
-
-qBittorrent, Radarr and Sonarr share one bind-mounted folder (`torrents/`, `media/movies`, `media/tv`) so an import can hardlink. Their databases stay on named volumes. Bitmagnet and Postgres share the Docker network `jellyfin-telegram`. Seerr reaches Radarr and Sonarr through the published loopback ports. `/radarr/` and `/sonarr/` are reverse-proxied on the same port as Jellyfin. qBittorrent's WebUI and Bitmagnet's HTTP port stay on loopback. The DHT port and qBittorrent's peer port are published, because otherwise nothing arrives.
-
-The uploader polls Radarr and Sonarr every minute. Each file is posted by one user session, under that session's own pace and daily cap. A bot then reads the message back and compares the size and the first and last block with the local file. The local file and the torrent are deleted only after the catalog row is probed, so Seerr still sees the title as available. A crash after the send is caught by searching the channel for the same name and size before posting again. That search runs once per interrupted file, never for a fresh one, and a failed search stops the upload instead of counting as "not found".
-
-Rules the uploader keeps:
-
-- **Nothing is deleted on a doubt.** A file already in the channel under the same name and size is still read back and compared. A real difference sets the row to `mismatch`, which nothing moves on from. A network error only retries.
-- **Size limits.** The cap is megabytes per minute of runtime in Radarr and Sonarr, so it is divided by 150 minutes for films and 60 for episodes, and it is rewritten whenever the largest account changes. A file that still exceeds what every account can send is marked `too_big` and stays on disk.
-- **The torrent is found from the grab history** before the file is deleted, and only a record naming that movie or episode counts. A file holding several episodes unmonitors all of them.
-- **The disk guard runs on every pass**, including when setting up the apps fails. It stops the torrents below the free-space minimum and later starts only those, remembered by a marker file in the download folder.
-- **Sessions reconnect** with a growing delay after a dropped connection, but not after a revoked session or a lost admin right. A panel request that arrives with forwarding headers is not treated as this computer.
-- **Missing titles are searched for again** every `DOWNLOADS_SEARCH_EVERY_MINUTES` (60), by the commands `MissingMoviesSearch` and `MissingEpisodeSearch`. Radarr and Sonarr search once when a title is added and afterwards read only the newest items of an indexer's feed. Bitmagnet adds hundreds of torrents a minute and learns of a release at an unpredictable time, so without the repeat a title it did not know yet would never be looked for again. It only runs while an account is ready to upload and the disk has room. Both commands were checked on the live servers.
-- **Bitmagnet is not a search engine.** It stores what it overhears on the DHT, so a search can only find torrents it has already seen. Recent releases are about three to six times as dense in its index as releases from the 2000s, and single episodes outnumber whole seasons. A film that is still in cinemas is not searched for at all while its minimum availability is `released`.
-- **Containers are removed when the program ends**, so nothing keeps downloading unwatched.
-
-Checked against live containers (`go test -tags live ./internal/stack` with `JFTG_LIVE_DIR` set): the five containers start, Radarr and Sonarr get a root folder, one download client, an enabled Bitmagnet indexer and the size caps, qBittorrent accepts `max_ratio=0`, a hardlink across the bind mount on Windows has two links, and a second or forced pass changes nothing. Two things only a real server showed: the quality definition update answers 202 and applies a moment later, and the default Ultra-HD profile allows nothing but 2160p, so only the profile Seerr uses is changed.
-
-End-to-end run on 2026-11-04 with Sintel (CC-BY, 129 MB) and one signed-in non-Premium account:
-Seerr request, Radarr, qBittorrent (web seed, about 20 s), import with a hardlink, upload at 8 MB/s
-(15 s), a bot reading back the first and last block (`verified`), the indexer, Jellyfin's probe, then
-cleanup. Afterwards Radarr had no file and was unmonitored, the torrent and the local file were gone,
-Jellyfin listed the film (14.8 min, h264, aac, a subtitle track), range reads through the gateway
-answered 206 at both ends, and Seerr showed it as available. Radarr removed the finished torrent
-itself after the import, so the program's own torrent deletion is a second safety net.
-
-Four more things only the live run showed:
-
-- A queue that goes quiet must say why. A file now carries "waiting: @account rests for 4m" when no
-  account can take it.
-- An upload cannot run under the context of the pass that started it. A pass lasts seconds and an
-  upload minutes, so every upload died with its pass. Uploads now have their own context, which ends
-  when the switch is turned off or the program stops.
-- Seerr's Node gives each connection attempt 250 ms. Reaching a published loopback port through
-  Docker Desktop is sometimes slower, so Seerr failed at random with an empty error, even towards
-  Jellyfin, and once stopped the whole program during setup. Seerr now runs with
-  `--no-network-family-autoselection` and reaches Radarr and Sonarr by container name over the
-  shared network. Its setup is retried five times.
-- Updating a server in Seerr must not send its id in the body. Seerr refuses it as read-only.
 
 ## Shared library
 
@@ -450,10 +403,6 @@ A signature proves who signed, not that the line is true. So an installation doe
 - Long sessions, where `FLOOD_PREMIUM_WAIT` may appear after tens of gigabytes.
 - A whole library. Extraction has run on 3 files.
 - The real upload speed of a user session, which may change the default pace.
-- A film found by Bitmagnet itself. Its index starts empty and no release has been found by search yet. The release in the end-to-end run below was handed to Radarr directly.
-- Series: Sonarr's import, season packs, a file holding two episodes, and `episode?episodeFileId=` on a real import. The film path is checked, the series path only has unit tests and request-shape checks.
 - A Premium account, a file larger than the account can send (`too_big`), flood waits, and long sessions.
 - A `mismatch` after a real corrupted upload. It has a unit test only.
-- Seerr, inside its container, reaching Radarr and Sonarr on the loopback ports through `host.docker.internal`.
 - A bot reading a Premium upload larger than 2 GB.
-- The download stack on Linux. It is built with `CGO_ENABLED=0`, and the containers are the same images.

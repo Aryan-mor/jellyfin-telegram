@@ -1,5 +1,5 @@
 // Package home is the personal library. A person posts in its channel, or syncs folders from
-// this computer. Torrents, news channels and other channels never write there.
+// this computer. News channels and other channels never write there.
 package home
 
 import (

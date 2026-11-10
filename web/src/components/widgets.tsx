@@ -192,8 +192,8 @@ export function LoginForm({ path, extra, onDone, resend }: { path: string; extra
 export function TelegramLoginDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenChange: (v: boolean) => void; onDone: () => void }) {
   useEffect(() => { pausePolling(open); return () => { if (open) pausePolling(false) } }, [open])
   return (
-    <DialogRoot open={open} onOpenChange={(v) => { if (!v) void api("/panel/downloads/login", { cancel: true }).catch(() => {}); onOpenChange(v) }}>
-      {open && <DialogContent title={t("Add account")}><LoginForm path="/panel/downloads/login" onDone={() => { onOpenChange(false); onDone() }} /></DialogContent>}
+    <DialogRoot open={open} onOpenChange={(v) => { if (!v) void api("/panel/accounts/login", { cancel: true }).catch(() => {}); onOpenChange(v) }}>
+      {open && <DialogContent title={t("Add account")}><LoginForm path="/panel/accounts/login" onDone={() => { onOpenChange(false); onDone() }} /></DialogContent>}
     </DialogRoot>
   )
 }

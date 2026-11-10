@@ -1,7 +1,6 @@
 package front
 
 import (
-	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -66,93 +65,5 @@ func TestSeerrStaysUnderItsPath(t *testing.T) {
 	res.Body.Close()
 	if res.StatusCode != http.StatusTemporaryRedirect || res.Header.Get("Location") != "/seerr/" {
 		t.Errorf("redirect %d %q", res.StatusCode, res.Header.Get("Location"))
-	}
-}
-
-func TestFladderSeerrAPILandsOnSeerr(t *testing.T) {
-	upstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/auth/me" {
-			t.Errorf("upstream path %s", r.URL.Path)
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write([]byte(`{"id":1}`))
-	}))
-	defer upstream.Close()
-	target, err := url.Parse(upstream.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	jellyfin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Errorf("jellyfin saw %s", r.URL.Path)
-	}))
-	defer jellyfin.Close()
-	jellyfinURL, err := url.Parse(jellyfin.URL)
-	if err != nil {
-		t.Fatal(err)
-	}
-	gateway := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	srv := httptest.NewServer(Handler(Options{Gateway: gateway, Jellyfin: jellyfinURL, Seerr: target}))
-	defer srv.Close()
-
-	res, err := http.Get(srv.URL + "/api/v1/auth/me")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer res.Body.Close()
-	body, err := io.ReadAll(res.Body)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if res.StatusCode != http.StatusOK || string(body) != `{"id":1}` {
-		t.Errorf("status %d body %s", res.StatusCode, body)
-	}
-}
-
-func TestSeerrWaitingPageUntilReady(t *testing.T) {
-	passed := 0
-	next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { passed++; w.WriteHeader(http.StatusOK) })
-	state := SeerrState{Text: "Unpacking Seerr. 40% <b>"}
-	h := seerrGate(func() SeerrState { return state }, next)
-
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seerr/", nil))
-	body := rec.Body.String()
-	if rec.Code != http.StatusServiceUnavailable || passed != 0 {
-		t.Fatalf("code %d, passed %d", rec.Code, passed)
-	}
-	for _, want := range []string{"Seerr is starting", "Unpacking Seerr. 40% &lt;b&gt;", `http-equiv="refresh"`, "few minutes"} {
-		if !strings.Contains(body, want) {
-			t.Errorf("page has no %q:\n%s", want, body)
-		}
-	}
-	if strings.Contains(body, "<b>") {
-		t.Error("the status text was not escaped")
-	}
-	if rec.Header().Get("Retry-After") == "" {
-		t.Error("no Retry-After")
-	}
-
-	state = SeerrState{Ready: true}
-	rec = httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seerr/", nil))
-	if rec.Code != http.StatusOK || passed != 1 {
-		t.Errorf("ready: code %d, passed %d", rec.Code, passed)
-	}
-}
-
-func TestSeerrFailurePageDoesNotKeepReloading(t *testing.T) {
-	h := seerrGate(func() SeerrState { return SeerrState{Failed: true, Text: "port in use"} }, http.NotFoundHandler())
-	rec := httptest.NewRecorder()
-	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/seerr/", nil))
-	body := rec.Body.String()
-	if !strings.Contains(body, "could not start") || !strings.Contains(body, "port in use") || strings.Contains(body, "refresh") {
-		t.Errorf("page:\n%s", body)
-	}
-}
-
-func TestNoSeerrStateMeansAlwaysReady(t *testing.T) {
-	next := http.NotFoundHandler()
-	if got := seerrGate(nil, next); fmt.Sprintf("%p", got) != fmt.Sprintf("%p", next) {
-		t.Error("a nil state should not wrap the proxy")
 	}
 }

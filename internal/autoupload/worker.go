@@ -6,46 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/diskspace"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
-
-// pausedMarker is a file in the download folder. It exists while this program has stopped the
-// torrents for lack of space, so it resumes only those, even after a restart.
-const pausedMarker = ".paused-by-jellyfin-telegram"
-
-// Item is one file Radarr or Sonarr has imported.
-type Item struct {
-	Kind       string
-	RemoteID   int
-	OwnerID    int
-	Path       string
-	Size       int64
-	FileName   string
-	Caption    string
-	DownloadID string
-}
-
-// Library is Radarr, Sonarr, qBittorrent and the Seerr scan.
-type Library interface {
-	List(ctx context.Context) ([]Item, error)
-	Scan(ctx context.Context) error
-	Unmonitor(ctx context.Context, item Item) error
-	DeleteFile(ctx context.Context, item Item) error
-	// DownloadID is the torrent that produced the file, or empty when history no longer says.
-	DownloadID(ctx context.Context, item Item) (string, error)
-	DeleteTorrent(ctx context.Context, hash string) error
-	Pause(ctx context.Context) error
-	Resume(ctx context.Context) error
-}
 
 // Sessions is the set of user accounts that can post.
 type Sessions interface {
@@ -63,25 +32,18 @@ type Verifier interface {
 	FetchBlock(ctx context.Context, messageID int, docID, block, size int64) ([]byte, error)
 }
 
-// Worker moves imported files onto the channel and deletes the local copy only after Jellyfin has probed it.
+// Worker moves the local files a person chose in the panel (catalog.KindLocal) onto the channel.
+// A file that is probed stays on disk, because only the person decides to delete it.
 type Worker struct {
 	Cat      *catalog.Catalog
-	Lib      Library
 	Sessions Sessions
 	Verify   Verifier
-	Dir      string
-	MinFree  uint64
 	Log      *slog.Logger
 	Now      func() time.Time
 	// Ctx is what an upload runs under. It outlives one pass, because a file takes longer than the
 	// pass that started it. It ends when the switch is turned off or the program stops. When nil,
 	// the context of the pass is used.
-	Ctx context.Context
-	// Local makes this worker handle only the files a person chose in the panel (catalog.KindLocal),
-	// and leave Radarr and Sonarr rows alone. The other worker does the reverse. A local file that is
-	// probed stays on disk, because only the person decides to delete it, and Lib is not used.
-	Local bool
-
+	Ctx      context.Context
 	inflight sync.Map
 }
 
@@ -108,37 +70,6 @@ func (w *Worker) now() time.Time {
 	return time.Now()
 }
 
-// Guard stops the torrents when the download folder is nearly full, and starts again only the
-// torrents it stopped. It runs even when the rest of a pass fails.
-func (w *Worker) Guard(ctx context.Context) {
-	if w.Dir == "" || w.MinFree == 0 || w.Lib == nil {
-		return
-	}
-	free, err := diskspace.Free(w.Dir)
-	if err != nil {
-		return
-	}
-	marker := filepath.Join(w.Dir, pausedMarker)
-	if free < w.MinFree {
-		if err := w.Lib.Pause(ctx); err != nil {
-			w.warn("cannot stop the torrents", err)
-			return
-		}
-		if err := os.WriteFile(marker, []byte("stopped for lack of space\n"), 0o600); err != nil {
-			w.warn("cannot write the pause marker", err)
-		}
-		return
-	}
-	if _, err := os.Stat(marker); err != nil {
-		return
-	}
-	if err := w.Lib.Resume(ctx); err != nil {
-		w.warn("cannot start the torrents again", err)
-		return
-	}
-	_ = os.Remove(marker)
-}
-
 func (w *Worker) warn(msg string, err error) {
 	if w.Log != nil {
 		w.Log.Warn(msg, "err", err)
@@ -147,22 +78,13 @@ func (w *Worker) warn(msg string, err error) {
 
 // RunOnce does a single pass. Uploads that are already running are left alone.
 func (w *Worker) RunOnce(ctx context.Context) error {
-	if !w.Local {
-		w.Guard(ctx)
-		if w.Lib == nil {
-			return nil
-		}
-		if err := w.importItems(ctx); err != nil {
-			return err
-		}
-	}
 	rows, err := w.Cat.ListUploads(ctx)
 	if err != nil {
 		return err
 	}
 	var ready []catalog.Upload
 	for _, row := range rows {
-		if row.Kind == catalog.KindHome || (row.Kind == catalog.KindLocal) != w.Local {
+		if row.Kind != catalog.KindLocal {
 			continue
 		}
 		if err := w.advance(ctx, row); err != nil {
@@ -173,54 +95,6 @@ func (w *Worker) RunOnce(ctx context.Context) error {
 		}
 	}
 	w.dispatch(ctx, ready)
-	return nil
-}
-
-// importItems records every file Radarr and Sonarr have imported.
-func (w *Worker) importItems(ctx context.Context) error {
-	items, err := w.Lib.List(ctx)
-	if err != nil {
-		return err
-	}
-	for _, item := range items {
-		prev, had, err := w.Cat.FindUpload(ctx, item.Kind, item.RemoteID)
-		if err != nil {
-			return err
-		}
-		state := catalog.UploadQueued
-		if w.Sessions != nil {
-			if cap := w.Sessions.LargestCap(); cap > 0 && item.Size > cap {
-				state = catalog.UploadTooBig
-			}
-		}
-		got, err := w.Cat.UpsertUpload(ctx, catalog.Upload{
-			Kind: item.Kind, RemoteID: item.RemoteID, OwnerID: item.OwnerID,
-			Path: item.Path, Size: item.Size, FileName: item.FileName, Caption: item.Caption,
-			State: state, DownloadID: item.DownloadID,
-		})
-		if err != nil {
-			return err
-		}
-		if had && prev.State == catalog.UploadCleaned {
-			// A cleaned file is gone from Radarr or Sonarr. Seeing it again means either the delete
-			// did not happen, or a reset database reused the id for a different file.
-			next, message := catalog.UploadQueued, 0
-			if prev.FileName == item.FileName && prev.Size == item.Size {
-				next, message = catalog.UploadProbed, prev.MessageID
-			}
-			if err := w.Cat.SetUpload(ctx, got.ID, next, message, 0, ""); err != nil {
-				return err
-			}
-			continue
-		}
-		if w.Sessions != nil {
-			if cap := w.Sessions.LargestCap(); cap > 0 && got.Size > cap && (got.State == catalog.UploadQueued || got.State == catalog.UploadFailed) {
-				if err := w.Cat.SetUpload(ctx, got.ID, catalog.UploadTooBig, 0, 0, "larger than every signed-in account can send"); err != nil {
-					return err
-				}
-			}
-		}
-	}
 	return nil
 }
 
@@ -236,11 +110,6 @@ func (w *Worker) advance(ctx context.Context, row catalog.Upload) error {
 		return w.markIndexed(ctx, row)
 	case catalog.UploadIndexed:
 		return w.markProbed(ctx, row)
-	case catalog.UploadProbed:
-		if w.Local {
-			return nil
-		}
-		return w.cleanup(ctx, row)
 	}
 	return nil
 }
@@ -452,29 +321,4 @@ func (w *Worker) markProbed(ctx context.Context, row catalog.Upload) error {
 		return nil
 	}
 	return w.Cat.SetUpload(ctx, row.ID, catalog.UploadProbed, row.MessageID, 0, "")
-}
-
-func (w *Worker) cleanup(ctx context.Context, row catalog.Upload) error {
-	item := Item{Kind: row.Kind, RemoteID: row.RemoteID, OwnerID: row.OwnerID, Path: row.Path, DownloadID: row.DownloadID}
-	// The torrent is found before the file is deleted, because the file is what ties them together.
-	hash := row.DownloadID
-	if hash == "" {
-		var err error
-		if hash, err = w.Lib.DownloadID(ctx, item); err != nil {
-			return err
-		}
-	}
-	if err := w.Lib.Scan(ctx); err != nil {
-		return err
-	}
-	if err := w.Lib.Unmonitor(ctx, item); err != nil {
-		return err
-	}
-	if err := w.Lib.DeleteFile(ctx, item); err != nil {
-		return err
-	}
-	if err := w.Lib.DeleteTorrent(ctx, hash); err != nil {
-		return err
-	}
-	return w.Cat.SetUpload(ctx, row.ID, catalog.UploadCleaned, row.MessageID, 0, "")
 }

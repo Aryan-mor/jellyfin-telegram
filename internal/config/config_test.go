@@ -18,8 +18,8 @@ func clearEnv(t *testing.T) {
 	for _, e := range os.Environ() {
 		key, _, _ := strings.Cut(e, "=")
 		if strings.HasPrefix(key, "TELEGRAM_") || strings.HasPrefix(key, "GATEWAY_") ||
-			strings.HasPrefix(key, "JELLYFIN_") || strings.HasPrefix(key, "SEERR_") || strings.HasPrefix(key, "FLADDER_") || strings.HasPrefix(key, "SUBTITLE") ||
-			strings.HasPrefix(key, "UPLOAD_") || strings.HasPrefix(key, "DOWNLOADS_") || strings.HasPrefix(key, "BITMAGNET_") ||
+			strings.HasPrefix(key, "JELLYFIN_") || strings.HasPrefix(key, "SEERR_") || strings.HasPrefix(key, "SUBTITLE") ||
+			strings.HasPrefix(key, "UPLOAD_") ||
 			key == "FFPROBE_PATH" || key == "LIBRARY_DIR" || key == "DATA_DIR" ||
 			key == "CACHE_MAX_GB" || key == "SYNC_INTERVAL_SECONDS" ||
 			key == "SIGNED_LIBRARY" || key == "INBOX_DELETE_ORIGINALS" || key == "TELEGRAM_SEARCH" || key == "UI_LANGUAGE" ||
@@ -70,14 +70,11 @@ func TestLoadValid(t *testing.T) {
 	if c.JellyfinEnabled() {
 		t.Error("jellyfin should be off")
 	}
-	if !c.JellyfinManaged || c.SeerrManaged || c.FladderManaged {
-		t.Error("a private Jellyfin is the default, Seerr and Fladder are opt-in")
+	if !c.JellyfinManaged || c.SeerrManaged {
+		t.Error("a private Jellyfin is the default, Seerr is opt-in")
 	}
-	if c.DownloadsEnabled || c.UploadMBPerSec != 8 || c.UploadDailyGB != 50 || c.DownloadsMinFreeGB != 20 || c.BitmagnetDBMaxGB != 40 {
-		t.Errorf("download defaults = %+v", c)
-	}
-	if c.DownloadsDir != filepath.Join("./data", "downloads") {
-		t.Errorf("downloads dir = %s", c.DownloadsDir)
+	if c.UploadMBPerSec != 8 || c.UploadDailyGB != 50 {
+		t.Errorf("upload defaults = %+v", c)
 	}
 	if !c.TelegramSearch {
 		t.Error("telegram search is on unless turned off")
@@ -170,37 +167,25 @@ func TestEnsureGatewayTokenPersists(t *testing.T) {
 	}
 }
 
-func TestSeerrAndFladderAreOptIn(t *testing.T) {
+func TestSeerrIsOptIn(t *testing.T) {
 	c, err := load(t, validEnv+"SEERR_MANAGED=true\n")
-	if err != nil || !c.JellyfinManaged || !c.SeerrManaged || c.FladderManaged {
+	if err != nil || !c.JellyfinManaged || !c.SeerrManaged {
 		t.Fatalf("seerr only: %+v, %v", c, err)
 	}
 	c, err = load(t, validEnv+"JELLYFIN_MANAGED=false\nSEERR_MANAGED=true\nFLADDER_MANAGED=true\nGATEWAY_PUBLIC_URL=http://127.0.0.1:8097\n")
-	if err != nil || c.JellyfinManaged || c.SeerrManaged || c.FladderManaged {
+	if err != nil || c.JellyfinManaged || c.SeerrManaged {
 		t.Fatalf("no server: %+v, %v", c, err)
 	}
 	c, err = load(t, validEnv+`JELLYFIN_URL=http://127.0.0.1:8096
 JELLYFIN_API_KEY=abc
 GATEWAY_PUBLIC_URL=http://127.0.0.1:8097
 SEERR_MANAGED=true
-FLADDER_MANAGED=true
 `)
-	if err != nil || c.JellyfinManaged || !c.SeerrManaged || !c.FladderManaged {
-		t.Fatalf("existing Jellyfin can still get Seerr and Fladder: %+v, %v", c, err)
+	if err != nil || c.JellyfinManaged || !c.SeerrManaged {
+		t.Fatalf("existing Jellyfin can still get Seerr: %+v, %v", c, err)
 	}
 	if err := c.ValidateServe(); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestDownloadsNeedSeerr(t *testing.T) {
-	c, err := load(t, validEnv+"DOWNLOADS_ENABLED=true\n")
-	if err != nil || c.DownloadsEnabled {
-		t.Fatalf("downloads without seerr: %+v, %v", c, err)
-	}
-	c, err = load(t, validEnv+"SEERR_MANAGED=true\nDOWNLOADS_ENABLED=true\n")
-	if err != nil || c.DownloadsEnabled != DownloadsAvailable {
-		t.Fatalf("downloads with seerr: %+v, %v", c, err)
 	}
 }
 
@@ -230,18 +215,5 @@ func TestUILanguage(t *testing.T) {
 	c, err = load(t, validEnv+"UI_LANGUAGE=klingon\n")
 	if err != nil || c.UILanguage != "" {
 		t.Errorf("unknown language should be ignored: %q, %v", c.UILanguage, err)
-	}
-}
-
-func TestSearchIntervalDefaultAndLimit(t *testing.T) {
-	t.Setenv("DOWNLOADS_SEARCH_EVERY_MINUTES", "")
-	cfg, err := Load(filepath.Join(t.TempDir(), "none.env"))
-	_ = err
-	if cfg.DownloadsSearchEveryMinutes != 60 {
-		t.Errorf("default %d, want 60", cfg.DownloadsSearchEveryMinutes)
-	}
-	t.Setenv("DOWNLOADS_SEARCH_EVERY_MINUTES", "-5")
-	if _, err := Load(filepath.Join(t.TempDir(), "none.env")); err == nil || !strings.Contains(err.Error(), "DOWNLOADS_SEARCH_EVERY_MINUTES") {
-		t.Errorf("a negative interval was accepted: %v", err)
 	}
 }

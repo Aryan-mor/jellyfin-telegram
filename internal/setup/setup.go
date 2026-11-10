@@ -33,11 +33,8 @@ type Values struct {
 	UILanguage  string `json:"ui_language"`
 	JellyfinURL string `json:"jellyfin_url"`
 	JellyfinKey string `json:"jellyfin_key"`
-	// Fladder, Seerr and Downloads are the optional parts. Downloads is part of Seerr, so asking
-	// for it turns Seerr on too.
-	Fladder   bool `json:"fladder"`
-	Seerr     bool `json:"seerr"`
-	Downloads bool `json:"downloads"`
+	// Seerr is the optional request app.
+	Seerr bool `json:"seerr"`
 	// Group turns on the shared library: new files are posted again with a signed caption.
 	Group bool `json:"group"`
 	// TelegramSearch looks up a requested title on Telegram and copies a file it finds.
@@ -88,8 +85,6 @@ type Status struct {
 	Password string   `json:"password,omitempty"`
 	// Seerr is true when requests are served under /seerr/.
 	Seerr bool `json:"seerr,omitempty"`
-	// Fladder is true when the web client is served under /fladder/.
-	Fladder bool `json:"fladder,omitempty"`
 }
 
 // statusResponse is what the page polls: the status and the log so far.
@@ -234,7 +229,9 @@ func (w *Wizard) Waiting() http.Handler {
 			webui.Assets().ServeHTTP(rw, r)
 			return
 		}
-		http.Error(rw, "jellyfin-telegram is starting. The address to set it up is on its console.", http.StatusServiceUnavailable)
+		writeJSON(rw, http.StatusServiceUnavailable, map[string]string{
+			"error": "The program is still starting. Wait a moment.",
+		})
 	})
 }
 
@@ -350,9 +347,7 @@ func (w *Wizard) handleSave(rw http.ResponseWriter, r *http.Request) {
 		"SUBTITLE_LANGUAGE":      d.language,
 		"JELLYFIN_URL":           strings.TrimRight(strings.TrimSpace(v.JellyfinURL), "/"),
 		"JELLYFIN_API_KEY":       strings.TrimSpace(v.JellyfinKey),
-		"SEERR_MANAGED":          fmt.Sprint(v.Seerr || v.Downloads),
-		"FLADDER_MANAGED":        fmt.Sprint(v.Fladder),
-		"DOWNLOADS_ENABLED":      fmt.Sprint(v.Downloads),
+		"SEERR_MANAGED":          fmt.Sprint(v.Seerr),
 		"SIGNED_LIBRARY":         fmt.Sprint(v.Group),
 		"TELEGRAM_SEARCH":        fmt.Sprint(v.TelegramSearch),
 		"INBOX_DELETE_ORIGINALS": "false",

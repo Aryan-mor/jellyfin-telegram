@@ -21,11 +21,6 @@ import (
 )
 
 // Config is the full service configuration.
-// DownloadsAvailable is false while the torrent download chain is paused. That chain runs in
-// Docker, and this program is meant to need nothing but itself. Its code stays, so turning this on
-// brings it back. Nothing starts and no Docker is looked for while it is false.
-const DownloadsAvailable = false
-
 type Config struct {
 	APIID     int
 	APIHash   string
@@ -68,30 +63,12 @@ type Config struct {
 	// SeerrManaged means this program runs Seerr against the configured Jellyfin.
 	// It is off until SEERR_MANAGED=true, and works with a Jellyfin you already run too.
 	SeerrManaged bool
-	// FladderManaged means this program runs the Fladder web client, with Seerr filled in when
-	// Seerr is on. It is off until FLADDER_MANAGED=true.
-	FladderManaged bool
 
 	// LocalMediaDirs are folders of videos already on this computer. The panel lists them and uploads
 	// the ones a person chooses. Nothing is uploaded or deleted without that choice.
 	LocalMediaDirs []string
 	// HomeMediaDirs are folders synced only into the personal channel, and only when a person asks.
 	HomeMediaDirs []string
-
-	// DownloadsEnabled turns on Radarr, Sonarr, qBittorrent, Bitmagnet and the channel uploader.
-	// It needs Seerr, stays off until a person turns it on, and only works once a healthy admin
-	// session exists.
-	DownloadsEnabled bool
-	// DownloadsDir is the bind-mounted volume shared by qBittorrent, Radarr and Sonarr.
-	// Empty resolves to DATA_DIR/downloads.
-	DownloadsDir string
-	// DownloadsMinFreeGB pauses qBittorrent when the volume has less than this much free.
-	DownloadsMinFreeGB int
-	// DownloadsSearchEveryMinutes is how often Radarr and Sonarr look again for what is still missing.
-	// Zero turns the repeat off.
-	DownloadsSearchEveryMinutes int
-	// BitmagnetDBMaxGB stops the DHT crawler once Postgres reaches this size. Search stays on.
-	BitmagnetDBMaxGB int
 
 	// Upload limits apply to each user session. Zero MB/s means no speed cap.
 	// UploadHours is empty for all day, or a window such as 01-08.
@@ -305,7 +282,6 @@ func Load(envPath string) (Config, error) {
 	c.JellyfinManaged = c.JellyfinURL == "" && !strings.EqualFold(get("JELLYFIN_MANAGED", "true"), "false")
 	withJellyfin := c.JellyfinManaged || c.JellyfinURL != ""
 	c.SeerrManaged = withJellyfin && strings.EqualFold(get("SEERR_MANAGED", "false"), "true")
-	c.FladderManaged = withJellyfin && strings.EqualFold(get("FLADDER_MANAGED", "false"), "true")
 	if (c.JellyfinURL == "") != (c.JellyfinAPIKey == "") {
 		fail("set both JELLYFIN_URL and JELLYFIN_API_KEY, or neither")
 	}
@@ -319,25 +295,6 @@ func Load(envPath string) (Config, error) {
 		if dir = strings.TrimSpace(dir); dir != "" {
 			c.LocalMediaDirs = append(c.LocalMediaDirs, dir)
 		}
-	}
-	// Downloads are part of Seerr: it is what asks Radarr and Sonarr for a title. They are paused
-	// for now, see DownloadsAvailable.
-	c.DownloadsEnabled = DownloadsAvailable && c.SeerrManaged && strings.EqualFold(get("DOWNLOADS_ENABLED", "false"), "true")
-	c.DownloadsDir = get("DOWNLOADS_DIR", "")
-	if c.DownloadsDir == "" {
-		c.DownloadsDir = filepath.Join(c.DataDir, "downloads")
-	}
-	c.DownloadsMinFreeGB = getInt("DOWNLOADS_MIN_FREE_GB", 20, fail)
-	if c.DownloadsMinFreeGB < 0 {
-		fail("DOWNLOADS_MIN_FREE_GB must not be negative")
-	}
-	c.DownloadsSearchEveryMinutes = getInt("DOWNLOADS_SEARCH_EVERY_MINUTES", 60, fail)
-	if c.DownloadsSearchEveryMinutes < 0 {
-		fail("DOWNLOADS_SEARCH_EVERY_MINUTES must not be negative")
-	}
-	c.BitmagnetDBMaxGB = getInt("BITMAGNET_DB_MAX_GB", 40, fail)
-	if c.BitmagnetDBMaxGB < 0 {
-		fail("BITMAGNET_DB_MAX_GB must not be negative")
 	}
 	c.UploadMBPerSec = getInt("UPLOAD_MB_PER_SEC", 8, fail)
 	c.UploadRestMinutes = getInt("UPLOAD_REST_MINUTES", 5, fail)

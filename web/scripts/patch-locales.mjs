@@ -7,11 +7,9 @@ const files = {
   en: "web/src/locales/en.json",
 }
 
-const extra = "Torrents connect this computer to strangers and can be illegal where you live."
 const patch = {
-  en: { [extra]: extra },
+  en: {},
   fa: {
-    [extra]: "تورنت این رایانه را به غریبه‌ها وصل می‌کند و ممکن است جایی که زندگی می‌کنید غیرقانونی باشد.",
     "The setup page and the panel use this language. You can change it later in the panel.": "صفحهٔ راه‌اندازی و پنل از این زبان استفاده می‌کنند. بعداً می‌توانید آن را در پنل عوض کنید.",
     "First-time setup": "راه‌اندازی اولیه",
     "Connect Telegram": "اتصال به Telegram",
@@ -86,7 +84,6 @@ const patch = {
     "Accounts": "حساب‌ها",
     "Bots": "ربات‌ها",
     "Away from home": "بیرون از خانه",
-    "Torrents": "تورنت",
     "Direct files": "فایل مستقیم",
     "News channels": "کانال‌های خبر",
     "Local files": "فایل‌های محلی",
@@ -96,7 +93,6 @@ const patch = {
     "Sign out": "خروج",
   },
   de: {
-    [extra]: "Torrents verbinden diesen Computer mit Fremden und können dort, wo du wohnst, illegal sein.",
     "The setup page and the panel use this language. You can change it later in the panel.": "Die Einrichtungsseite und das Panel nutzen diese Sprache. Du kannst sie später im Panel ändern.",
     "Connect Telegram": "Telegram verbinden",
     "Your videos live in a private Telegram channel, and bots read them for playback.": "Deine Videos liegen in einem privaten Telegram-Kanal, und Bots lesen sie für die Wiedergabe.",
@@ -138,11 +134,9 @@ const patch = {
     "Personal videos and photos. They get their own Telegram channel, and a Jellyfin library called Home Videos and Photos.": "Persönliche Videos und Fotos. Sie bekommen einen eigenen Telegram-Kanal und eine Jellyfin-Bibliothek namens Home Videos and Photos.",
     "Pick every language to keep. The first one is preferred; drag or use the arrows to change the order. Leave none to skip subtitles.": "Wähl jede Sprache, die bleiben soll. Die erste wird bevorzugt. Zieh sie oder nutz die Pfeile für die Reihenfolge. Ohne Auswahl gibt es keine Untertitel.",
     "The API ID and API hash identify this program to Telegram. They are not the bot token.": "API-ID und API-Hash weisen dieses Programm bei Telegram aus. Sie sind nicht das Bot-Token.",
-    "Torrents connect this computer to strangers and can be illegal where you live. Your address is visible to other people in the swarm. Leave this off unless you accept that.": "Torrents verbinden diesen Computer mit Fremden und können dort, wo du wohnst, illegal sein. Deine Adresse sehen andere im Schwarm. Lass das aus, wenn du das nicht willst.",
     "You're using the default. Replace it here if you want your own.": "Du nutzt die Vorgabe. Ersetz sie hier, wenn du eine eigene willst.",
   },
   tr: {
-    [extra]: "Torrent bu bilgisayarı yabancılara bağlar ve yaşadığınız yerde yasa dışı olabilir.",
     "Connect Telegram": "Telegram'a bağlan",
     "Your videos live in a private Telegram channel, and bots read them for playback.": "Videolarınız özel bir Telegram kanalında durur ve botlar oynatmak için onları okur.",
     "Telegram details": "Telegram bilgileri",

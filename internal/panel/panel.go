@@ -1,5 +1,5 @@
 // Package panel is the page for a server that is already running. It edits the Telegram
-// settings, links to Jellyfin, Seerr and Fladder, and explains how to open Jellyfin from
+// settings, links to Jellyfin and Seerr, and explains how to open Jellyfin from
 // another network.
 package panel
 
@@ -50,15 +50,14 @@ type Options struct {
 	// SameChannel refuses a different channel once the library has files, because the .strm
 	// files would then point at the wrong messages. Nil allows any channel.
 	SameChannel func(channel int64) error
-	// Seerr and Fladder are true when those apps are served on this gateway.
-	Seerr   bool
-	Fladder bool
+	// Seerr is true when it is served on this gateway.
+	Seerr bool
 	// Accounts lists how to sign in to each app that runs here. It may be nil.
 	Accounts func() []Account
-	// Downloads reports the automatic download stack. Nil hides that tab's actions.
-	Downloads func(context.Context) (any, error)
-	// DownloadDo runs one panel action: login, logout, enable or pace.
-	DownloadDo func(r *http.Request, action string, body map[string]any) (any, error)
+	// Pace reports the default upload pace of the Telegram accounts. Nil leaves it out.
+	Pace func(context.Context) (any, error)
+	// AccountDo runs one account action: login, logout or pace.
+	AccountDo func(r *http.Request, action string, body map[string]any) (any, error)
 	// Local reports the videos already on this computer. Nil hides the Local files tab.
 	Local func(context.Context) (any, error)
 	// LocalDo runs one action of that tab: scan, folder, upload, cancel, delete or delete_synced.
@@ -129,10 +128,9 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/settings", p.guard(p.handleSettings))
 	mux.HandleFunc("POST /panel/ui-language", p.guard(p.handleUILanguage))
 	mux.HandleFunc("POST /panel/bots", p.guard(p.handleBots))
-	mux.HandleFunc("POST /panel/automation", p.guard(p.handleAutomation))
-	mux.HandleFunc("POST /panel/downloads/login", p.guard(p.handleDownloadLogin))
-	mux.HandleFunc("POST /panel/downloads/logout", p.guard(p.handleDownloadLogout))
-	mux.HandleFunc("POST /panel/downloads/pace", p.guard(p.handleDownloadPace))
+	mux.HandleFunc("POST /panel/accounts/login", p.guard(p.handleAccountLogin))
+	mux.HandleFunc("POST /panel/accounts/logout", p.guard(p.handleAccountLogout))
+	mux.HandleFunc("POST /panel/accounts/pace", p.guard(p.handleAccountPace))
 	mux.HandleFunc("GET /panel/local", p.guard(p.handleLocal))
 	mux.HandleFunc("POST /panel/local/{action}", p.guard(p.handleLocalAction))
 	mux.HandleFunc("GET /panel/home", p.guard(p.handleHome))
@@ -178,7 +176,6 @@ var pagePaths = map[string]struct{}{
 	"/panel/sources":           {},
 	"/panel/news":              {},
 	"/panel/local":             {},
-	"/panel/downloads":         {},
 	"/panel/away":              {},
 }
 
@@ -302,8 +299,7 @@ type state struct {
 	Bots           []botView `json:"bots"`
 	Addresses      []address `json:"addresses"`
 	Seerr          bool      `json:"seerr"`
-	Fladder        bool      `json:"fladder"`
-	Downloads      any       `json:"downloads,omitempty"`
+	Pace           any       `json:"pace,omitempty"`
 	TelegramSearch bool      `json:"telegram_search"`
 	Mirrors        any       `json:"mirrors,omitempty"`
 	Local          bool      `json:"local"`
@@ -354,12 +350,9 @@ func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
-	if p.o.Downloads != nil {
-		d, err := p.o.Downloads(r.Context())
-		if err != nil {
-			s.Downloads = map[string]any{"error": err.Error()}
-		} else {
-			s.Downloads = d
+	if p.o.Pace != nil {
+		if d, err := p.o.Pace(r.Context()); err == nil {
+			s.Pace = d
 		}
 	}
 	if p.o.Mirrors != nil {
@@ -399,47 +392,29 @@ func (p *panel) handleForumAction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, out)
 }
 
-func (p *panel) handleAutomation(w http.ResponseWriter, r *http.Request) {
-	if p.o.DownloadDo == nil {
-		writeError(w, http.StatusNotFound, "downloads are not available")
-		return
-	}
-	var body map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-		writeError(w, http.StatusBadRequest, "bad request")
-		return
-	}
-	out, err := p.o.DownloadDo(r, "enable", body)
-	if err != nil {
-		writeError(w, http.StatusBadRequest, err.Error())
-		return
-	}
-	writeJSON(w, http.StatusOK, out)
-}
-
-func (p *panel) handleDownloadLogin(w http.ResponseWriter, r *http.Request) {
+func (p *panel) handleAccountLogin(w http.ResponseWriter, r *http.Request) {
 	if !setup.TrustedClient(r) {
 		writeError(w, http.StatusForbidden, "Sign in to a Telegram account from this computer or over Tailscale. The panel is plain HTTP, and this step gives full access to the account.")
 		return
 	}
-	p.downloadAction(w, r, "login")
+	p.accountAction(w, r, "login")
 }
 
-func (p *panel) handleDownloadLogout(w http.ResponseWriter, r *http.Request) {
+func (p *panel) handleAccountLogout(w http.ResponseWriter, r *http.Request) {
 	if !setup.TrustedClient(r) {
 		writeError(w, http.StatusForbidden, "Sign out of a Telegram account from this computer or over Tailscale.")
 		return
 	}
-	p.downloadAction(w, r, "logout")
+	p.accountAction(w, r, "logout")
 }
 
-func (p *panel) handleDownloadPace(w http.ResponseWriter, r *http.Request) {
-	p.downloadAction(w, r, "pace")
+func (p *panel) handleAccountPace(w http.ResponseWriter, r *http.Request) {
+	p.accountAction(w, r, "pace")
 }
 
-func (p *panel) downloadAction(w http.ResponseWriter, r *http.Request, action string) {
-	if p.o.DownloadDo == nil {
-		writeError(w, http.StatusNotFound, "downloads are not available")
+func (p *panel) accountAction(w http.ResponseWriter, r *http.Request, action string) {
+	if p.o.AccountDo == nil {
+		writeError(w, http.StatusNotFound, "Telegram accounts are not available")
 		return
 	}
 	var body map[string]any
@@ -447,7 +422,7 @@ func (p *panel) downloadAction(w http.ResponseWriter, r *http.Request, action st
 		writeError(w, http.StatusBadRequest, "bad request")
 		return
 	}
-	out, err := p.o.DownloadDo(r, action, body)
+	out, err := p.o.AccountDo(r, action, body)
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -986,7 +961,7 @@ func (p *panel) snapshot() (state, error) {
 			live[b.ID] = b
 		}
 	}
-	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, Bots: []botView{}, Seerr: p.o.Seerr, Fladder: p.o.Fladder, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
+	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, Bots: []botView{}, Seerr: p.o.Seerr, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
 	// The API this build ships with is not a value the person chose. The panel says "default"
 	// and never sends that id, even when only the hash was replaced.
 	if defID, defHash, ok := config.DefaultAPI(); ok && cur.apiID == defID && cur.hash == defHash {

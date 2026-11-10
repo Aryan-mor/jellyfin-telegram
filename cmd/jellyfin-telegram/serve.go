@@ -23,9 +23,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/downloads"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/fladder"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/home"
@@ -44,7 +42,6 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/seerr"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/stack"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
@@ -254,18 +251,6 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		jellyfinForSeerr <- jellyfinReady{cfg: cfg, creds: creds}
 	}
 
-	var fladderTarget *url.URL
-	if cfg.FladderManaged {
-		base, err := startFladder(ctx, cfg, wizard, log, &child, armDone)
-		if err != nil {
-			return err
-		}
-		fladderTarget, err = url.Parse(base)
-		if err != nil {
-			return err
-		}
-	}
-
 	var homeCat *catalog.Catalog
 	var homeIdx *indexer.Indexer
 	if cfg.HomeChannelID != 0 {
@@ -307,7 +292,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		users.SetJournal(journal)
 	}
 	personal := startHome(cfg, envPath, cat, users, log)
-	dl := startDownloads(cfg, envPath, cat, pool, users, seerrTarget, log)
+	accounts := newAccountControl(cfg, envPath, users)
 	local := startLocal(cfg, envPath, cat, pool, users, log)
 	sources := startSources(cfg, cat, users)
 	news := startNews(ctx, cfg, cat, users, sources, log)
@@ -328,19 +313,14 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	hub := newGroupHub(ctx, log, cfg.SignedLibrary, func(ctx context.Context) (*intake.Service, error) {
 		return openGroup(ctx, cfg, pool, cat, users, sources, news, lib, log)
 	})
-	radarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.RadarrPort))
-	sonarrURL, _ := url.Parse("http://127.0.0.1:" + strconv.Itoa(stack.SonarrPort))
 	options := front.Options{
 		Gateway: gw,
 		Setup:   wizard.Handler(),
-		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, fladderTarget != nil, dl, users, local, personal, sources, news, hub, journal, channelIndex,
-			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil, fladderTarget != nil) }),
+		Panel: settingsPanel(envPath, cfg.DataDir, wizard.Code(), pool, cat, cfg.ChannelID, cfg.GatewayListen, log, seerrTarget != nil, accounts, users, local, personal, sources, news, hub, journal, channelIndex,
+			func() []panel.Account { return signInDetails(cfg, creds, seerrTarget != nil) }),
 		StreamBase: streamBase,
 		Seerr:      seerrTarget,
 		SeerrState: seerrState,
-		Fladder:    fladderTarget,
-		Radarr:     radarrURL,
-		Sonarr:     sonarrURL,
 		UI:         webui.Assets(),
 	}
 	if cfg.JellyfinURL != "" {
@@ -351,9 +331,6 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		options.Jellyfin = target
 	}
 	entry.Set(front.Handler(options))
-	if dl != nil {
-		go dl.Run(ctx)
-	}
 	go local.Run(ctx)
 	go personal.Run(ctx)
 	if sources != nil {
@@ -403,7 +380,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 
 	addresses := reachableAddresses(cfg.GatewayListen)
 	wizard.Logf("Everything is ready")
-	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password, Seerr: seerrTarget != nil, Fladder: fladderTarget != nil})
+	wizard.SetStatus(setup.Status{Ready: true, URLs: addresses, User: creds.User, Password: creds.Password, Seerr: seerrTarget != nil})
 	fmt.Printf("\nJellyfin is ready at:\n")
 	for _, a := range addresses {
 		fmt.Printf("    %s\n", a)
@@ -414,12 +391,6 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	if seerrTarget != nil {
 		fmt.Printf("\nSeerr is at the same addresses, under /seerr/\n")
 		fmt.Printf("Sign in there with the same Jellyfin user.\n")
-	}
-	if fladderTarget != nil {
-		fmt.Printf("\nFladder is at the same addresses, under /fladder/\n")
-		if seerrTarget != nil {
-			fmt.Printf("Seerr is already filled in.\n")
-		}
 	}
 	fmt.Printf("\nSettings panel:\n    %s/panel\n\n", cfg.LoopbackURL())
 	if setupConsole {
@@ -473,8 +444,8 @@ func uploadPace(cfg config.Config) tguser.Pace {
 	}
 }
 
-// startUsers connects the Telegram accounts a person signed in to. Downloads and the local files tab
-// share them, so one account never sends two files at once. It returns nil when they cannot start.
+// startUsers connects the Telegram accounts a person signed in to. The local files tab and the
+// other tools share them, so one account never sends two files at once. It returns nil when they cannot start.
 func startUsers(ctx context.Context, cfg config.Config, log *slog.Logger) *tguser.Manager {
 	users, err := tguser.New(filepath.Join(cfg.DataDir, "users"), cfg.APIID, cfg.APIHash, cfg.ChannelID, uploadPace(cfg), log)
 	if err != nil {
@@ -495,7 +466,7 @@ func startHome(cfg config.Config, envPath string, cat *catalog.Catalog, users *t
 	if users != nil {
 		svc.Sender = users
 	}
-	for _, dir := range []string{cfg.LibraryDir, cfg.DownloadsDir, cfg.DataDir} {
+	for _, dir := range []string{cfg.LibraryDir, cfg.DataDir} {
 		if abs, err := filepath.Abs(dir); err == nil {
 			svc.Exclude = append(svc.Exclude, abs)
 		}
@@ -506,80 +477,28 @@ func startHome(cfg config.Config, envPath string, cat *catalog.Catalog, users *t
 func startLocal(cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, log *slog.Logger) *localmedia.Service {
 	svc := localmedia.New(cfg.LocalMediaDirs)
 	svc.Cat, svc.EnvPath, svc.Log = cat, envPath, log
-	// The Telegram library of .strm files, the downloads and this program's own data are never listed.
-	for _, dir := range []string{cfg.LibraryDir, cfg.DownloadsDir, cfg.DataDir} {
+	// The Telegram library of .strm files and this program's own data are never listed.
+	for _, dir := range []string{cfg.LibraryDir, cfg.DataDir} {
 		if abs, err := filepath.Abs(dir); err == nil {
 			svc.Exclude = append(svc.Exclude, abs)
 		}
 	}
 	if users != nil {
 		svc.Accounts = users
-		svc.Worker = &autoupload.Worker{Cat: cat, Sessions: users, Verify: pool, Local: true, Log: log}
+		svc.Worker = &autoupload.Worker{Cat: cat, Sessions: users, Verify: pool, Log: log}
 	}
 	return svc
 }
 
-func startDownloads(cfg config.Config, envPath string, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, seerrTarget *url.URL, log *slog.Logger) *downloads.Service {
-	if seerrTarget == nil {
-		return nil // downloads are part of Seerr
-	}
-	pace := uploadPace(cfg)
-	seerrBase, seerrKey := "", ""
-	if seerrTarget != nil {
-		seerrBase = seerrTarget.String()
-		seerrKey, _ = seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr"))
-	}
-	// Docker reads a relative -v path as a volume name, so both folders must be absolute.
-	downloadsDir, err := filepath.Abs(cfg.DownloadsDir)
-	if err != nil {
-		log.Warn("downloads are off", "err", err)
-		return nil
-	}
-	stackDir, err := filepath.Abs(filepath.Join(cfg.DataDir, "stack"))
-	if err != nil {
-		log.Warn("downloads are off", "err", err)
-		return nil
-	}
-	runner := &stack.Runner{
-		Downloads: downloadsDir, ConfigDir: stackDir,
-		SeerrURL: seerrBase, SeerrKey: seerrKey, PublicBase: publicBase(cfg),
-		MaxDBGB: cfg.BitmagnetDBMaxGB, Log: log,
-	}
-	svc := downloads.New(cfg.DownloadsEnabled)
-	svc.EnvPath = envPath
-	svc.Users = users
-	svc.Runner = runner
-	svc.Cat = cat
-	svc.Defaults = pace
-	svc.MinFree = cfg.DownloadsMinFreeGB
-	svc.SearchEvery = time.Duration(cfg.DownloadsSearchEveryMinutes) * time.Minute
-	svc.Log = log
-	worker := &autoupload.Worker{
-		Cat: cat, Verify: pool, Dir: downloadsDir,
-		MinFree: uint64(cfg.DownloadsMinFreeGB) << 30, Log: log,
-	}
-	if users != nil {
-		worker.Sessions = users
-	}
-	svc.Worker = worker
-	return svc
-}
-
-func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr, fladder bool, dl *downloads.Service, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, journal *actlog.Store, channels *chanindex.Client, accounts func() []panel.Account) http.Handler {
+func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalog.Catalog, channel int64, listen string, log *slog.Logger, seerr bool, ctl *accountControl, users *tguser.Manager, local *localmedia.Service, personal *home.Service, sources *tgsource.Service, news *newsfeed.Service, hub *groupHub, journal *actlog.Store, channels *chanindex.Client, accounts func() []panel.Account) http.Handler {
 	jobs := &panelJobs{}
 	return panel.New(panel.Options{
-		Accounts: accounts,
-		Code:     code,
-		EnvPath:  envPath,
-		Seerr:    seerr,
-		Fladder:  fladder,
-		Downloads: func(ctx context.Context) (any, error) {
-			if dl == nil {
-				return nil, nil
-			}
-			return dl.Status(ctx)
-		},
-		DownloadDo: downloadActions(dl, users),
+		Accounts:  accounts,
+		Code:      code,
+		EnvPath:   envPath,
+		Seerr:     seerr,
+		Pace:      ctl.state,
+		AccountDo: ctl.do,
 		Local: func(ctx context.Context) (any, error) {
 			return local.State(ctx)
 		},
@@ -753,58 +672,6 @@ func kindList(v any) ([]string, error) {
 	return catalog.NormalizeKinds(in)
 }
 
-func downloadActions(dl *downloads.Service, users *tguser.Manager) func(*http.Request, string, map[string]any) (any, error) {
-	return func(r *http.Request, action string, body map[string]any) (any, error) {
-		if users == nil {
-			return nil, errors.New("Telegram accounts are not available")
-		}
-		switch action {
-		case "enable":
-			if dl == nil {
-				return nil, errors.New("downloads are not available")
-			}
-			on, _ := body["enabled"].(bool)
-			if err := dl.SetEnabled(r.Context(), on); err != nil {
-				return nil, err
-			}
-			return map[string]any{"ok": true}, nil
-		case "login":
-			if cancel, _ := body["cancel"].(bool); cancel {
-				users.CancelLogin()
-				return map[string]any{"ok": true}, nil
-			}
-			if phone, _ := body["phone"].(string); phone != "" {
-				return users.BeginLogin(r.Context(), phone)
-			}
-			if pass, _ := body["password"].(string); pass != "" {
-				return users.SubmitPassword(r.Context(), pass)
-			}
-			code, _ := body["code"].(string)
-			return users.SubmitCode(r.Context(), code)
-		case "logout":
-			return nil, users.Logout(r.Context(), int64(number(body["user_id"])))
-		case "pace":
-			p := tguser.Pace{
-				MBPerSec: int(number(body["mb_per_sec"])), RestMinutes: int(number(body["rest_minutes"])),
-				LongEveryGB: int(number(body["long_every_gb"])), LongRestMinutes: int(number(body["long_rest_minutes"])),
-				DailyGB: int(number(body["daily_gb"])),
-			}
-			if hours, ok := body["hours"].(string); ok {
-				p.Hours = hours
-			}
-			if id := int64(number(body["user_id"])); id != 0 {
-				return nil, users.SetPace(id, p, true)
-			}
-			if dl == nil {
-				return nil, errors.New("downloads are not available")
-			}
-			return nil, dl.SetDefaults(p)
-		default:
-			return nil, errors.New("unknown action")
-		}
-	}
-}
-
 // localActions runs what the Local files tab asks for. Every upload and every delete starts from a
 // button press that names the files.
 func localActions(svc *localmedia.Service) func(*http.Request, string, map[string]any) (any, error) {
@@ -894,35 +761,6 @@ func finishManaged(ctx context.Context, cfg config.Config, server *managed.Serve
 		Language:  cfg.SubtitleLanguage,
 	}
 	return b.Run(ctx)
-}
-
-// startFladder runs the web client. Jellyfin and Seerr addresses are the ones a browser opens.
-func startFladder(ctx context.Context, cfg config.Config, wizard *setup.Wizard, log *slog.Logger, child *sync.WaitGroup, armDone func()) (string, error) {
-	root, err := filepath.Abs(filepath.Join(cfg.DataDir, "fladder"))
-	if err != nil {
-		return "", err
-	}
-	wizard.SetStatus(setup.Status{Stage: "Downloading Fladder", Percent: 96})
-	if err := fladder.Pull(ctx, log); err != nil {
-		return "", err
-	}
-	public := strings.TrimRight(publicBase(cfg), "/")
-	seerrURL := ""
-	if cfg.SeerrManaged {
-		seerrURL = public + "/seerr"
-	}
-	srv := &fladder.Server{Root: root, JellyfinURL: public, SeerrURL: seerrURL, Log: log}
-	srv.Prepare(ctx)
-	child.Add(1)
-	go func() {
-		defer child.Done()
-		srv.Run(ctx)
-	}()
-	armDone()
-	if err := srv.WaitReady(ctx, managedStartTimeout); err != nil {
-		return "", err
-	}
-	return srv.URL(), nil
 }
 
 // seerrJellyfin is the address Seerr uses to call Jellyfin. Seerr runs on this machine, so a

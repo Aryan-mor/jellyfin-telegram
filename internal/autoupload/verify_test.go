@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -59,7 +58,7 @@ func TestDifferentBytesAreAMismatchAndKeepTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cat.Close()
-	row, err := cat.UpsertUpload(ctx, catalog.Upload{Kind: "movie", RemoteID: 1, OwnerID: 2, Path: path,
+	row, err := cat.UpsertUpload(ctx, catalog.Upload{Kind: catalog.KindLocal, RemoteID: 1, OwnerID: 2, Path: path,
 		Size: int64(len(body)), FileName: "A (2010).mkv", State: catalog.UploadSent})
 	if err != nil {
 		t.Fatal(err)
@@ -68,11 +67,11 @@ func TestDifferentBytesAreAMismatchAndKeepTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	row.MessageID = 1
-	w := &Worker{Cat: cat, Lib: &memLib{}, Verify: channelFake{other}}
+	w := &Worker{Cat: cat, Verify: channelFake{other}}
 	if err := w.verify(ctx, row); err != nil {
 		t.Fatal(err)
 	}
-	got, _, _ := cat.FindUpload(ctx, "movie", 1)
+	got, _, _ := cat.FindUpload(ctx, catalog.KindLocal, 1)
 	if got.State != catalog.UploadMismatch {
 		t.Fatalf("state %s", got.State)
 	}
@@ -84,50 +83,9 @@ func TestDifferentBytesAreAMismatchAndKeepTheFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	w.dispatch(ctx, nil)
-	again, _, _ := cat.FindUpload(ctx, "movie", 1)
+	again, _, _ := cat.FindUpload(ctx, catalog.KindLocal, 1)
 	if again.State != catalog.UploadMismatch {
 		t.Fatalf("a mismatch moved on to %s", again.State)
-	}
-}
-
-type guardLib struct {
-	memLib
-	mu      sync.Mutex
-	paused  int
-	resumed int
-}
-
-func (g *guardLib) Pause(context.Context) error  { g.mu.Lock(); g.paused++; g.mu.Unlock(); return nil }
-func (g *guardLib) Resume(context.Context) error { g.mu.Lock(); g.resumed++; g.mu.Unlock(); return nil }
-
-func TestGuardResumesOnlyWhatItStopped(t *testing.T) {
-	dir := t.TempDir()
-	lib := &guardLib{}
-	// The folder always has less free space than this, so the guard must stop the torrents.
-	w := &Worker{Lib: lib, Dir: dir, MinFree: 1 << 60}
-	w.Guard(context.Background())
-	if lib.paused != 1 {
-		t.Fatalf("paused %d", lib.paused)
-	}
-	if _, err := os.Stat(filepath.Join(dir, pausedMarker)); err != nil {
-		t.Fatal("the pause was not remembered")
-	}
-	w.MinFree = 1
-	w.Guard(context.Background())
-	w.Guard(context.Background())
-	if lib.resumed != 1 {
-		t.Fatalf("resumed %d times, want once", lib.resumed)
-	}
-}
-
-func TestGuardLeavesTorrentsAloneWhenItNeverStoppedThem(t *testing.T) {
-	lib := &guardLib{}
-	w := &Worker{Lib: lib, Dir: t.TempDir(), MinFree: 1}
-	for i := 0; i < 3; i++ {
-		w.Guard(context.Background())
-	}
-	if lib.resumed != 0 {
-		t.Fatalf("resumed %d torrents that this program never stopped", lib.resumed)
 	}
 }
 
@@ -142,13 +100,13 @@ func TestAnUploadOutlivesThePassThatStartedIt(t *testing.T) {
 	if err := os.WriteFile(path, []byte("video"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	lib := &memLib{items: []Item{{Kind: "movie", RemoteID: 1, OwnerID: 2, Path: path, Size: 5, FileName: "A (2010).mkv", Caption: "A (2010)"}}}
+	addLocal(t, cat, 1, path, 5, "A (2010).mkv")
 	sessions := &memSessions{hold: make(chan struct{}), views: []tguser.View{
 		{UserID: 1, Username: "u", Admin: true, Connected: true, MaxBytes: tguser.MaxBytes(false), Pace: tguser.Pace{DailyGB: 50}},
 	}}
 	forever, stop := context.WithCancel(context.Background())
 	defer stop()
-	w := &Worker{Cat: cat, Lib: lib, Sessions: sessions, Ctx: forever}
+	w := &Worker{Cat: cat, Sessions: sessions, Ctx: forever}
 
 	pass, endPass := context.WithCancel(context.Background())
 	if err := w.RunOnce(pass); err != nil {
@@ -160,13 +118,13 @@ func TestAnUploadOutlivesThePassThatStartedIt(t *testing.T) {
 
 	deadline := time.Now().Add(3 * time.Second)
 	for time.Now().Before(deadline) {
-		row, _, _ := cat.FindUpload(context.Background(), "movie", 1)
+		row, _, _ := cat.FindUpload(context.Background(), catalog.KindLocal, 1)
 		if row.State == catalog.UploadSent {
 			return
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
-	row, _, _ := cat.FindUpload(context.Background(), "movie", 1)
+	row, _, _ := cat.FindUpload(context.Background(), catalog.KindLocal, 1)
 	t.Fatalf("the upload died with its pass, state %s", row.State)
 }
 
@@ -177,17 +135,17 @@ func TestAWaitingFileSaysWhatItWaitsFor(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer cat.Close()
-	lib := &memLib{items: []Item{{Kind: "movie", RemoteID: 1, OwnerID: 2, Path: "x", Size: 5, FileName: "A (2010).mkv", Caption: "A"}}}
+	addLocal(t, cat, 1, "x", 5, "A (2010).mkv")
 	// This account is only allowed to send between 01:00 and 02:00, and it is 12:00.
 	sessions := &memSessions{views: []tguser.View{
 		{UserID: 1, Username: "u", Admin: true, Connected: true, MaxBytes: tguser.MaxBytes(false), Pace: tguser.Pace{Hours: "01-02"}},
 	}}
 	noon := func() time.Time { return time.Date(2026, 11, 3, 12, 0, 0, 0, time.Local) }
-	w := &Worker{Cat: cat, Lib: lib, Sessions: sessions, Now: noon}
+	w := &Worker{Cat: cat, Sessions: sessions, Now: noon}
 	if err := w.RunOnce(ctx); err != nil {
 		t.Fatal(err)
 	}
-	row, _, _ := cat.FindUpload(ctx, "movie", 1)
+	row, _, _ := cat.FindUpload(ctx, catalog.KindLocal, 1)
 	if row.State != catalog.UploadQueued || !strings.Contains(row.Error, "@u rests for") {
 		t.Fatalf("state %s note %q", row.State, row.Error)
 	}
