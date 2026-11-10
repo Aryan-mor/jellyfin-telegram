@@ -73,12 +73,12 @@ func TestVoteUsesTheChannelForm(t *testing.T) {
 }
 
 func TestIntroduce(t *testing.T) {
-	b := &bot{answers: []string{"pending @pub film series"}}
-	err := (&Client{Bot: "idx", TG: b}).Introduce(context.Background(), "pub", []string{"series", "film"})
+	b := &bot{answers: []string{"pending @pub movie series"}}
+	err := (&Client{Bot: "idx", TG: b}).Introduce(context.Background(), "pub", []string{"series", "movie"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if b.sent[0] != "idx: /add @pub film series" {
+	if b.sent[0] != "idx: /add @pub movie series" {
 		t.Fatal(b.sent)
 	}
 	b.answers = []string{"limited"}

@@ -4,7 +4,7 @@ import "testing"
 
 func TestMirrorIndexTags(t *testing.T) {
 	got := mirrorIndexTags([]string{"video", "movie", "series", "music", "movie"})
-	want := "direct-file,film,music,series"
+	want := "direct-file,movie,music,series"
 	if joinTags(got) != want {
 		t.Fatalf("%v", got)
 	}
@@ -14,9 +14,9 @@ func TestMirrorIndexTags(t *testing.T) {
 }
 
 func TestIntroducedRoundTrip(t *testing.T) {
-	raw := formatIntroduced(map[string]string{"b": "news", "a": "direct-file,film"})
+	raw := formatIntroduced(map[string]string{"b": "news", "a": "direct-file,movie"})
 	back := parseIntroduced(raw)
-	if back["a"] != "direct-file,film" || back["b"] != "news" {
+	if back["a"] != "direct-file,movie" || back["b"] != "news" {
 		t.Fatalf("%q %+v", raw, back)
 	}
 }

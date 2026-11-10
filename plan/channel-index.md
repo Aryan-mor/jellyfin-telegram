@@ -39,7 +39,7 @@ These parts are copied almost unchanged:
 ```
 cmd/channel-index/main.go   serve | login | say
 internal/botapi/            + keyboards, callbacks, edit, answerCallbackQuery
-internal/tags/              fixed ASCII slugs: film, series, anime, documentary, music, joke,
+internal/tags/              fixed ASCII slugs: movie, series, anime, documentary, music, joke,
                             meme, news, direct-file, software, education, book
 internal/i18n/              labels en (default) + fa; machine lines never translated
 internal/store/             schema + queries

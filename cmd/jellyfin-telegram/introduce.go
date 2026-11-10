@@ -144,7 +144,7 @@ func mirrorIndexTags(kinds []string) []string {
 	for _, k := range kinds {
 		switch k {
 		case "movie":
-			out = append(out, "film")
+			out = append(out, "movie")
 		case "series":
 			out = append(out, "series")
 		case "music":
