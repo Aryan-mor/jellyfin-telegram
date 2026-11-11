@@ -212,12 +212,6 @@ func (c *Catalog) SetExtractState(ctx context.Context, messageID int, state stri
 	return err
 }
 
-// ResetExtractTries gives files that failed before another chance, for example after a restart.
-func (c *Catalog) ResetExtractTries(ctx context.Context) error {
-	_, err := c.db.ExecContext(ctx, `UPDATE files SET extract_tries=0 WHERE extract_tries>0`)
-	return err
-}
-
 // AddExtractTry counts a failed attempt.
 func (c *Catalog) AddExtractTry(ctx context.Context, messageID int) error {
 	_, err := c.db.ExecContext(ctx, `UPDATE files SET extract_tries=extract_tries+1 WHERE message_id=?`, messageID)

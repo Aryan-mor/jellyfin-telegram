@@ -1305,9 +1305,6 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 	if cfg.SignedLibrary {
 		w.Forum = lazyForum{hub}
 	}
-	if err := cat.ResetExtractTries(ctx); err != nil {
-		log.Warn("cannot reset subtitle extraction tries", "err", err)
-	}
 	verify := time.NewTicker(reconcileEvery)
 	defer verify.Stop()
 	idle := time.NewTicker(archiveIdle)
