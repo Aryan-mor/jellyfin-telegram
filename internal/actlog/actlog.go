@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite" // database driver
@@ -49,7 +50,26 @@ type Entry struct {
 }
 
 // Store is the SQLite log.
-type Store struct{ db *sql.DB }
+type Store struct {
+	db *sql.DB
+
+	mu     sync.Mutex
+	totals map[string]int64
+}
+
+// Totals is how many actions each actor has logged since the service started, keyed "kind:id".
+func (s *Store) Totals() map[string]int64 {
+	out := map[string]int64{}
+	if s == nil {
+		return out
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, v := range s.totals {
+		out[k] = v
+	}
+	return out
+}
 
 // Open creates or opens the log at path.
 func Open(path string) (*Store, error) {
@@ -62,7 +82,7 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply schema: %w", err)
 	}
-	return &Store{db: db}, nil
+	return &Store{db: db, totals: map[string]int64{}}, nil
 }
 
 // Close closes the database.
@@ -81,6 +101,9 @@ func (s *Store) Note(kind string, actorID int64, name, action, detail string, er
 	if kind != "account" && kind != "bot" {
 		return
 	}
+	s.mu.Lock()
+	s.totals[fmt.Sprintf("%s:%d", kind, actorID)]++
+	s.mu.Unlock()
 	msg := ""
 	ok := 1
 	if err != nil {

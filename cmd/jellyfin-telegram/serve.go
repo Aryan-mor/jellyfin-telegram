@@ -552,6 +552,18 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			return scheduleRestart(restartStop)
 		},
 		AutoFilter: autoFilter(envPath),
+		Totals: func() map[string]panel.Total {
+			out := map[string]panel.Total{}
+			for _, c := range pool.Stats() {
+				out[fmt.Sprintf("bot:%d", c.ID)] = panel.Total{Work: c.Reads + c.Writes + c.Failures, Bytes: c.ReadBytes}
+			}
+			for k, n := range journal.Totals() {
+				if strings.HasPrefix(k, "account:") {
+					out[k] = panel.Total{Work: n}
+				}
+			}
+			return out
+		},
 		Paused:     hold.Stopped,
 		SetPaused:  hold.Set,
 		Logs: func(kind string, id int64, page, limit int) (any, int, error) {

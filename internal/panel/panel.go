@@ -110,6 +110,9 @@ type Options struct {
 	AutoFilter setup.Mounter
 	// Logs lists one page of what an account or a bot did. kind is "account" or "bot".
 	Logs func(kind string, actorID int64, page, limit int) (any, int, error)
+	// Totals reports what each bot and account has done so far, keyed "bot:<id>" or "account:<id>".
+	// The panel samples it for the activity chart. Nil leaves the chart empty.
+	Totals func() map[string]Total
 	// Paused reports that automatic bot and account work is stopped.
 	Paused func() bool
 	// SetPaused pauses or resumes that work. Nil hides the switch.
@@ -141,6 +144,9 @@ type JobView struct {
 // New serves /panel and /panel/.
 func New(o Options) http.Handler {
 	p := &panel{o: o}
+	if o.Totals != nil {
+		p.series = newSampler(o.Totals)
+	}
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /panel", p.guard(p.handlePage))
 	mux.HandleFunc("GET /panel/state", p.guard(p.handleState))
@@ -163,6 +169,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/bots/reuse", p.guard(p.handleBotJob("reuse")))
 	mux.HandleFunc("GET /panel/jobs", p.guard(p.handleJobs))
 	mux.HandleFunc("GET /panel/activity", p.guard(p.handleActivity))
+	mux.HandleFunc("GET /panel/series", p.guard(p.handleSeries))
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
 	mux.HandleFunc("POST /panel/restart", p.guard(p.handleRestart))
@@ -191,6 +198,8 @@ var pagePaths = map[string]struct{}{
 	"/panel/telegram":          {},
 	"/panel/bots":              {},
 	"/panel/logs":              {},
+	"/panel/logs/overview":     {},
+	"/panel/logs/details":      {},
 	"/panel/api":               {},
 	"/panel/sources/filter":    {},
 	"/panel/sources":           {},
@@ -206,7 +215,10 @@ var pageAPIs = map[string]struct{}{
 	"/panel/sources": {},
 }
 
-type panel struct{ o Options }
+type panel struct {
+	o      Options
+	series *sampler
+}
 
 func wantsDocument(r *http.Request) bool {
 	if r.Header.Get("Sec-Fetch-Dest") == "document" || r.Header.Get("Sec-Fetch-Mode") == "navigate" {
