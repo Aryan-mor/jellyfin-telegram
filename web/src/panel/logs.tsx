@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react"
-import { useSearchParams } from "react-router"
+import { Navigate, NavLink, useLocation, useSearchParams } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api, pollingPaused } from "@/lib/api"
 import { t } from "@/lib/i18n"
@@ -9,6 +9,46 @@ import { usePanel, type BotCounters } from "@/panel/shell"
 
 type LogRow = { id: number; at: number; action: string; detail: string; ok: boolean; error?: string }
 type LogPage = { items: LogRow[]; total: number; page: number; pages: number }
+
+// LogTabs switches between the overview and the per-account / per-bot view.
+function LogTabs() {
+  const { search } = useLocation()
+  const tab = ({ isActive }: { isActive: boolean }) => cn("rounded-md px-3 py-1.5 text-sm", isActive ? "bg-accent font-medium" : "text-muted-foreground hover:bg-accent/60")
+  return (
+    <div className="flex gap-1">
+      <NavLink to={{ pathname: "/logs/overview", search: new URLSearchParams(search).has("code") ? "?code=" + new URLSearchParams(search).get("code") : "" }} className={tab}>{t("Overview")}</NavLink>
+      <NavLink to={{ pathname: "/logs/details", search }} className={tab}>{t("Details")}</NavLink>
+    </div>
+  )
+}
+
+// LogsHome is where the Logs menu opens: every bot, and the live log of all of them.
+export function LogsHome() {
+  return (
+    <div className="space-y-4">
+      <div>
+        <h1 className="text-xl font-semibold tracking-tight">{t("Logs")}</h1>
+        <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("What each bot did since the service started, and everything the bots and accounts do as it happens.")}</p>
+      </div>
+      <LogTabs />
+      <Card>
+        <div className="border-b px-4 py-3"><h2 className="font-medium">{t("Bots")}</h2></div>
+        <BotsLive />
+      </Card>
+      <Card>
+        <div className="space-y-3 p-4">
+          <LiveLog />
+        </div>
+      </Card>
+    </div>
+  )
+}
+
+// LogsRedirect sends /logs to the overview.
+export function LogsRedirect() {
+  const { search } = useLocation()
+  return <Navigate to={{ pathname: "/logs/overview", search }} replace />
+}
 
 export function Logs() {
   const { data: s } = usePanel()
@@ -51,6 +91,7 @@ export function Logs() {
         <h1 className="text-xl font-semibold tracking-tight">{t("Logs")}</h1>
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("Pick an account or a bot to see what it did.")}</p>
       </div>
+      <LogTabs />
       <div className="grid items-start gap-4 md:grid-cols-[16rem_1fr]">
         <Card className="overflow-hidden">
           <Group title={t("Accounts")}>

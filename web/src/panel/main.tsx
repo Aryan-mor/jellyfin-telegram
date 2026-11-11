@@ -8,7 +8,7 @@ import { ConfirmHost } from "@/components/widgets"
 import { I18nProvider, useUiLang } from "@/lib/i18n"
 import { Shell } from "@/panel/shell"
 import { Accounts, ApiPage, AutoFilter, Away, Bots, Channel, HomeVideos, Local, Mirrors, News, Overview, Shared, Sources, Subtitles, Telegram, UploadPace } from "@/panel/pages"
-import { Logs } from "@/panel/logs"
+import { Logs, LogsHome, LogsRedirect } from "@/panel/logs"
 
 const client = new QueryClient({ defaultOptions: { queries: { retry: false, refetchOnWindowFocus: false } } })
 
@@ -41,7 +41,9 @@ createRoot(document.getElementById("root")!).render(
             <Route path="channel/subtitles" element={<Subtitles />} />
             <Route path="telegram" element={<Telegram />} />
             <Route path="bots" element={<Bots />} />
-            <Route path="logs" element={<Logs />} />
+            <Route path="logs" element={<LogsRedirect />} />
+            <Route path="logs/overview" element={<LogsHome />} />
+            <Route path="logs/details" element={<Logs />} />
             <Route path="api" element={<ApiPage />} />
             <Route path="sources/filter" element={<AutoFilter />} />
             <Route path="sources" element={<Sources />} />
