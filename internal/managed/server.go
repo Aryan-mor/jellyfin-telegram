@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -125,26 +126,62 @@ func (s *Server) runOnce(ctx context.Context) error {
 // stopStale ends a copy left running by an earlier crash, which would hold the port. The process is
 // only touched if it really runs this server's file, because the id may have been reused since.
 func stopStale(pidFile, exe string, log *slog.Logger) {
+	stopMatching(pidFile, log, "stopping a Jellyfin left over from an earlier run", func(pid int) bool {
+		return runsFile(pid, exe)
+	})
+}
+
+// stopStaleIn ends a leftover process whose executable sits inside dir. A Seerr rebuild keeps the
+// same version number and replaces that directory, and Windows will not delete bcrypt.node while
+// node.exe still has it loaded. The id is still checked, because it may have been reused.
+func stopStaleIn(pidFile, dir string, log *slog.Logger) {
+	stopMatching(pidFile, log, "stopping a copy left over from an earlier run", func(pid int) bool {
+		return runsInside(pid, dir)
+	})
+}
+
+func stopMatching(pidFile string, log *slog.Logger, message string, match func(int) bool) {
 	raw, err := os.ReadFile(pidFile)
 	if err != nil {
 		return
 	}
-	pid, err := strconv.Atoi(string(raw))
-	if err != nil || pid <= 0 || !runsFile(pid, exe) {
+	pid, err := strconv.Atoi(strings.TrimSpace(string(raw)))
+	if err != nil || pid <= 0 || !match(pid) {
 		return
 	}
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		return
 	}
-	log.Info("stopping a Jellyfin left over from an earlier run", "pid", pid)
+	if log != nil {
+		log.Info(message, "pid", pid)
+	}
 	_ = proc.Kill()
 	// Wait until it is actually gone. A fixed pause let the next start treat the dying process
 	// as ready, then lose it mid-setup.
 	deadline := time.Now().Add(15 * time.Second)
-	for runsFile(pid, exe) && time.Now().Before(deadline) {
+	for match(pid) && time.Now().Before(deadline) {
 		time.Sleep(200 * time.Millisecond)
 	}
+}
+
+// pathInside reports whether file is dir or a file under it.
+func pathInside(file, dir string) bool {
+	file = strings.TrimPrefix(file, `\\?\`)
+	file = filepath.Clean(file)
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return false
+	}
+	dir = filepath.Clean(dir)
+	if runtime.GOOS == "windows" {
+		file = strings.ToLower(file)
+		dir = strings.ToLower(dir)
+	}
+	if file == dir {
+		return true
+	}
+	return strings.HasPrefix(file, dir+string(os.PathSeparator))
 }
 
 // WaitReady blocks until the server answers.

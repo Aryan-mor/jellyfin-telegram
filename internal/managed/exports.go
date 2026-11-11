@@ -20,6 +20,9 @@ func Download(ctx context.Context, a Artifact, name, into string, client *http.C
 // StopStale ends a copy of the program at exe that an earlier crash left running.
 func StopStale(pidFile, exe string, log *slog.Logger) { stopStale(pidFile, exe, log) }
 
+// StopStaleIn ends a leftover process whose executable sits inside dir.
+func StopStaleIn(pidFile, dir string, log *slog.Logger) { stopStaleIn(pidFile, dir, log) }
+
 // StopGently asks a child to end in the way its system allows.
 func StopGently(p *os.Process) error { return stopGently(p) }
 

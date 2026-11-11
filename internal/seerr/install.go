@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/managed"
 )
@@ -33,17 +35,17 @@ func (b Bundle) entry() string { return filepath.Join(b.App, "dist", "index.js")
 
 // Install makes sure this system's bundle is present below root and returns where it is. Nothing
 // else is needed on the machine: no Docker and no Node.
-func Install(ctx context.Context, root string, client *http.Client, progress managed.Progress) (Bundle, error) {
+func Install(ctx context.Context, root string, client *http.Client, progress managed.Progress, log *slog.Logger) (Bundle, error) {
 	art, err := bundleFor(runtime.GOOS, runtime.GOARCH)
 	if err != nil {
 		return Bundle{}, err
 	}
-	return install(ctx, root, art, client, progress)
+	return install(ctx, root, art, client, progress, log)
 }
 
 // install keeps a finished install marked, so an interrupted download starts over instead of
 // running a partial copy.
-func install(ctx context.Context, root string, art managed.Artifact, client *http.Client, progress managed.Progress) (Bundle, error) {
+func install(ctx context.Context, root string, art managed.Artifact, client *http.Client, progress managed.Progress, log *slog.Logger) (Bundle, error) {
 	versions := filepath.Join(root, "bundle")
 	dir := filepath.Join(versions, Version)
 	b := bundleAt(dir)
@@ -57,7 +59,11 @@ func install(ctx context.Context, root string, art managed.Artifact, client *htt
 	if art.SHA256 == "" {
 		return Bundle{}, errors.New("this Seerr build has not been published yet, so it cannot be downloaded")
 	}
-	if err := os.RemoveAll(dir); err != nil {
+	// Stop before the delete. Windows will not unlink bcrypt.node while the previous
+	// node.exe has it loaded, and a failed delete removes the marker and then cannot finish.
+	// Stopping afterwards never runs, because this error is what the page shows.
+	managed.StopStaleIn(filepath.Join(root, "seerr.pid"), versions, log)
+	if err := removeTree(dir); err != nil {
 		return Bundle{}, err
 	}
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -85,4 +91,21 @@ func install(ctx context.Context, root string, art managed.Artifact, client *htt
 		}
 	}
 	return b, nil
+}
+
+// removeTree deletes dir. A native module can stay locked for a moment after its process
+// ends, and an antivirus scan holds the same file, so a single try is not enough.
+func removeTree(dir string) error {
+	var err error
+	for attempt := 0; attempt < 30; attempt++ {
+		err = os.RemoveAll(dir)
+		if err == nil {
+			return nil
+		}
+		if _, statErr := os.Stat(dir); os.IsNotExist(statErr) {
+			return nil
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
+	return err
 }

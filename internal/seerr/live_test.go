@@ -24,7 +24,7 @@ func TestLiveBundleInstallsAndRuns(t *testing.T) {
 	defer cancel()
 
 	began := time.Now()
-	bundle, err := Install(ctx, root, http.DefaultClient, nil)
+	bundle, err := Install(ctx, root, http.DefaultClient, nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

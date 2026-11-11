@@ -14,6 +14,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -339,5 +340,17 @@ func TestStopStaleIgnoresAnUnrelatedProcess(t *testing.T) {
 	}
 	if runsFile(os.Getpid(), filepath.Join(t.TempDir(), "not-this.exe")) {
 		t.Error("an unrelated process was taken for the server")
+	}
+}
+
+func TestStopStaleInLeavesAnUnrelatedProcess(t *testing.T) {
+	dir := t.TempDir()
+	pidFile := filepath.Join(dir, "seerr.pid")
+	if err := os.WriteFile(pidFile, []byte(strconv.Itoa(os.Getpid())), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	stopStaleIn(pidFile, filepath.Join(dir, "bundle"), nil)
+	if runsInside(os.Getpid(), filepath.Join(dir, "bundle")) {
+		t.Fatal("this process was taken for a copy inside the bundle")
 	}
 }

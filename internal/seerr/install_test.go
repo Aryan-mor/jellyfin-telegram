@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -61,7 +63,7 @@ func TestInstallUnpacksOnceAndDropsOlderVersions(t *testing.T) {
 		t.Fatal(err)
 	}
 	art := managed.Artifact{URL: srv.URL + "/seerr.tar.gz", SHA256: sum}
-	b, err := install(context.Background(), root, art, srv.Client(), nil)
+	b, err := install(context.Background(), root, art, srv.Client(), nil, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -74,7 +76,7 @@ func TestInstallUnpacksOnceAndDropsOlderVersions(t *testing.T) {
 	if _, err := os.Stat(old); !os.IsNotExist(err) {
 		t.Errorf("an older version stayed: %v", err)
 	}
-	if _, err := install(context.Background(), root, art, srv.Client(), nil); err != nil || hits != 1 {
+	if _, err := install(context.Background(), root, art, srv.Client(), nil, nil); err != nil || hits != 1 {
 		t.Errorf("second install downloaded again: hits=%d err=%v", hits, err)
 	}
 }
@@ -85,7 +87,7 @@ func TestInstallRefusesAChangedFile(t *testing.T) {
 	defer srv.Close()
 	root := t.TempDir()
 	art := managed.Artifact{URL: srv.URL + "/seerr.tar.gz", SHA256: strings.Repeat("0", 64)}
-	if _, err := install(context.Background(), root, art, srv.Client(), nil); err == nil || !strings.Contains(err.Error(), "checksum") {
+	if _, err := install(context.Background(), root, art, srv.Client(), nil, nil); err == nil || !strings.Contains(err.Error(), "checksum") {
 		t.Fatalf("err = %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(root, "bundle", Version)); !os.IsNotExist(err) {
@@ -94,7 +96,7 @@ func TestInstallRefusesAChangedFile(t *testing.T) {
 }
 
 func TestInstallSaysWhenTheBuildIsNotPublished(t *testing.T) {
-	_, err := install(context.Background(), t.TempDir(), managed.Artifact{URL: "http://x/y.tar.gz"}, http.DefaultClient, nil)
+	_, err := install(context.Background(), t.TempDir(), managed.Artifact{URL: "http://x/y.tar.gz"}, http.DefaultClient, nil, nil)
 	if err == nil || !strings.Contains(err.Error(), "not been published") {
 		t.Fatalf("err = %v", err)
 	}
@@ -152,14 +154,66 @@ func TestARebuiltBundleReplacesTheOldOne(t *testing.T) {
 		t.Fatal(err)
 	}
 	art := managed.Artifact{URL: srv.URL + "/seerr.tar.gz", SHA256: sum}
-	b, err := install(context.Background(), root, art, srv.Client(), nil)
+	b, err := install(context.Background(), root, art, srv.Client(), nil, nil)
 	if err != nil || hits != 1 {
 		t.Fatalf("hits=%d err=%v", hits, err)
 	}
 	if _, err := os.Stat(filepath.Join(b.App, "committag.json")); !os.IsNotExist(err) {
 		t.Error("the stale file of the old bundle stayed")
 	}
-	if _, err := install(context.Background(), root, art, srv.Client(), nil); err != nil || hits != 1 {
+	if _, err := install(context.Background(), root, art, srv.Client(), nil, nil); err != nil || hits != 1 {
 		t.Errorf("the same bundle was downloaded again: hits=%d err=%v", hits, err)
+	}
+}
+
+func TestInstallStopsTheRunningCopyBeforeReplacingIt(t *testing.T) {
+	data, sum := fakeBundle(t)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write(data)
+	}))
+	defer srv.Close()
+	root := t.TempDir()
+	dir := filepath.Join(root, "bundle", Version)
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	// A marker from before the hash was stored, so this install has to replace the directory.
+	if err := os.WriteFile(filepath.Join(dir, ".installed"), []byte(Version+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	pid := startHolder(t, dir)
+	t.Cleanup(func() { stopHolder(pid) })
+	if err := os.WriteFile(filepath.Join(root, "seerr.pid"), []byte(strconv.Itoa(pid)+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	art := managed.Artifact{URL: srv.URL + "/seerr.tar.gz", SHA256: sum}
+	if _, err := install(context.Background(), root, art, srv.Client(), nil, nil); err != nil {
+		t.Fatal(err)
+	}
+	if holderAlive(pid) {
+		t.Fatalf("process %d still holds the bundle", pid)
+	}
+}
+
+func copyFile(t *testing.T, src, dst string) {
+	t.Helper()
+	in, err := os.Open(src)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer in.Close()
+	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o755)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		out.Close()
+		t.Fatal(err)
+	}
+	if err := out.Close(); err != nil {
+		t.Fatal(err)
 	}
 }

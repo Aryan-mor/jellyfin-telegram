@@ -99,7 +99,7 @@ func bringUpSeerr(ctx context.Context, cfg config.Config, wizard *setup.Wizard, 
 	progress.set("Preparing Seerr.")
 	sink := seerrSink{progress: progress, wizard: wizard}
 	// The bundle is a few hundred MB, so the download gets a client with a long timeout.
-	bundle, err := seerr.Install(ctx, root, &http.Client{Timeout: 30 * time.Minute}, newInstallReporter(sink, 0, 50, 100).Progress)
+	bundle, err := seerr.Install(ctx, root, &http.Client{Timeout: 30 * time.Minute}, newInstallReporter(sink, 0, 50, 100).Progress, log)
 	if err != nil {
 		return err
 	}
