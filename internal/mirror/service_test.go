@@ -35,7 +35,7 @@ func TestPassCopiesOnlyTheChosenParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []int
-	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), Copy: func(_ context.Context, message int, channel int64) (int, error) {
+	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), Copy: func(_ context.Context, message int, channel int64, _ int) (int, error) {
 		if channel != 50 {
 			t.Fatalf("copy channel %d", channel)
 		}
@@ -76,7 +76,7 @@ func TestBannedMirrorIsReplacedOnce(t *testing.T) {
 	var copiedTo int64
 	s := &Service{
 		Cat: c, Log: slog.New(slog.DiscardHandler),
-		Copy: func(_ context.Context, _ int, channel int64) (int, error) {
+		Copy: func(_ context.Context, _ int, channel int64, _ int) (int, error) {
 			copiedTo = channel
 			if channel == 50 {
 				return 0, tgerr.New(400, "CHANNEL_PRIVATE")
@@ -154,7 +154,7 @@ func TestReadyOnlyWaitsForFinishedPosts(t *testing.T) {
 	var got []int
 	on := true
 	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), ReadyOnly: func() bool { return on },
-		Copy: func(_ context.Context, message int, _ int64) (int, error) {
+		Copy: func(_ context.Context, message int, _ int64, _ int) (int, error) {
 			got = append(got, message)
 			return message + 100, nil
 		}}
@@ -189,8 +189,8 @@ func TestReadyOnlyWaitsForFinishedPosts(t *testing.T) {
 	}
 }
 
-// A finished video goes to the mirror together with its subtitle archive, one after the other.
-// A video whose archive is not stored yet still goes; the archive follows later.
+// A finished video goes with its subtitle archive. The archive is a reply to the video in the
+// mirror. A video whose archive is not stored yet waits, so the two stay together.
 func TestVideoAndItsArchiveGoTogether(t *testing.T) {
 	c, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
 	if err != nil {
@@ -230,34 +230,39 @@ func TestVideoAndItsArchiveGoTogether(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []int
+	replies := map[int]int{}
 	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), ReadyOnly: func() bool { return true },
-		Copy: func(_ context.Context, message int, _ int64) (int, error) {
+		Copy: func(_ context.Context, message int, _ int64, reply int) (int, error) {
 			got = append(got, message)
+			replies[message] = reply
 			return message + 1000, nil
 		}}
 	if err := s.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// 10 with its archive 11, then 20, then 30. 30 does not wait for an archive that is not stored yet.
-	want := []int{10, 11, 20, 30}
-	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
+	// 10 with its archive 11, then 20 which has no archive. 30 waits for its archive.
+	want := []int{10, 11, 20}
+	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
 		t.Fatalf("copied %v, want %v", got, want)
 	}
-	// The archive of 30 turns up on its own, after the video.
+	if replies[10] != 0 || replies[11] != 1010 || replies[20] != 0 {
+		t.Fatalf("replies %v", replies)
+	}
+	// The archive of 30 turns up: the video and then the archive, as a reply.
 	archive(31, 30, 333)
 	if err := s.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 5 || got[4] != 31 {
-		t.Fatalf("copied %v", got)
+	if len(got) != 5 || got[3] != 30 || got[4] != 31 || replies[31] != 1030 {
+		t.Fatalf("copied %v replies %v", got, replies)
 	}
-	// An archive that appears after its video was copied is caught up.
+	// An archive that appears after its video was copied is caught up, still as a reply.
 	archive(21, 20, 222)
 	if err := s.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 6 || got[5] != 21 {
-		t.Fatalf("copied %v", got)
+	if len(got) != 6 || got[5] != 21 || replies[21] != 1020 {
+		t.Fatalf("copied %v replies %v", got, replies)
 	}
 	// Nothing is sent twice.
 	if err := s.Pass(ctx); err != nil {
@@ -292,7 +297,7 @@ func TestCopiesRunSideBySide(t *testing.T) {
 	s := &Service{
 		Cat: c, Log: slog.New(slog.DiscardHandler),
 		Width: func() int { return 2 },
-		Copy: func(_ context.Context, message int, _ int64) (int, error) {
+		Copy: func(_ context.Context, message int, _ int64, _ int) (int, error) {
 			mu.Lock()
 			inflight++
 			if inflight > peak {

@@ -501,7 +501,7 @@ func (p *Pool) CopyMessage(ctx context.Context, botID int64, messageID int, chan
 		if err != nil {
 			return err
 		}
-		id, err = b.forwardTo(ctx, messageID, ch)
+		id, err = b.forwardTo(ctx, messageID, ch, 0)
 		return err
 	})
 	p.didID(botID, "copy message", fmt.Sprintf("message %d", messageID), err)
@@ -511,8 +511,8 @@ func (p *Pool) CopyMessage(ctx context.Context, botID int64, messageID int, chan
 // CopyToMirror forwards one message from the main channel into channelID. The next free bot does
 // it, so every bot that is an admin of the mirror shares the work. A bot that cannot post there is
 // benched for a while and the call goes on with another one. Each bot keeps its own rest and its
-// own flood wait.
-func (p *Pool) CopyToMirror(ctx context.Context, messageID int, channelID int64) (int, error) {
+// own flood wait. replyTo, when set, is a message already in channelID that this copy answers.
+func (p *Pool) CopyToMirror(ctx context.Context, messageID int, channelID int64, replyTo int) (int, error) {
 	var id int
 	err := p.callDid(ctx, messageID, botAPIGap, "copy message", fmt.Sprintf("message %d", messageID), func(w worker) error {
 		b, ok := w.(*bot)
@@ -531,7 +531,7 @@ func (p *Pool) CopyToMirror(ctx context.Context, messageID int, channelID int64)
 			}
 			return err
 		}
-		id, err = b.forwardTo(ctx, messageID, ch)
+		id, err = b.forwardTo(ctx, messageID, ch, replyTo)
 		if err != nil && tgerr.Is(err, "CHANNEL_PRIVATE", "CHANNEL_INVALID", "USER_BANNED_IN_CHANNEL") {
 			b.forgetDest(channelID)
 			return err

@@ -307,27 +307,34 @@ func (c *Catalog) ArchiveOf(ctx context.Context, messageID int) (media.Attachmen
 	return a, err == nil, err
 }
 
+// LateArchive is a subtitle archive whose video is already in the mirror, and the id of that
+// video inside the mirror so the archive can be posted as a reply to it.
+type LateArchive struct {
+	MessageID int
+	ReplyTo   int
+}
+
 // UnmirroredArchives returns the subtitle archives of videos that were copied to this mirror and
-// that have not been copied themselves. It catches up an archive that was not there yet when its
-// video went.
-func (c *Catalog) UnmirroredArchives(ctx context.Context, id int64) ([]int, error) {
+// that have not been copied themselves. ReplyTo is the video's message in the mirror, or zero
+// when Telegram did not report one.
+func (c *Catalog) UnmirroredArchives(ctx context.Context, id int64) ([]LateArchive, error) {
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT a.message_id FROM attachments a
+		SELECT a.message_id, v.dest_id FROM attachments a
+		JOIN mirror_sent v ON v.mirror_id=? AND v.message_id=a.reply_to
 		WHERE a.doc_id<>0 AND a.file_name LIKE 'jftg-subs-%'
-		  AND EXISTS (SELECT 1 FROM mirror_sent v WHERE v.mirror_id=? AND v.message_id=a.reply_to)
 		  AND NOT EXISTS (SELECT 1 FROM mirror_sent s WHERE s.mirror_id=? AND s.message_id=a.message_id)
 		ORDER BY a.message_id`, id, id)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []int
+	var out []LateArchive
 	for rows.Next() {
-		var m int
-		if err := rows.Scan(&m); err != nil {
+		var a LateArchive
+		if err := rows.Scan(&a.MessageID, &a.ReplyTo); err != nil {
 			return nil, err
 		}
-		out = append(out, m)
+		out = append(out, a)
 	}
 	return out, rows.Err()
 }

@@ -35,7 +35,7 @@ const (
 // Service walks the mirrors until ctx ends.
 type Service struct {
 	Cat  *catalog.Catalog
-	Copy func(ctx context.Context, messageID int, channelID int64) (int, error)
+	Copy func(ctx context.Context, messageID int, channelID int64, replyTo int) (int, error)
 	Log  *slog.Logger
 	// ReadyOnly is asked at each pass. When it is true, only posts that are finished are copied:
 	// their status line says ready and so does their signed line. A post that is still being
@@ -98,9 +98,9 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 	if err != nil {
 		return err
 	}
-	var units [][]int
+	var units []copyUnit
 	room := mirrorBurst
-	push := func(ids ...int) {
+	push := func(reply int, ids ...int) {
 		if room <= 0 || len(ids) == 0 {
 			return
 		}
@@ -109,7 +109,7 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		} else {
 			ids = append([]int(nil), ids...)
 		}
-		units = append(units, ids)
+		units = append(units, copyUnit{ids: ids, reply: reply})
 		room -= len(ids)
 	}
 	for _, it := range items {
@@ -123,31 +123,32 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		if s.ReadyOnly != nil && s.ReadyOnly() && kind != naming.SectionMusic && !sign.IsReady(it.Caption) {
 			continue
 		}
-		// The video goes now. Its subtitle archive, when one is named and already stored, goes
-		// straight after it on the same bot. An archive that is not here yet follows on a later
-		// pass, the same way a subtitle is delivered apart from the film.
+		// A video that names a subtitle archive waits until that archive is stored, then both go
+		// in one unit. The archive is forwarded as a reply to the video, so an index of the mirror
+		// can find it on the video.
 		ids := []int{it.MessageID}
 		if meta, ok := sign.ParseCaption(it.Caption); ok && meta.Subs == "yes" {
 			archive, hasArchive, err := s.Cat.ArchiveOf(ctx, it.MessageID)
 			if err != nil {
 				return err
 			}
-			if hasArchive {
-				ids = append(ids, archive.MessageID)
+			if !hasArchive {
+				continue
 			}
+			ids = append(ids, archive.MessageID)
 		}
-		push(ids...)
+		push(0, ids...)
 	}
 	if room > 0 {
 		late, err := s.Cat.UnmirroredArchives(ctx, m.ID)
 		if err != nil {
 			return err
 		}
-		for _, id := range late {
+		for _, a := range late {
 			if room <= 0 {
 				break
 			}
-			push(id)
+			push(a.ReplyTo, a.MessageID)
 		}
 	}
 	var failed string
@@ -157,9 +158,17 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 	return s.Cat.SetMirrorError(ctx, m.ID, failed)
 }
 
+// copyUnit is one video, or a video and the subtitle archive that must follow it.
+// reply is a message already in the mirror. The archive of a video copied earlier uses it.
+// Inside a unit, each message after the first replies to the message just copied.
+type copyUnit struct {
+	ids   []int
+	reply int
+}
+
 // dispatch runs each unit on its own. A unit is one video and, when it is already stored, its
-// subtitle archive, so the archive stays next to its film. Units run together up to Width.
-func (s *Service) dispatch(ctx context.Context, m catalog.Mirror, units [][]int, failed *string) error {
+// subtitle archive. The archive is a reply to that video. Units run together up to Width.
+func (s *Service) dispatch(ctx context.Context, m catalog.Mirror, units []copyUnit, failed *string) error {
 	if len(units) == 0 {
 		return nil
 	}
@@ -175,13 +184,14 @@ func (s *Service) dispatch(ctx context.Context, m catalog.Mirror, units [][]int,
 	var gone error
 	for _, unit := range units {
 		g.Go(func() error {
-			for i, id := range unit {
+			reply := unit.reply
+			for i, id := range unit.ids {
 				if i > 0 {
 					if err := wait(gctx, copyGap); err != nil {
 						return err
 					}
 				}
-				dest, err := s.Copy(gctx, id, m.ChannelID)
+				dest, err := s.Copy(gctx, id, m.ChannelID, reply)
 				if err != nil {
 					if channelGone(err) {
 						mu.Lock()
@@ -205,7 +215,8 @@ func (s *Service) dispatch(ctx context.Context, m catalog.Mirror, units [][]int,
 				if err := s.Cat.MarkSent(gctx, m.ID, id, dest); err != nil {
 					return err
 				}
-				s.log().Info("mirrored", "channel", m.Title, "message", id, "dest", dest)
+				s.log().Info("mirrored", "channel", m.Title, "message", id, "dest", dest, "reply", reply)
+				reply = dest
 			}
 			return nil
 		})

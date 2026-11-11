@@ -372,7 +372,9 @@ func (b *bot) forgetDest(id int64) {
 }
 
 // forwardTo copies one main-channel message into dest without the author line.
-func (b *bot) forwardTo(ctx context.Context, messageID int, dest *tg.Channel) (int, error) {
+// replyTo is a message already in dest. Zero posts on its own. A subtitle archive uses the
+// id of the video just copied into that channel, so a later index can see the reply.
+func (b *bot) forwardTo(ctx context.Context, messageID int, dest *tg.Channel, replyTo int) (int, error) {
 	api, channel, err := b.conn()
 	if err != nil {
 		return 0, err
@@ -381,13 +383,17 @@ func (b *bot) forwardTo(ctx context.Context, messageID int, dest *tg.Channel) (i
 	if _, err := rand.Read(raw[:]); err != nil {
 		return 0, err
 	}
-	res, err := api.MessagesForwardMessages(ctx, &tg.MessagesForwardMessagesRequest{
+	req := &tg.MessagesForwardMessagesRequest{
 		FromPeer:   &tg.InputPeerChannel{ChannelID: channel.ChannelID, AccessHash: channel.AccessHash},
 		ToPeer:     &tg.InputPeerChannel{ChannelID: dest.ID, AccessHash: dest.AccessHash},
 		ID:         []int{messageID},
 		RandomID:   []int64{int64(binary.LittleEndian.Uint64(raw[:]))},
 		DropAuthor: true,
-	})
+	}
+	if replyTo > 0 {
+		req.SetReplyTo(&tg.InputReplyToMessage{ReplyToMsgID: replyTo})
+	}
+	res, err := api.MessagesForwardMessages(ctx, req)
 	if err != nil {
 		return 0, err
 	}
