@@ -4,6 +4,7 @@ import (
 	"context"
 	"log/slog"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -189,6 +190,7 @@ func TestReadyOnlyWaitsForFinishedPosts(t *testing.T) {
 }
 
 // A finished video goes to the mirror together with its subtitle archive, one after the other.
+// A video whose archive is not stored yet still goes; the archive follows later.
 func TestVideoAndItsArchiveGoTogether(t *testing.T) {
 	c, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
 	if err != nil {
@@ -236,17 +238,17 @@ func TestVideoAndItsArchiveGoTogether(t *testing.T) {
 	if err := s.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	// 10 with its archive 11, then 20 which has no archive. 30 waits for its archive.
-	want := []int{10, 11, 20}
-	if len(got) != 3 || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] {
+	// 10 with its archive 11, then 20, then 30. 30 does not wait for an archive that is not stored yet.
+	want := []int{10, 11, 20, 30}
+	if len(got) != len(want) || got[0] != want[0] || got[1] != want[1] || got[2] != want[2] || got[3] != want[3] {
 		t.Fatalf("copied %v, want %v", got, want)
 	}
-	// The archive of 30 turns up: the video and then the archive go.
+	// The archive of 30 turns up on its own, after the video.
 	archive(31, 30, 333)
 	if err := s.Pass(ctx); err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 5 || got[3] != 30 || got[4] != 31 {
+	if len(got) != 5 || got[4] != 31 {
 		t.Fatalf("copied %v", got)
 	}
 	// An archive that appears after its video was copied is caught up.
@@ -263,5 +265,51 @@ func TestVideoAndItsArchiveGoTogether(t *testing.T) {
 	}
 	if len(got) != 6 {
 		t.Fatalf("copied again: %v", got)
+	}
+}
+
+func TestCopiesRunSideBySide(t *testing.T) {
+	c, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { c.Close() })
+	ctx := context.Background()
+	for id := 1; id <= 4; id++ {
+		if err := c.Put(ctx, media.File{
+			MessageID: id, ChannelID: 9, DocID: int64(id), Size: 1, MIME: "video/mp4",
+			FileName: "Heat.1995.mkv", RelPath: filepath.Join("Movies", "Heat", string(rune('a'+id-1))+".strm"),
+			Date: time.Unix(int64(id), 0),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := c.AddMirror(ctx, 50, 7, "Films", []string{"movie"}); err != nil {
+		t.Fatal(err)
+	}
+	var inflight, peak int32
+	var mu sync.Mutex
+	s := &Service{
+		Cat: c, Log: slog.New(slog.DiscardHandler),
+		Width: func() int { return 2 },
+		Copy: func(_ context.Context, message int, _ int64) (int, error) {
+			mu.Lock()
+			inflight++
+			if inflight > peak {
+				peak = inflight
+			}
+			mu.Unlock()
+			time.Sleep(40 * time.Millisecond)
+			mu.Lock()
+			inflight--
+			mu.Unlock()
+			return message + 100, nil
+		},
+	}
+	if err := s.Pass(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if peak < 2 {
+		t.Fatalf("peak in flight %d, want copies side by side", peak)
 	}
 }

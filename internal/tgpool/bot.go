@@ -126,6 +126,7 @@ type bot struct {
 	channel     *tg.InputChannel
 	st          BotStatus
 	locations   map[int]location
+	dests       map[int64]*tg.Channel
 	extra       map[int64]*tg.InputChannel
 	extraLoc    map[string]location
 	settledOnce sync.Once
@@ -283,6 +284,11 @@ func (b *bot) openChannel(ctx context.Context, id int64, username string) (*tg.C
 	if !st.IsAdmin {
 		return nil, errors.New("that bot is not an admin of the main channel")
 	}
+	if username == "" && id != 0 {
+		if ch := b.cachedDest(id); ch != nil {
+			return ch, nil
+		}
+	}
 	var ch *tg.Channel
 	if username != "" {
 		res, err := api.ContactsResolveUsername(ctx, &tg.ContactsResolveUsernameRequest{Username: username})
@@ -318,6 +324,9 @@ func (b *bot) openChannel(ctx context.Context, id int64, username string) (*tg.C
 		}
 		return nil, fmt.Errorf("%w: @%s must be an admin of %s, with permission to post, and an admin of the main channel", ErrNoMirrorAccess, strings.TrimPrefix(who, "@"), name)
 	}
+	if username == "" {
+		b.rememberDest(ch)
+	}
 	return ch, nil
 }
 
@@ -335,6 +344,31 @@ func canPost(ch *tg.Channel) bool {
 	}
 	rights, ok := ch.GetAdminRights()
 	return ok && rights.PostMessages
+}
+
+func (b *bot) cachedDest(id int64) *tg.Channel {
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.dests[id]
+}
+
+func (b *bot) rememberDest(ch *tg.Channel) {
+	if ch == nil {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.dests == nil {
+		b.dests = map[int64]*tg.Channel{}
+	}
+	b.dests[ch.ID] = ch
+}
+
+func (b *bot) forgetDest(id int64) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	delete(b.dests, id)
+	delete(b.extra, id)
 }
 
 // forwardTo copies one main-channel message into dest without the author line.

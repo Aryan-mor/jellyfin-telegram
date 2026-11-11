@@ -63,7 +63,9 @@ func (r *reader) Read(p []byte) (int, error) {
 	}
 	block := r.pos / media.BlockSize
 	if block != r.curBlock {
-		if !r.background {
+		// A probe is Jellyfin learning the file, not someone watching. Counting it as playback
+		// kept three bots aside for as long as a file with no streams was retried.
+		if !r.background && !r.engine.isProbing(r.file.MessageID) {
 			r.engine.noteForeground()
 		}
 		// A probe stays exempt, because Jellyfin waits on it before playback can start.

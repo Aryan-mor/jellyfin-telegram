@@ -532,7 +532,12 @@ func (p *Pool) CopyToMirror(ctx context.Context, messageID int, channelID int64)
 			return err
 		}
 		id, err = b.forwardTo(ctx, messageID, ch)
+		if err != nil && tgerr.Is(err, "CHANNEL_PRIVATE", "CHANNEL_INVALID", "USER_BANNED_IN_CHANNEL") {
+			b.forgetDest(channelID)
+			return err
+		}
 		if err != nil && tgerr.Is(err, "CHAT_ADMIN_REQUIRED", "CHAT_WRITE_FORBIDDEN") {
+			b.forgetDest(channelID)
 			p.deny(channelID, botID)
 			return fmt.Errorf("%w: %v", ErrNoMirrorAccess, err)
 		}

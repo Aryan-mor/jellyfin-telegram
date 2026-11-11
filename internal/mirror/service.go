@@ -9,14 +9,15 @@ import (
 	"errors"
 	"log/slog"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gotd/td/tgerr"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
@@ -43,6 +44,9 @@ type Service struct {
 	// Replace builds a new channel when the current mirror is banned, and points this mirror at it.
 	// Nil leaves the failure recorded and tries again on a later pass.
 	Replace func(ctx context.Context, m catalog.Mirror) error
+	// Width is how many copies run at once. Nil, or a number below 2, keeps one copy at a time.
+	// Each copy still takes the next free bot, so the width is the bot count.
+	Width func() int
 	// replaced remembers a mirror that was just replaced or that failed to be replaced, so a banned
 	// channel does not create a new one on every pass.
 	replaced map[int64]time.Time
@@ -94,34 +98,22 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 	if err != nil {
 		return err
 	}
-	copied := 0
-	copyBatch := mirrorBurst
-	var failed string
-	// send copies one message and records it. It reports whether Telegram refused.
-	send := func(messageID int) (refused bool, err error) {
-		if copied > 0 {
-			if err := wait(ctx, copyGap); err != nil {
-				return false, err
-			}
+	var units [][]int
+	room := mirrorBurst
+	push := func(ids ...int) {
+		if room <= 0 || len(ids) == 0 {
+			return
 		}
-		dest, err := s.Copy(ctx, messageID, m.ChannelID)
-		if err != nil {
-			if channelGone(err) {
-				return true, err
-			}
-			failed = err.Error()
-			s.log().Warn("mirror copy failed", "channel", m.Title, "message", messageID, "err", err)
-			return true, nil
+		if len(ids) > room {
+			ids = append([]int(nil), ids[:room]...)
+		} else {
+			ids = append([]int(nil), ids...)
 		}
-		if err := s.Cat.MarkSent(ctx, m.ID, messageID, dest); err != nil {
-			return false, err
-		}
-		s.log().Info("mirrored", "channel", m.Title, "message", messageID, "dest", dest)
-		copied++
-		return false, nil
+		units = append(units, ids)
+		room -= len(ids)
 	}
 	for _, it := range items {
-		if copied >= copyBatch {
+		if room <= 0 {
 			break
 		}
 		kind := naming.Section(it.FileName, it.Caption, it.MIME)
@@ -131,60 +123,101 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		if s.ReadyOnly != nil && s.ReadyOnly() && kind != naming.SectionMusic && !sign.IsReady(it.Caption) {
 			continue
 		}
-		// A post that names a subtitle archive goes with it, so a reader of the mirror gets both. If
-		// the archive has not been seen yet, the post waits for it.
-		var archive media.Attachment
-		hasArchive := false
+		// The video goes now. Its subtitle archive, when one is named and already stored, goes
+		// straight after it on the same bot. An archive that is not here yet follows on a later
+		// pass, the same way a subtitle is delivered apart from the film.
+		ids := []int{it.MessageID}
 		if meta, ok := sign.ParseCaption(it.Caption); ok && meta.Subs == "yes" {
-			if archive, hasArchive, err = s.Cat.ArchiveOf(ctx, it.MessageID); err != nil {
+			archive, hasArchive, err := s.Cat.ArchiveOf(ctx, it.MessageID)
+			if err != nil {
 				return err
 			}
-			if !hasArchive {
-				continue
+			if hasArchive {
+				ids = append(ids, archive.MessageID)
 			}
 		}
-		refused, err := send(it.MessageID)
-		if err != nil {
-			if channelGone(err) {
-				return s.replaceBanned(ctx, m, err)
-			}
-			return err
-		}
-		if refused {
-			break
-		}
-		if hasArchive {
-			if refused, err = send(archive.MessageID); err != nil {
-				if channelGone(err) {
-					return s.replaceBanned(ctx, m, err)
-				}
-				return err
-			} else if refused {
-				break
-			}
-		}
+		push(ids...)
 	}
-	// An archive that turned up after its video went is sent now.
-	if failed == "" && copied < copyBatch {
+	if room > 0 {
 		late, err := s.Cat.UnmirroredArchives(ctx, m.ID)
 		if err != nil {
 			return err
 		}
 		for _, id := range late {
-			if copied >= copyBatch {
+			if room <= 0 {
 				break
 			}
-			if refused, err := send(id); err != nil {
-				if channelGone(err) {
-					return s.replaceBanned(ctx, m, err)
-				}
-				return err
-			} else if refused {
-				break
-			}
+			push(id)
 		}
 	}
+	var failed string
+	if err := s.dispatch(ctx, m, units, &failed); err != nil {
+		return err
+	}
 	return s.Cat.SetMirrorError(ctx, m.ID, failed)
+}
+
+// dispatch runs each unit on its own. A unit is one video and, when it is already stored, its
+// subtitle archive, so the archive stays next to its film. Units run together up to Width.
+func (s *Service) dispatch(ctx context.Context, m catalog.Mirror, units [][]int, failed *string) error {
+	if len(units) == 0 {
+		return nil
+	}
+	width := 1
+	if s.Width != nil {
+		if n := s.Width(); n > 1 {
+			width = n
+		}
+	}
+	g, gctx := errgroup.WithContext(ctx)
+	g.SetLimit(width)
+	var mu sync.Mutex
+	var gone error
+	for _, unit := range units {
+		g.Go(func() error {
+			for i, id := range unit {
+				if i > 0 {
+					if err := wait(gctx, copyGap); err != nil {
+						return err
+					}
+				}
+				dest, err := s.Copy(gctx, id, m.ChannelID)
+				if err != nil {
+					if channelGone(err) {
+						mu.Lock()
+						if gone == nil {
+							gone = err
+						}
+						mu.Unlock()
+						return err
+					}
+					if gctx.Err() != nil {
+						return gctx.Err()
+					}
+					mu.Lock()
+					if *failed == "" {
+						*failed = err.Error()
+					}
+					mu.Unlock()
+					s.log().Warn("mirror copy failed", "channel", m.Title, "message", id, "err", err)
+					return err
+				}
+				if err := s.Cat.MarkSent(gctx, m.ID, id, dest); err != nil {
+					return err
+				}
+				s.log().Info("mirrored", "channel", m.Title, "message", id, "dest", dest)
+			}
+			return nil
+		})
+	}
+	err := g.Wait()
+	if gone != nil {
+		return s.replaceBanned(ctx, m, gone)
+	}
+	if err != nil && *failed == "" && ctx.Err() == nil {
+		return err
+	}
+	return nil
 }
 
 // channelGone reports that Telegram will not let this account use the channel any more.

@@ -435,6 +435,27 @@ func TestBackgroundRequestsAreLimitedAndDoNotHoldEachOther(t *testing.T) {
 	}
 }
 
+func TestProbeDoesNotCountAsPlayback(t *testing.T) {
+	b := setup(t, media.BlockSize, 0)
+	file := media.File{MessageID: testMessage, DocID: 77, Size: media.BlockSize}
+	end := b.engine.BeginProbe(testMessage)
+	r := newReader(context.Background(), b.engine, file, 0)
+	if _, err := r.Read(make([]byte, 16)); err != nil {
+		t.Fatal(err)
+	}
+	if b.engine.Playing() {
+		t.Fatal("a probe counted as playback")
+	}
+	end()
+	r = newReader(context.Background(), b.engine, file, 0)
+	if _, err := r.Read(make([]byte, 16)); err != nil {
+		t.Fatal(err)
+	}
+	if !b.engine.Playing() {
+		t.Fatal("a player read did not count as playback")
+	}
+}
+
 func TestCachedBlocksAreNotPaced(t *testing.T) {
 	b := setup(t, 3*media.BlockSize, 0)
 	file := media.File{MessageID: testMessage, DocID: 77, Size: 3 * media.BlockSize}

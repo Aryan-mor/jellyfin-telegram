@@ -353,6 +353,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 	go (&mirror.Service{
 		Cat: cat, Copy: pool.CopyToMirror, Log: log,
+		Width:     pool.ReadyCount,
 		ReadyOnly: func() bool { return hub.Get() != nil },
 		Replace: func(ctx context.Context, m catalog.Mirror) error {
 			if users == nil {

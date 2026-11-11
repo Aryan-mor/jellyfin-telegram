@@ -232,7 +232,9 @@ func (p *Prober) probeOne(ctx context.Context, f media.File, itemID, userID stri
 	}
 	if res.Streams == 0 {
 		p.log.Warn("probe found no streams", "message", f.MessageID)
-		return false
+		// The file was opened and has nothing to play. Leave it unprobed for a later sync,
+		// but do not sit in this run asking again every few seconds.
+		return blocks > 0
 	}
 	if err := p.cat.MarkProbed(ctx, f.MessageID, time.Now()); err != nil {
 		p.log.Warn("cannot record probe", "message", f.MessageID, "err", err)
