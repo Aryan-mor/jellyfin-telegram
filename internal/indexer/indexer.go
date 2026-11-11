@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/idscan"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
@@ -31,8 +32,11 @@ const (
 	FullWindow = 2000
 	// IncrementalWindow is the empty run tolerated by a routine check for new messages.
 	IncrementalWindow = batchSize
-	callTimeout       = 5 * time.Minute
-	defaultPace       = 150 * time.Millisecond
+	// backfillPerCheck is how many batches of old history a routine check reads when the channel
+	// is not yet covered down to its first message.
+	backfillPerCheck = 20
+	callTimeout      = 5 * time.Minute
+	defaultPace      = 150 * time.Millisecond
 )
 
 // Source reads messages from the channel.
@@ -121,55 +125,49 @@ func (x *Indexer) wrote(ctx context.Context) {
 	}
 }
 
-// Sync walks ids after the last seen message and stops after window empty ids.
+// Sync reads the channel newest first. New messages go before anything else: Up reads every id
+// above the newest one seen, and the walk down through older history checks for new ones every
+// few batches. The marks are kept in the catalog, so an interrupted walk resumes where it stopped.
+// A full window walks all the old history, a routine check only a slice of it per call.
 // It returns how many videos were added.
 func (x *Indexer) Sync(ctx context.Context, window int) (int, error) {
-	last, err := x.cat.LastMessageID(ctx)
-	if err != nil {
-		return 0, err
-	}
-	added, empty := 0, 0
-	for next := last + 1; empty < window; next += batchSize {
-		msgs, err := x.lookup(ctx, idRange(next, batchSize))
-		if err != nil {
-			return added, err
-		}
-		seen := false
-		for _, m := range msgs {
-			if !m.Exists {
-				continue
-			}
-			seen = true
-			last = max(last, m.ID)
+	added := 0
+	scan := &idscan.Scan{
+		Lookup: x.lookup,
+		Store:  x.cat,
+		Name:   "scan.main",
+		Batch:  batchSize,
+		Pace:   x.pace,
+		Legacy: x.cat.LastMessageID,
+		Saved:  x.cat.SetLastMessageID,
+		Handle: func(ctx context.Context, m media.Message) error {
 			if m.Attachment != nil {
 				if err := x.cat.PutAttachment(ctx, *m.Attachment); err != nil {
-					return added, err
+					return err
 				}
 			}
 			if m.File == nil {
-				continue
+				return nil
 			}
 			if err := x.add(ctx, *m.File); err != nil {
 				if errors.Is(err, errSkip) {
-					continue
+					return nil
 				}
-				return added, fmt.Errorf("add message %d: %w", m.ID, err)
+				return fmt.Errorf("add message %d: %w", m.ID, err)
 			}
 			added++
-		}
-		if seen {
-			empty = 0
-			if err := x.cat.SetLastMessageID(ctx, last); err != nil {
-				return added, err
-			}
-		} else {
-			empty += batchSize
-		}
-		if err := sleep(ctx, x.pace); err != nil {
-			return added, err
-		}
+			return nil
+		},
 	}
-	return added, nil
+	if err := scan.Up(ctx, window); err != nil {
+		return added, err
+	}
+	batches := backfillPerCheck
+	if window >= FullWindow {
+		batches = -1
+	}
+	_, err := scan.Down(ctx, batches, 3)
+	return added, err
 }
 
 // Reconcile re-reads every known message, then removes deleted files and picks up

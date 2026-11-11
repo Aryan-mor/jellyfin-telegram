@@ -348,7 +348,7 @@ func KnownTracks(tracks []Track) []Track {
 func (k *Key) Post(head string, m Meta) string {
 	for {
 		line := k.Sign(m)
-		if len(head)+1+len(line) <= CaptionLimit || len(m.Soft) == 0 {
+		if CaptionLen(head)+1+CaptionLen(line) <= CaptionLimit || len(m.Soft) == 0 {
 			return line
 		}
 		m.Soft = m.Soft[:len(m.Soft)-1]

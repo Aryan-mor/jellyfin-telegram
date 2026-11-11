@@ -88,7 +88,7 @@ func (c *Catalog) InboxAfter(ctx context.Context, state string, after, limit int
 
 // OpenInbox lists inbox files that still need a decision.
 func (c *Catalog) OpenInbox(ctx context.Context) ([]int, error) {
-	rows, err := c.db.QueryContext(ctx, `SELECT message_id FROM inbox_files WHERE state=? ORDER BY message_id`, "open")
+	rows, err := c.db.QueryContext(ctx, `SELECT message_id FROM inbox_files WHERE state=? ORDER BY message_id DESC`, "open")
 	if err != nil {
 		return nil, err
 	}

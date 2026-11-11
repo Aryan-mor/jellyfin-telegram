@@ -27,6 +27,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/idscan"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
@@ -34,7 +35,10 @@ import (
 
 const (
 	batchSize = 100
-	cursorKey = "forum.cursor"
+	// backfillBatches is how many batches of old history one pass reads while the channel is not yet
+	// covered down to its first message.
+	backfillBatches = 20
+	cursorKey       = "forum.cursor"
 	// maxTries is how many failed passes one file gets before it is rejected with the error.
 	// A pass runs every minute.
 	maxTries = 10
@@ -220,46 +224,36 @@ func (s *Service) failed(ctx context.Context, id int, err error) {
 	s.mu.Unlock()
 }
 
+// scan reads the channel newest first, so a file posted just now is queued before the old history
+// is read. The newest id seen is also kept under cursorKey for the pass that looks back at replies.
 func (s *Service) scan(ctx context.Context) error {
-	raw, err := s.Cat.StateValue(ctx, cursorKey)
-	if err != nil {
-		return err
-	}
-	cursor, _ := strconv.Atoi(raw)
 	window := s.Window
 	if window <= 0 {
 		window = batchSize
 	}
-	empty := 0
-	high := cursor
-	for next := cursor + 1; empty < window; next += batchSize {
-		msgs, err := s.TG.Messages(ctx, idRange(next, batchSize))
-		if err != nil {
-			return err
-		}
-		seen := false
-		for _, m := range msgs {
-			if !m.Exists {
-				continue
+	scan := &idscan.Scan{
+		Lookup: s.TG.Messages,
+		Store:  s.Cat,
+		Name:   "scan.inbox",
+		Batch:  batchSize,
+		Legacy: func(ctx context.Context) (int, error) {
+			raw, err := s.Cat.StateValue(ctx, cursorKey)
+			if err != nil {
+				return 0, err
 			}
-			seen = true
-			if m.ID > high {
-				high = m.ID
-			}
-			if err := s.observe(ctx, m); err != nil {
-				return err
-			}
-		}
-		if seen {
-			empty = 0
-		} else {
-			empty += batchSize
-		}
+			n, _ := strconv.Atoi(raw)
+			return n, nil
+		},
+		Saved: func(ctx context.Context, high int) error {
+			return s.Cat.SetStateValue(ctx, cursorKey, strconv.Itoa(high))
+		},
+		Handle: s.observe,
 	}
-	if high == cursor {
-		return nil
+	if err := scan.Up(ctx, window); err != nil {
+		return err
 	}
-	return s.Cat.SetStateValue(ctx, cursorKey, strconv.Itoa(high))
+	_, err := scan.Down(ctx, backfillBatches, 3)
+	return err
 }
 
 // isRaw is a video that a person posted and that no bot has finished with: it has no library line
@@ -530,7 +524,7 @@ func (s *Service) compose(status string, h naming.Head, claimLine string, meta s
 		if tag != "" {
 			out += "\n" + tag
 		}
-		if len(out) <= sign.CaptionLimit {
+		if sign.CaptionLen(out) <= sign.CaptionLimit {
 			return out
 		}
 		if next, ok := h.Shrink(); ok {
@@ -624,12 +618,12 @@ func (s *Service) claimCaption(status, claim string, f *media.File) string {
 func fitPlain(status, claim, body string) string {
 	caption := sign.WithHeader(status, "", claim, body)
 	lines := strings.Split(body, "\n")
-	for len(caption) > sign.CaptionLimit && len(lines) > 1 {
+	for sign.CaptionLen(caption) > sign.CaptionLimit && len(lines) > 1 {
 		lines = lines[:len(lines)-1]
 		body = strings.Join(lines, "\n")
 		caption = sign.WithHeader(status, "", claim, body)
 	}
-	for len(caption) > sign.CaptionLimit && body != "" {
+	for sign.CaptionLen(caption) > sign.CaptionLimit && body != "" {
 		_, size := utf8.DecodeLastRuneInString(body)
 		if size == 0 {
 			break
@@ -645,6 +639,8 @@ func fitPlain(status, claim, body string) string {
 // caption that is too long, stops at once instead of being repeated on every bot. The catalog row,
 // if there is one, follows. A caption that is already in place is not sent again.
 func (s *Service) write(ctx context.Context, messageID int, current, caption string) error {
+	// Last guard: no caption leaves here longer than Telegram allows.
+	caption = sign.Fit(caption)
 	if caption == current {
 		return nil
 	}
@@ -737,8 +733,11 @@ func (s *Service) ArchiveCaption(ctx context.Context, f media.File, archiveHash 
 		if tag != "" {
 			out += "\n" + tag
 		}
-		if len(out) <= sign.CaptionLimit || len(subs.Tracks) == 0 {
+		if sign.CaptionLen(out) <= sign.CaptionLimit {
 			return out
+		}
+		if len(subs.Tracks) == 0 {
+			return sign.Fit(out)
 		}
 		subs.Tracks = subs.Tracks[:len(subs.Tracks)-1]
 	}

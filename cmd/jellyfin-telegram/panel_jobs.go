@@ -474,6 +474,11 @@ func promoteAllBots(ctx context.Context, users *tguser.Manager, pool *tgpool.Poo
 	if len(names) == 0 {
 		return errors.New("no bot is connected")
 	}
+	return promoteBots(ctx, users, pool, names, ch, progress)
+}
+
+// promoteBots makes the named bots admins of the channel.
+func promoteBots(ctx context.Context, users *tguser.Manager, pool *tgpool.Pool, names []string, ch tgsetup.Created, progress panel.Step) error {
 	var failed []string
 	for _, name := range names {
 		if progress != nil {

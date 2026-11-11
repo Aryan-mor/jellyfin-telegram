@@ -5,7 +5,7 @@ import { api, pollingPaused } from "@/lib/api"
 import { t } from "@/lib/i18n"
 import { ago, cn } from "@/lib/utils"
 import { Button, Card, Empty, Table, TBody, TD, TH, THead, TR } from "@/components/ui"
-import { usePanel } from "@/panel/shell"
+import { usePanel, type BotCounters } from "@/panel/shell"
 
 type LogRow = { id: number; at: number; action: string; detail: string; ok: boolean; error?: string }
 type LogPage = { items: LogRow[]; total: number; page: number; pages: number }
@@ -43,6 +43,7 @@ export function Logs() {
   const rows = logs.data?.items ?? []
   const pages = logs.data?.pages ?? 1
   const total = logs.data?.total ?? 0
+  const counters = kind === "bot" ? bots.find((b) => b.id === id)?.counters : undefined
 
   return (
     <div className="space-y-4">
@@ -79,6 +80,7 @@ export function Logs() {
                   <Button size="sm" variant="outline" disabled={page >= pages} onClick={() => go(page + 1)}>{t("Next")}</Button>
                 </div>
               </div>
+              {kind === "bot" && <Counts c={counters} />}
               <Table>
                 <THead>
                   <TR>
@@ -104,6 +106,35 @@ export function Logs() {
           )}
         </Card>
       </div>
+    </div>
+  )
+}
+
+function mib(n: number) {
+  return n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GiB" : (n / (1 << 20)).toFixed(0) + " MiB"
+}
+
+// What this bot did since the service started. Reading file blocks is not in the event list below,
+// so it shows here.
+function Counts({ c }: { c?: BotCounters }) {
+  if (!c) return <p className="border-b px-4 py-3 text-sm text-muted-foreground">{t("No counters yet. They start when the bot connects.")}</p>
+  const wait = c.wait_until && c.wait_until * 1000 > Date.now() ? Math.ceil((c.wait_until * 1000 - Date.now()) / 1000) : 0
+  const items: [string, string][] = [
+    [t("Blocks read"), String(c.reads)],
+    [t("Data read"), mib(c.read_bytes)],
+    [t("Channel calls"), String(c.writes)],
+    [t("Refused"), String(c.failures)],
+    [t("Flood waits"), String(c.floods)],
+    [t("Last work"), c.last ? ago(c.last) : "–"],
+  ]
+  return (
+    <div className="border-b px-4 py-3">
+      <div className="grid grid-cols-2 gap-x-6 gap-y-2 sm:grid-cols-3">
+        {items.map(([k, v]) => <div key={k}><div className="text-xs text-muted-foreground">{k}</div><div className="text-sm font-medium tabular-nums">{v}</div></div>)}
+      </div>
+      <p className="mt-2 text-xs text-muted-foreground">
+        {wait ? t("Resting for {{n}} s after a flood wait.", { n: wait }) : c.running ? t("Working now.") : t("Free.")} {t("Counted since the service started.")}
+      </p>
     </div>
   )
 }

@@ -71,13 +71,32 @@ type slot struct {
 	gapUntil   time.Time
 	calls      int64
 	floods     int64
+	// Counters of this bot, since the service started. Each bot is counted on its own.
+	reads     int64
+	readBytes int64
+	writes    int64
+	failures  int64
+	lastUnix  int64
 }
 
-// BotStats counts the work done by one bot.
+// BotStats counts the work done by one bot since the service started.
 type BotStats struct {
-	ID     int64
-	Calls  int64
-	Floods int64
+	ID int64
+	// Calls is every call that worked: Reads plus Writes.
+	Calls int64
+	// Reads are file blocks read, and ReadBytes is their size.
+	Reads     int64
+	ReadBytes int64
+	// Writes are the other channel calls: send, edit, copy, delete, look up messages.
+	Writes int64
+	// Failures are calls that Telegram refused, not counting flood waits, which are in Floods.
+	Failures int64
+	Floods   int64
+	// LastUnix is when the bot last finished a call, and zero when it has not yet.
+	LastUnix int64
+	// WaitUntilUnix is when the bot may work again after a flood wait or a bench, and zero when it is free.
+	WaitUntilUnix int64
+	Running       int
 }
 
 // Pool schedules calls across bots.
@@ -142,9 +161,35 @@ func (p *Pool) Stats() []BotStats {
 	defer p.mu.Unlock()
 	out := make([]BotStats, 0, len(p.slots))
 	for _, s := range p.slots {
-		out = append(out, BotStats{ID: s.w.status().ID, Calls: s.calls, Floods: s.floods})
+		var wait time.Time
+		if s.floodUntil.After(wait) {
+			wait = s.floodUntil
+		}
+		if s.benchUntil.After(wait) {
+			wait = s.benchUntil
+		}
+		st := BotStats{
+			ID: s.w.status().ID, Calls: s.calls, Reads: s.reads, ReadBytes: s.readBytes, Writes: s.writes,
+			Failures: s.failures, Floods: s.floods, LastUnix: s.lastUnix, Running: s.inflight,
+		}
+		if wait.After(time.Now()) {
+			st.WaitUntilUnix = wait.Unix()
+		}
+		out = append(out, st)
 	}
 	return out
+}
+
+// addBytes counts what a worker just read.
+func (p *Pool) addBytes(w worker, n int) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for _, s := range p.slots {
+		if s.w == w {
+			s.readBytes += int64(n)
+			return
+		}
+	}
 }
 
 // ReadyCount returns how many bots can serve requests.
@@ -173,6 +218,9 @@ func (p *Pool) FetchBlock(ctx context.Context, messageID int, docID, block, size
 		err := p.call(ctx, messageID, func(w worker) error {
 			var err error
 			data, err = w.getBlock(ctx, messageID, docID, off, limit)
+			if err == nil {
+				p.addBytes(w, len(data))
+			}
 			return err
 		})
 		if err != nil {
@@ -211,6 +259,9 @@ func (p *Pool) FetchIn(ctx context.Context, channelID int64, messageID int, docI
 			}
 			var err error
 			data, err = in.getBlockIn(ctx, channelID, messageID, docID, off, limit)
+			if err == nil {
+				p.addBytes(w, len(data))
+			}
 			return err
 		})
 		if err != nil {
@@ -516,6 +567,52 @@ func (p *Pool) ForgetMirrorDenials(channelID int64) {
 	delete(p.denied, channelID)
 }
 
+// BotCheck is what one bot can do in one channel.
+type BotCheck struct {
+	ID       int64
+	Username string
+	State    string
+	Detail   string
+}
+
+// CheckBots asks every bot, one by one, what it can do in a channel right now. Channel 0 is the
+// main channel. A bot that cannot connect is listed as offline. Each ready bot is asked on its
+// own turn, with its own rest, so a check does not push anyone into a flood wait.
+func (p *Pool) CheckBots(ctx context.Context, channelID int64) []BotCheck {
+	out := make([]BotCheck, 0, len(p.slots))
+	for _, s := range p.slots {
+		st := s.w.status()
+		c := BotCheck{ID: st.ID, Username: st.Username}
+		b, ok := s.w.(*bot)
+		if !ok || !st.Ready {
+			c.State, c.Detail = CheckOffline, "the bot is not connected"
+			if st.Err != nil {
+				c.Detail = st.Err.Error()
+			}
+			out = append(out, c)
+			continue
+		}
+		if err := p.acquireSlot(ctx, s); err != nil {
+			c.State, c.Detail = CheckOffline, err.Error()
+			out = append(out, c)
+			continue
+		}
+		c.State, c.Detail = b.checkChannel(ctx, channelID)
+		p.finish(s, nil, botAPIGap)
+		if c.State == CheckOK && channelID != 0 {
+			p.undeny(channelID, st.ID)
+		}
+		out = append(out, c)
+	}
+	return out
+}
+
+func (p *Pool) undeny(channelID, botID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.denied[channelID], botID)
+}
+
 func (p *Pool) findBot(id int64) (*bot, error) {
 	for _, s := range p.slots {
 		b, ok := s.w.(*bot)
@@ -738,7 +835,7 @@ func slotBusy(s *slot, now time.Time, limit int, user bool) bool {
 
 // finish returns the bot to the queue. A success starts the rest. A flood wait benches it.
 func (p *Pool) finish(s *slot, err error, gap time.Duration) {
-	p.release(s, err == nil, gap)
+	p.release(s, err, gap)
 	if d, ok := tgerr.AsFloodWait(err); ok {
 		p.bench(s, d+floodMargin, true)
 		if p.log != nil {
@@ -747,13 +844,25 @@ func (p *Pool) finish(s *slot, err error, gap time.Duration) {
 	}
 }
 
-func (p *Pool) release(s *slot, ok bool, gap time.Duration) {
+func (p *Pool) release(s *slot, err error, gap time.Duration) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if s.inflight > 0 {
 		s.inflight--
 	}
+	s.lastUnix = time.Now().Unix()
+	ok := err == nil
+	if !ok {
+		if _, flood := tgerr.AsFloodWait(err); !flood {
+			s.failures++
+		}
+	}
 	if ok {
+		if gap == botReadGap {
+			s.reads++
+		} else {
+			s.writes++
+		}
 		s.calls++
 		if gap > 0 {
 			s.gapUntil = time.Now().Add(gap)

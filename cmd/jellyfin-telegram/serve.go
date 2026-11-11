@@ -563,6 +563,13 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 		},
 		Bots: func() []panel.LiveBot {
 			out := make([]panel.LiveBot, 0)
+			counts := map[int64]*panel.Counters{}
+			for _, c := range pool.Stats() {
+				counts[c.ID] = &panel.Counters{
+					Reads: c.Reads, ReadBytes: c.ReadBytes, Writes: c.Writes, Failures: c.Failures,
+					Floods: c.Floods, Running: c.Running, LastUnix: c.LastUnix, WaitUntilUnix: c.WaitUntilUnix,
+				}
+			}
 			for _, st := range pool.Statuses() {
 				msg := ""
 				if st.Err != nil {
@@ -570,7 +577,7 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 				}
 				out = append(out, panel.LiveBot{
 					ID: st.ID, Name: st.Username, OK: st.Ready && st.IsAdmin, Admin: st.IsAdmin, Error: msg,
-					ChannelTitle: st.ChannelTitle,
+					ChannelTitle: st.ChannelTitle, Counters: counts[st.ID],
 				})
 			}
 			return out
@@ -687,6 +694,8 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 			return mirrorVisibility(r, cat, users, body)
 		case "admin":
 			return mirrorAdmin(r, pool, users, body)
+		case "check":
+			return checkBots(r, cat, pool, users, main, body)
 		default:
 			return nil, errors.New("unknown action")
 		}

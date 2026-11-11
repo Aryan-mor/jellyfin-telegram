@@ -12,6 +12,8 @@ import { Button, Sheet } from "@/components/ui"
 import { confirmDialog } from "@/components/widgets"
 import { cn } from "@/lib/utils"
 
+export type BotCounters = { reads: number; read_bytes: number; writes: number; failures: number; floods: number; running: number; last?: number; wait_until?: number }
+
 export type PanelState = {
   api_id?: number
   default_api?: boolean
@@ -19,7 +21,7 @@ export type PanelState = {
   channel_title?: string
   language: string
   ui_language?: string
-  bots: { id: number; name: string; hint: string; ok: boolean; admin: boolean; connected: boolean; error?: string }[]
+  bots: { id: number; name: string; hint: string; ok: boolean; admin: boolean; connected: boolean; error?: string; counters?: BotCounters }[]
   addresses: { url: string; away: boolean }[]
   seerr: boolean
   pace?: Record<string, unknown> | null

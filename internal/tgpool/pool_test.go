@@ -296,14 +296,14 @@ func TestGapHoldsTheSameBot(t *testing.T) {
 	if !p.tryTake(s, time.Now(), false) {
 		t.Fatal("free bot was not taken")
 	}
-	p.release(s, true, time.Second)
+	p.release(s, nil, time.Second)
 	if p.tryTake(s, time.Now(), false) {
 		t.Fatal("bot ran again during its rest")
 	}
 	if !p.tryTake(s, time.Now(), true) {
 		t.Fatal("a job the person asked for waited out the voluntary rest")
 	}
-	p.release(s, true, 0)
+	p.release(s, nil, 0)
 	s.floodUntil = time.Now().Add(time.Minute)
 	if p.tryTake(s, time.Now(), true) {
 		t.Fatal("a flood wait let a user job through")

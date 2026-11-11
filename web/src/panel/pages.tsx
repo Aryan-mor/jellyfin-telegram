@@ -210,6 +210,40 @@ export function Accounts() {
 
 // ---------- Main channel ----------
 
+type BotCheckResult = { ok: boolean; fixed: number; error?: string; bots: { id: number; name: string; state: string; detail?: string }[] }
+
+// Asks Telegram what each bot can do in one channel (id 0 is the main channel). "Fix" adds the
+// bots that are missing, with the signed-in account.
+function BotCheck({ id, compact }: { id: number; compact?: boolean }) {
+  const [res, setRes] = useState<BotCheckResult | null>(null)
+  const { busy, run } = useBusy()
+  const refresh = useRefreshState()
+  const check = (fix: boolean) => void run(fix ? "fix" : "check", async () => {
+    setRes(await api<BotCheckResult>("/panel/mirrors/check", { id, fix }))
+    if (fix) await refresh()
+  })
+  const label = (state: string) => state === "ok" ? t("ok") : state === "no_post" ? t("may not post") : state === "offline" ? t("not connected") : t("not an admin")
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap gap-2">
+        <Button size="sm" variant="outline" disabled={!!busy} onClick={() => check(false)}>{busy === "check" ? t("Checking…") : t("Check bots in channel")}</Button>
+        {res && !res.ok && <Button size="sm" disabled={!!busy} onClick={() => check(true)}>{busy === "fix" ? t("Adding…") : t("Add the missing bots")}</Button>}
+      </div>
+      {res && <div className={compact ? "space-y-1 text-xs" : "space-y-1 text-sm"}>
+        {res.bots.map((b) => (
+          <div key={b.id} className="flex flex-wrap items-center gap-2">
+            <span className="font-medium">{b.name || t("bot {{id}}", { id: b.id })}</span>
+            <StatusBadge tone={b.state === "ok" ? "ok" : b.state === "offline" ? "warn" : "bad"}>{label(b.state)}</StatusBadge>
+            {b.state !== "ok" && b.detail && <span className="text-muted-foreground">{b.detail}</span>}
+          </div>
+        ))}
+        {res.fixed > 0 && <p className="text-muted-foreground">{t("{{count}} bots added.", { count: res.fixed })}</p>}
+        {res.error && <p className="text-destructive">{res.error}</p>}
+      </div>}
+    </div>
+  )
+}
+
 export function Channel() {
   const { data: s } = usePanel()
   const refresh = useRefreshState()
@@ -222,6 +256,7 @@ export function Channel() {
     <Page title={t("Main channel")} text={t("The channel that holds the library. Replacing it is refused once files are indexed, because the library would point at the wrong messages.")}>
       <Section title={t("Library channel")} actions={!editing && <Button size="sm" variant="outline" onClick={() => setEditing(true)}>{t("Replace")}</Button>}>
         <ChannelName name={s.channel_title} id={s.channel_id} className="text-sm font-medium" />
+        <BotCheck id={0} />
         {editing && <div className="space-y-2">
           <FieldLabel htmlFor="main-channel">{t("New channel")}</FieldLabel>
           <Input id="main-channel" value={channel} placeholder={t("https://t.me/c/1234567890/5 or -100…")} onChange={(e) => setChannel(e.target.value)} />
@@ -355,6 +390,7 @@ function MirrorRow({ m, bots, onDone }: { m: NonNullable<PanelState["mirrors"]>[
           {m.error && botLive && <StatusBadge tone="bad">{t("problem")}</StatusBadge>}
         </div>
         {m.error && botLive && <div className="pt-0.5 text-xs text-destructive">{m.error}</div>}
+        <div className="pt-1.5"><BotCheck id={m.id} compact /></div>
       </TD>
       <TD><KindPicks value={m.kinds} disabled={busy === "save"} onChange={(k) => { if (k.length) save(k) }} /></TD>
       <TD className="pr-4">

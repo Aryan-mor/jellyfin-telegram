@@ -213,6 +213,50 @@ func (b *bot) connect(ctx context.Context) error {
 	})
 }
 
+// Results of looking at one bot in one channel.
+const (
+	CheckOK       = "ok"
+	CheckNotAdmin = "not_admin"
+	CheckNoPost   = "no_post"
+	CheckOffline  = "offline"
+)
+
+// checkChannel asks Telegram what this bot can do in a channel right now. Channel 0 is the main
+// channel. For the main channel the answer also refreshes the admin flag the bot shows.
+func (b *bot) checkChannel(ctx context.Context, id int64) (state, detail string) {
+	api, _, err := b.conn()
+	if err != nil {
+		return CheckOffline, "the bot is not connected"
+	}
+	if id == 0 || id == b.channelID {
+		ch, err := resolveChannel(ctx, api, b.channelID)
+		if err != nil {
+			return CheckNotAdmin, err.Error()
+		}
+		_, admin := ch.GetAdminRights()
+		admin = admin || ch.Creator
+		b.mu.Lock()
+		b.st.IsAdmin = admin
+		b.st.ChannelTitle = ch.Title
+		b.mu.Unlock()
+		if !admin {
+			return CheckNotAdmin, "the bot is not an admin of the main channel"
+		}
+		return CheckOK, ""
+	}
+	if !b.status().IsAdmin {
+		return CheckNotAdmin, "the bot is not an admin of the main channel"
+	}
+	ch, err := resolveChannel(ctx, api, id)
+	if err != nil {
+		return CheckNotAdmin, "the bot cannot see this channel"
+	}
+	if !canPost(ch) {
+		return CheckNoPost, "the bot is in the channel but may not post"
+	}
+	return CheckOK, ""
+}
+
 // resolveChannel finds the channel. Bots may address a channel they belong to with an
 // access hash of zero, which is why only the id is needed in the configuration.
 func resolveChannel(ctx context.Context, api *tg.Client, id int64) (*tg.Channel, error) {
@@ -447,7 +491,7 @@ func (b *bot) sendDocument(ctx context.Context, name, caption string, data []byt
 			MimeType:   "application/zip",
 			Attributes: []tg.DocumentAttributeClass{&tg.DocumentAttributeFilename{FileName: name}},
 		},
-		Message:  caption,
+		Message:  sign.Fit(caption),
 		RandomID: int64(binary.LittleEndian.Uint64(randomID[:])),
 	}
 	if replyTo > 0 {
@@ -941,7 +985,7 @@ func (b *bot) repostDocument(ctx context.Context, sourceID int, caption string) 
 	req := &tg.MessagesSendMediaRequest{
 		Peer:     peer,
 		Media:    &tg.InputMediaDocument{ID: doc.AsInput()},
-		Message:  caption,
+		Message:  sign.Fit(caption),
 		RandomID: id,
 	}
 	sent, err := api.MessagesSendMedia(ctx, req)
@@ -960,7 +1004,7 @@ func (b *bot) editCaption(ctx context.Context, messageID int, caption string) er
 		return err
 	}
 	req := &tg.MessagesEditMessageRequest{Peer: peer, ID: messageID}
-	req.SetMessage(caption)
+	req.SetMessage(sign.Fit(caption))
 	if _, err := api.MessagesEditMessage(ctx, req); err != nil {
 		// Telegram refuses an edit that changes nothing. The caption is already what we want.
 		if tgerr.Is(err, "MESSAGE_NOT_MODIFIED") {

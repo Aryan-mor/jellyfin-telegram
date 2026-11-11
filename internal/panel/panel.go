@@ -33,6 +33,19 @@ type LiveBot struct {
 	Admin        bool
 	Error        string
 	ChannelTitle string
+	Counters     *Counters
+}
+
+// Counters is the work one bot has done since the service started.
+type Counters struct {
+	Reads         int64 `json:"reads"`
+	ReadBytes     int64 `json:"read_bytes"`
+	Writes        int64 `json:"writes"`
+	Failures      int64 `json:"failures"`
+	Floods        int64 `json:"floods"`
+	Running       int   `json:"running"`
+	LastUnix      int64 `json:"last,omitempty"`
+	WaitUntilUnix int64 `json:"wait_until,omitempty"`
 }
 
 // Options wires the page to the running service.
@@ -287,13 +300,14 @@ type Account struct {
 }
 
 type botView struct {
-	ID        int64  `json:"id"`
-	Name      string `json:"name"`
-	Hint      string `json:"hint"`
-	OK        bool   `json:"ok"`
-	Admin     bool   `json:"admin"`
-	Connected bool   `json:"connected"`
-	Error     string `json:"error,omitempty"`
+	ID        int64     `json:"id"`
+	Name      string    `json:"name"`
+	Hint      string    `json:"hint"`
+	OK        bool      `json:"ok"`
+	Admin     bool      `json:"admin"`
+	Connected bool      `json:"connected"`
+	Error     string    `json:"error,omitempty"`
+	Counters  *Counters `json:"counters,omitempty"`
 }
 
 type state struct {
@@ -1011,6 +1025,7 @@ func (p *panel) snapshot() (state, error) {
 			view.OK = b.OK
 			view.Admin = b.Admin
 			view.Error = b.Error
+			view.Counters = b.Counters
 			if b.Name != "" {
 				view.Name = "@" + strings.TrimPrefix(b.Name, "@")
 			}
