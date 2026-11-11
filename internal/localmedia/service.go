@@ -12,8 +12,8 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autoupload"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )

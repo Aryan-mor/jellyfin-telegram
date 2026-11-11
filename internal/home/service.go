@@ -17,8 +17,8 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
-	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/localmedia"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
