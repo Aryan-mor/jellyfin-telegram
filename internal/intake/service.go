@@ -516,7 +516,7 @@ func (s *Service) originLine(ctx context.Context, docID int64) string {
 // caption would pass Telegram's limit the lesser details are dropped one at a time.
 func (s *Service) compose(status string, h naming.Head, claimLine string, meta sign.Meta) string {
 	tag := h.LookupTag()
-	signed := meta
+	signed := meta.WithoutUnknown()
 	for {
 		head := naming.Caption(h)
 		top := sign.WithHeader(status, "", claimLine, head)
@@ -722,7 +722,7 @@ func (s *Service) ArchiveCaption(ctx context.Context, f media.File, archiveHash 
 	if title == "" {
 		title = "Untitled"
 	}
-	subs := sign.Subs{DocID: f.DocID, VideoHash: meta.Hash, ArchiveHash: archiveHash, Tracks: tracks}
+	subs := sign.Subs{DocID: f.DocID, VideoHash: meta.Hash, ArchiveHash: archiveHash, Tracks: sign.KnownTracks(tracks)}
 	tag := h.LookupTag()
 	for {
 		line := s.Key.SignSubs(subs)

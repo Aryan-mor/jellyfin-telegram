@@ -450,6 +450,14 @@ func ShowTracks(tracks []sign.Track, prefer string) []string {
 	if len(tracks) == 0 {
 		return nil
 	}
+	var known []sign.Track
+	for _, t := range tracks {
+		if lang.Normalize(t.Lang) == "" {
+			continue
+		}
+		known = append(known, t)
+	}
+	tracks = known
 	var first, rest []sign.Track
 	for _, t := range tracks {
 		if prefer != "" && strings.EqualFold(t.Lang, prefer) && len(first) == 0 {

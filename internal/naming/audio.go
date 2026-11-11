@@ -64,6 +64,14 @@ func AudioTracks(in []AudioIn, original, fileText string) []sign.AudioTrack {
 // are shown and anything left becomes "+N".
 func ShowAudio(tracks []sign.AudioTrack) []string {
 	const max = 6
+	known := make([]sign.AudioTrack, 0, len(tracks))
+	for _, t := range tracks {
+		if lang.Normalize(t.Lang) == "" {
+			continue
+		}
+		known = append(known, t)
+	}
+	tracks = known
 	var out []string
 	for i, t := range tracks {
 		if i == max {

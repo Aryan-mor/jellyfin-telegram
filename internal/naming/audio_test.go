@@ -73,4 +73,10 @@ func TestCaptionShowsAudio(t *testing.T) {
 	if shown := ShowAudio(many); len(shown) != 7 || shown[6] != "+2" {
 		t.Fatalf("shown: %v", shown)
 	}
+	if shown := ShowAudio([]sign.AudioTrack{{Lang: "und"}, {Lang: "und"}}); shown != nil {
+		t.Fatalf("unknown audio was written: %v", shown)
+	}
+	if shown := ShowTracks([]sign.Track{{Lang: "und", Codec: "srt"}, {Lang: "fa", Codec: "srt"}}, ""); len(shown) != 1 || shown[0] != "fa (srt)" {
+		t.Fatalf("unknown subtitles were written: %v", shown)
+	}
 }

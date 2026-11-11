@@ -16,6 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 )
 
 const (
@@ -300,6 +301,45 @@ func (k *Key) Sign(m Meta) string {
 	c := m.Canonical()
 	sig := ed25519.Sign(k.priv, []byte(c))
 	return c + ";s=" + base64.RawURLEncoding.EncodeToString(sig)
+}
+
+// WithoutUnknown drops tracks whose language is missing or a placeholder such as "und".
+// A dropped subtitle list is marked cut, so a reader does not treat it as the full set.
+func (m Meta) WithoutUnknown() Meta {
+	soft := make([]Track, 0, len(m.Soft))
+	dropped := false
+	for _, t := range m.Soft {
+		if lang.Normalize(t.Lang) == "" {
+			dropped = true
+			continue
+		}
+		soft = append(soft, t)
+	}
+	if dropped {
+		m.Cut = true
+	}
+	m.Soft = soft
+	audio := make([]AudioTrack, 0, len(m.Audio))
+	for _, t := range m.Audio {
+		if lang.Normalize(t.Lang) == "" {
+			continue
+		}
+		audio = append(audio, t)
+	}
+	m.Audio = audio
+	return m
+}
+
+// KnownTracks keeps subtitle tracks that name a real language.
+func KnownTracks(tracks []Track) []Track {
+	out := make([]Track, 0, len(tracks))
+	for _, t := range tracks {
+		if lang.Normalize(t.Lang) == "" {
+			continue
+		}
+		out = append(out, t)
+	}
+	return out
 }
 
 // Post signs m so that head and the machine line together stay within CaptionLimit.

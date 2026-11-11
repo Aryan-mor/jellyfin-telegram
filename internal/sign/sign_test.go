@@ -203,6 +203,22 @@ func TestEmptyIMDbAndQualityStayValid(t *testing.T) {
 	}
 }
 
+func TestUnknownTracksAreNotWritten(t *testing.T) {
+	m := sample()
+	m.Soft = append(m.Soft, Track{Lang: "und", Codec: "srt", Index: 9, HasIndex: true})
+	m.Audio = []AudioTrack{{Lang: "und", Index: 1, HasIndex: true}, {Lang: "fa", Role: RoleDub, Index: 2, HasIndex: true}}
+	got := m.WithoutUnknown()
+	if !got.Cut || len(got.Soft) != len(sample().Soft) {
+		t.Fatalf("soft %+v cut %v", got.Soft, got.Cut)
+	}
+	if len(got.Audio) != 1 || got.Audio[0].Lang != "fa" {
+		t.Fatalf("audio %+v", got.Audio)
+	}
+	if strings.Contains(got.Canonical(), "und") {
+		t.Fatal(got.Canonical())
+	}
+}
+
 func TestCaptionStaysWithinLimit(t *testing.T) {
 	key, err := LoadOrCreate(t.TempDir())
 	if err != nil {
