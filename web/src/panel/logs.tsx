@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { useSearchParams } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api, pollingPaused } from "@/lib/api"
@@ -112,6 +112,116 @@ export function Logs() {
 
 function mib(n: number) {
   return n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GiB" : (n / (1 << 20)).toFixed(0) + " MiB"
+}
+
+type LiveRow = LogRow & { kind: string; actor_id: number; name: string }
+
+const LIVE_KEY = "panel-live-log"
+
+function liveOn() {
+  try { return localStorage.getItem(LIVE_KEY) !== "off" } catch { return true }
+}
+
+// BotsLive lists every bot with what it did since the service started, one bot per row.
+export function BotsLive() {
+  const { data: s } = usePanel()
+  const bots = s?.bots ?? []
+  if (!bots.length) return <Empty>{t("No bots yet.")}</Empty>
+  return (
+    <Table>
+      <THead>
+        <TR>
+          <TH>{t("Bot")}</TH>
+          <TH>{t("State")}</TH>
+          <TH>{t("Last work")}</TH>
+          <TH>{t("Blocks read")}</TH>
+          <TH>{t("Data read")}</TH>
+          <TH>{t("Channel calls")}</TH>
+          <TH>{t("Refused")}</TH>
+        </TR>
+      </THead>
+      <TBody>
+        {bots.map((b) => {
+          const c = b.counters
+          const wait = c?.wait_until && c.wait_until * 1000 > Date.now()
+          const state = !b.connected ? t("Offline") : wait ? t("Resting") : c?.running ? t("Working now.").replace(/\.$/, "") : t("Free.").replace(/\.$/, "")
+          return (
+            <TR key={b.id}>
+              <TD className="whitespace-nowrap font-medium">{b.name ? "@" + b.name.replace(/^@/, "") : t("bot {{id}}", { id: b.id })}</TD>
+              <TD className="whitespace-nowrap text-muted-foreground">{state}</TD>
+              <TD className="whitespace-nowrap text-muted-foreground">{c?.last ? <span title={new Date(c.last * 1000).toLocaleString()}>{ago(c.last)}</span> : "–"}</TD>
+              <TD className="tabular-nums">{c?.reads ?? 0}</TD>
+              <TD className="whitespace-nowrap tabular-nums">{mib(c?.read_bytes ?? 0)}</TD>
+              <TD className="tabular-nums">{c?.writes ?? 0}</TD>
+              <TD className={cn("tabular-nums", c?.failures ? "text-destructive" : "")}>{c?.failures ?? 0}</TD>
+            </TR>
+          )
+        })}
+      </TBody>
+    </Table>
+  )
+}
+
+// LiveLog is every account and bot's actions together, newest first. It is on unless the person turned it off.
+export function LiveLog() {
+  const { data: s } = usePanel()
+  const [on, setOn] = useState(liveOn)
+  const logs = useQuery({
+    queryKey: ["panel-logs", "all"],
+    enabled: on,
+    queryFn: () => api<{ items: LiveRow[] }>("/panel/activity?kind=all&page=1"),
+    refetchInterval: () => (pollingPaused() ? false : 3000),
+  })
+  function toggle(v: boolean) {
+    setOn(v)
+    try { localStorage.setItem(LIVE_KEY, v ? "on" : "off") } catch { /* private window */ }
+  }
+  const rows = logs.data?.items ?? []
+  const accounts = s?.telegram?.sessions ?? []
+  const who = (r: LiveRow) => {
+    if (r.name) return r.kind === "bot" ? "@" + r.name.replace(/^@/, "") : r.name
+    if (r.kind === "bot") return t("bot {{id}}", { id: r.actor_id })
+    const ses = accounts.find((a) => a.user_id === r.actor_id)
+    return ses?.username ? "@" + ses.username : t("user {{id}}", { id: r.actor_id })
+  }
+  return (
+    <div className="space-y-3">
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={on} onChange={(e) => toggle(e.target.checked)} />
+        {t("Live log")}
+      </label>
+      {on && (
+        <>
+          {logs.isError && <p className="text-sm text-destructive">{(logs.error as Error).message}</p>}
+          <div className="max-h-96 overflow-y-auto rounded-lg border">
+            <Table>
+              <THead>
+                <TR>
+                  <TH>{t("Who")}</TH>
+                  <TH>{t("When")}</TH>
+                  <TH>{t("Action")}</TH>
+                  <TH>{t("Detail")}</TH>
+                  <TH>{t("Result")}</TH>
+                </TR>
+              </THead>
+              <TBody>
+                {rows.map((row) => (
+                  <TR key={row.id}>
+                    <TD className="whitespace-nowrap font-medium">{who(row)}</TD>
+                    <TD className="whitespace-nowrap text-muted-foreground"><span title={new Date(row.at * 1000).toLocaleString()}>{ago(row.at)}</span></TD>
+                    <TD>{t(row.action)}</TD>
+                    <TD className="max-w-xs truncate"><span title={row.detail}>{row.detail}</span></TD>
+                    <TD className={row.ok ? "text-muted-foreground" : "text-destructive"}>{row.ok ? t("ok") : (row.error || t("failed"))}</TD>
+                  </TR>
+                ))}
+              </TBody>
+            </Table>
+            {!logs.isLoading && !rows.length && <Empty>{t("Nothing here yet.")}</Empty>}
+          </div>
+        </>
+      )}
+    </div>
+  )
 }
 
 // What this bot did since the service started. Reading file blocks is not in the event list below,

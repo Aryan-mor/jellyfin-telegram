@@ -12,6 +12,7 @@ import {
 } from "@/components/ui"
 import { AutoFilterForm } from "@/components/autofilter"
 import { confirmDialog, CopyField, MultiSelect, ProgressSteps, StatusBadge, TelegramLoginDialog, type Tone } from "@/components/widgets"
+import { BotsLive, LiveLog } from "@/panel/logs"
 import { useJob, usePanel, useAutomation, type PanelState, type Session } from "@/panel/shell"
 
 // ---------- shared pieces ----------
@@ -159,6 +160,12 @@ export function Overview() {
         <Stat label={t("Channel")} value={s.channel_title || channelID(s.channel_id)} tip={channelID(s.channel_id)} sub={(s.language ? t("Subtitles {{language}}", { language: s.language }) : t("No subtitles")) + (mirrors ? " · " + plural(mirrors, "mirror") : "")} to="/channel" />
         <Stat label={t("Shared library")} value={forumValue} sub={forumSub} to="/channel/shared" />
       </div>
+      <Section title={t("Bots")} text={t("What each bot did since the service started.")}>
+        <BotsLive />
+      </Section>
+      <Section title={t("Live log")} text={t("Everything the bots and accounts do, as it happens.")}>
+        <LiveLog />
+      </Section>
       <Section title={t("Open from another device")} text={t("On this computer, open /panel. From a phone on the same Wi-Fi, open this link. The part after code= is the secret that keeps the panel private.")}>
         <CopyField label={t("Share link")} value={share || t("No network address yet")} />
       </Section>

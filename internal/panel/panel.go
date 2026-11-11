@@ -241,11 +241,14 @@ func (p *panel) guard(next http.HandlerFunc) http.HandlerFunc {
 
 func (p *panel) handleActivity(w http.ResponseWriter, r *http.Request) {
 	kind := r.URL.Query().Get("kind")
-	if kind != "account" && kind != "bot" {
+	if kind != "account" && kind != "bot" && kind != "all" {
 		writeError(w, http.StatusBadRequest, "pick an account or a bot")
 		return
 	}
 	id, _ := strconv.ParseInt(r.URL.Query().Get("id"), 10, 64)
+	if kind == "all" {
+		id = -1 // the live log has no single actor
+	}
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	if page < 1 {
 		page = 1

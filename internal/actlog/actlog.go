@@ -12,6 +12,9 @@ import (
 
 const keepRows = 8000
 
+// KindAll lists every actor's actions together instead of one actor's.
+const KindAll = "all"
+
 const schema = `
 CREATE TABLE IF NOT EXISTS activity (
 	id       INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -108,14 +111,19 @@ func (s *Store) List(kind string, actorID int64, page, limit int) ([]Entry, int,
 	if page < 1 {
 		page = 1
 	}
+	// Kind "all" is the live log: every account and bot together, newest first.
+	where, args := `kind=? AND actor_id=?`, []any{kind, actorID}
+	if kind == KindAll {
+		where, args = `1=1`, nil
+	}
 	var total int
-	if err := s.db.QueryRow(`SELECT COUNT(*) FROM activity WHERE kind=? AND actor_id=?`, kind, actorID).Scan(&total); err != nil {
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM activity WHERE `+where, args...).Scan(&total); err != nil {
 		return nil, 0, err
 	}
 	rows, err := s.db.Query(`
 		SELECT id, at_unix, kind, actor_id, name, action, detail, ok, error
-		FROM activity WHERE kind=? AND actor_id=?
-		ORDER BY id DESC LIMIT ? OFFSET ?`, kind, actorID, limit, (page-1)*limit)
+		FROM activity WHERE `+where+`
+		ORDER BY id DESC LIMIT ? OFFSET ?`, append(args, limit, (page-1)*limit)...)
 	if err != nil {
 		return nil, 0, err
 	}
