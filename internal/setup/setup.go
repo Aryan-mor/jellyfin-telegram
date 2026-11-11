@@ -247,7 +247,7 @@ func (w *Wizard) serveWaitingPanel(rw http.ResponseWriter, r *http.Request) {
 	switch r.URL.Path {
 	case "/panel/state":
 		writeJSON(rw, http.StatusOK, map[string]any{
-			"starting": true,
+			"starting":   true,
 			"channel_id": 0, "language": "", "bots": []any{}, "addresses": []any{}, "accounts": []any{},
 			"seerr": false, "fladder": false, "telegram_search": false, "local": false, "sources": false,
 		})
