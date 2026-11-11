@@ -110,12 +110,12 @@ func seerrScan(base, key string, log *slog.Logger) func(context.Context) error {
 // startSources prepares the copier of films and series from other Telegram channels. It stays idle
 // until a person turns it on in the panel, and it needs a signed-in account. It returns nil when
 // accounts cannot start.
-func startSources(cfg config.Config, cat *catalog.Catalog, users *tguser.Manager) *tgsource.Service {
+func startSources(cfg config.Config, cat *catalog.Catalog, users *tguser.Manager, log *slog.Logger) *tgsource.Service {
 	if users == nil {
 		return nil
 	}
 	svc := tgsource.New()
-	svc.Cat, svc.TG, svc.LibraryChannel = cat, users, cfg.ChannelID
+	svc.Cat, svc.TG, svc.LibraryChannel, svc.Log = cat, users, cfg.ChannelID, log
 	return svc
 }
 

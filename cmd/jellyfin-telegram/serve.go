@@ -305,7 +305,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	personal := startHome(cfg, envPath, cat, users, log)
 	accounts := newAccountControl(cfg, envPath, users)
 	local := startLocal(cfg, envPath, cat, pool, users, log)
-	sources := startSources(cfg, cat, users)
+	sources := startSources(cfg, cat, users, log)
 	news := startNews(ctx, cfg, cat, users, sources, log)
 	allowBotTalk(ctx, pool, users, cat, []string{cfg.HashtagIndexBot, cfg.ChannelIndexBot}, log)
 	tagIndex := startHashIndex(ctx, cfg, cat, pool, users, log)

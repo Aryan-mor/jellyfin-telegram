@@ -214,7 +214,7 @@ func TestLookBackStopsAtTheCutoff(t *testing.T) {
 	tg := &fakeTG{free: true}
 	tg.posts = append(tg.posts, movie(1, now.AddDate(0, 0, -30)), movie(2, now.AddDate(0, 0, -20)), movie(3, now.AddDate(0, 0, -2)), movie(4, now.AddDate(0, 0, -1)))
 	s, _ := newService(t, tg, now)
-	enable(t, s, nil) // seven days
+	enable(t, s, func(set *Settings) { set.LookBackDays = 7 })
 	s.Pass(context.Background())
 	if got := tg.all(); len(got) != 2 || got[0] != 3 || got[1] != 4 {
 		t.Fatalf("a week back copied %v", got)

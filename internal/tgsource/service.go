@@ -63,6 +63,9 @@ type Service struct {
 	running  bool
 	note     string
 	lastPass time.Time
+	// passFiles and passBytes count what the pass in progress has copied, for its closing log line.
+	passFiles int
+	passBytes int64
 	// run is held for the length of a pass, so the settings page can wait for it to stop.
 	run sync.Mutex
 	// cancel stops the pass in progress when the switch is turned off.
@@ -229,6 +232,16 @@ func (s *Service) Pass(parent context.Context) bool {
 		s.setNote(err.Error())
 		return false
 	}
+	s.mu.Lock()
+	s.passFiles, s.passBytes = 0, 0
+	s.mu.Unlock()
+	started := s.now()
+	defer func() {
+		s.mu.Lock()
+		files, size := s.passFiles, s.passBytes
+		s.mu.Unlock()
+		s.logf("direct file pass finished", "copied", files, "size", humanSize(size), "took", s.now().Sub(started).Round(time.Second).String())
+	}()
 	more := false
 	for _, src := range sources {
 		if ctx.Err() != nil || !src.Enabled || src.NoForwards {
@@ -238,6 +251,9 @@ func (s *Service) Pass(parent context.Context) bool {
 		if errors.Is(err, errWalkMore) {
 			more = true
 			continue
+		}
+		if err == nil {
+			s.logf("channel is fully read", "channel", src.Title)
 		}
 		if err != nil {
 			if stop := s.record(ctx, src, err); stop {
@@ -340,8 +356,13 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings, bu
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
 	w := catalog.SourceWalk{Cursor: src.Cursor, ScanTop: src.ScanTop, Watermark: src.Watermark, CoveredDays: src.CoveredDays}
 	var edge edgeMsg
+	// A finished week stores the newest id and stops. That left the older files uncopied.
+	// All-history (zero days) resumes under that id instead of treating the channel as done.
+	if w.Cursor == 0 && days == 0 && w.Watermark > 1 && w.CoveredDays != 0 {
+		w.Cursor = w.Watermark
+		w.ScanTop = w.Watermark
+	}
 	if w.Cursor == 0 {
-		// A new walk. If an earlier one covered less time than is wanted now, it starts again from the top.
 		if !covers(w.CoveredDays, days) {
 			w.Watermark = 0
 		}
@@ -360,7 +381,12 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings, bu
 	if days > 0 {
 		cutoff = s.now().AddDate(0, 0, -days)
 	}
+	// A history page is already older than the live top. The top stays the watermark so a new
+	// post is still seen first; it must not hide the files under it.
 	floor := w.Watermark
+	if w.Cursor > 0 {
+		floor = 0
+	}
 	pages := 0
 	for {
 		if err := ctx.Err(); err != nil {
@@ -388,6 +414,7 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings, bu
 				take = append(take, p)
 			}
 		}
+		s.logf("read a page of history", "channel", src.Title, "page", pages, "messages", len(page.Posts), "in range", len(take), "oldest", dateOf(page.Oldest), "more", !done)
 		// edge is the message directly under the newest post of this page: the oldest message of
 		// the page already read. The subtitle archive is posted under its video, so it is seen first.
 		if err := s.copyPosts(ctx, src, take, set, subsBelow(page, edge)); err != nil {
@@ -482,26 +509,38 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 	}
 	var want []tguser.Post
 	inPage := map[string]bool{}
+	notWanted, copiedBefore := 0, 0
 	for _, p := range posts {
 		if ok, _ := set.Wanted(p); !ok {
+			notWanted++
 			continue
 		}
 		key := fmt.Sprintf("%s|%d", p.Name, p.Size)
 		if inPage[key] {
+			copiedBefore++
 			continue
 		}
 		if same, err := s.Cat.CopiedFile(ctx, p.Name, p.Size); err != nil {
 			return err
 		} else if same {
+			copiedBefore++
 			continue
 		}
 		inPage[key] = true
 		if done, err := s.Cat.CopiedDoc(ctx, p.DocID); err != nil {
 			return err
 		} else if done {
+			copiedBefore++
 			continue
 		}
 		want = append(want, p)
+	}
+	if len(posts) > 0 {
+		var total int64
+		for _, p := range want {
+			total += p.Size
+		}
+		s.logf("checked posts", "channel", src.Title, "posts", len(posts), "to copy", len(want), "size", humanSize(total), "skipped, not a wanted file", notWanted, "skipped, already copied", copiedBefore)
 	}
 	sort.Slice(want, func(i, j int) bool { return want[i].ID < want[j].ID })
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
@@ -535,6 +574,7 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 				return err
 			}
 			if have >= set.MaxPerDay {
+				s.logf("daily limit reached, copying stops until tomorrow", "limit", set.MaxPerDay, "copied today", have)
 				return errDailyCap
 			}
 			// A burst never goes past the cap: send what is left of today's allowance.
@@ -547,7 +587,9 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 			return err
 		}
 		if len(want) > 0 && set.PauseSeconds > 0 {
-			if err := s.sleep(ctx, pace.Pause(time.Duration(set.PauseSeconds)*time.Second)); err != nil {
+			rest := pace.Pause(time.Duration(set.PauseSeconds) * time.Second)
+			s.logf("resting between groups", "channel", src.Title, "for", rest.Round(time.Second).String(), "left on this page", len(want))
+			if err := s.sleep(ctx, rest); err != nil {
 				return err
 			}
 		}
@@ -560,6 +602,7 @@ func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.
 	var send []tguser.Post
 	for _, p := range batch {
 		if p.NoForward {
+			s.logf("skipped a protected file", "channel", src.Title, "file", p.Name, "size", humanSize(p.Size))
 			if err := s.mark(ctx, src, p, catalog.CopyFailed, "this post is protected from copying"); err != nil {
 				return err
 			}
@@ -586,16 +629,25 @@ func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.
 	if len(ids) == 0 {
 		return nil
 	}
+	var total int64
+	for _, p := range send {
+		total += p.Size
+	}
+	s.logf("copying to the library", "channel", src.Title, "files", len(send), "messages", len(ids), "size", humanSize(total))
+	began := s.now()
 	err := s.forward(ctx, ref, ids)
 	if err == nil {
 		for _, p := range send {
 			if err := s.mark(ctx, src, p, catalog.CopyDone, ""); err != nil {
 				return err
 			}
+			s.logf("copied", "channel", src.Title, "file", p.Name, "size", humanSize(p.Size))
 		}
-		s.logf("copied videos", "channel", src.Title, "count", len(send))
+		s.addPass(len(send), total)
+		s.logf("copied a group", "channel", src.Title, "files", len(send), "size", humanSize(total), "took", s.now().Sub(began).Round(time.Millisecond).String())
 		return nil
 	}
+	s.logf("copy failed", "channel", src.Title, "files", len(send), "err", err)
 	// A message deleted since it was listed fails the whole group. Try them one by one so the rest go through.
 	if len(send) > 1 && tgerr.Is(err, "MESSAGE_ID_INVALID", "MESSAGE_ID_EMPTY") {
 		for _, p := range send {
@@ -605,7 +657,10 @@ func (s *Service) copyBatch(ctx context.Context, src catalog.Source, ref tguser.
 				if err := s.mark(ctx, src, p, catalog.CopyDone, ""); err != nil {
 					return err
 				}
+				s.addPass(1, p.Size)
+				s.logf("copied", "channel", src.Title, "file", p.Name, "size", humanSize(p.Size))
 			case tgerr.Is(one, "MESSAGE_ID_INVALID", "MESSAGE_ID_EMPTY"):
+				s.logf("skipped a deleted post", "channel", src.Title, "file", p.Name)
 				if err := s.mark(ctx, src, p, catalog.CopyFailed, "the post was deleted"); err != nil {
 					return err
 				}
@@ -623,12 +678,42 @@ func (s *Service) forward(ctx context.Context, ref tguser.SourceRef, ids []int) 
 	err := s.TG.Copy(ctx, ref, ids)
 	if wait, ok := tgerr.AsFloodWait(err); ok && wait > 0 && wait <= maxFloodWait {
 		s.setNote(fmt.Sprintf("Telegram asked for a pause of %d seconds.", int(wait.Seconds())))
+		s.logf("Telegram asked for a pause, waiting", "seconds", int(wait.Seconds()))
 		if serr := s.sleep(ctx, wait+time.Second); serr != nil {
 			return serr
 		}
 		return s.TG.Copy(ctx, ref, ids)
 	}
 	return err
+}
+
+func (s *Service) addPass(files int, size int64) {
+	s.mu.Lock()
+	s.passFiles += files
+	s.passBytes += size
+	s.mu.Unlock()
+}
+
+// humanSize writes a byte count the way a person reads it.
+func humanSize(n int64) string {
+	const unit = 1024
+	if n < unit {
+		return fmt.Sprintf("%d B", n)
+	}
+	div, exp := int64(unit), 0
+	for m := n / unit; m >= unit; m /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %ciB", float64(n)/float64(div), "KMGTPE"[exp])
+}
+
+// dateOf writes a day, or a dash when the time is unknown.
+func dateOf(t time.Time) string {
+	if t.IsZero() {
+		return "-"
+	}
+	return t.Format("2006-01-02")
 }
 
 func (s *Service) mark(ctx context.Context, src catalog.Source, p tguser.Post, state, errText string) error {

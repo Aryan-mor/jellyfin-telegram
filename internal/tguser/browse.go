@@ -285,10 +285,18 @@ func (m *Manager) History(ctx context.Context, ref SourceRef, offsetID, limit in
 		}
 		return out, nil
 	})
+	page, _ := val.(Page)
+	where := ref.Username
+	if where == "" {
+		where = strconv.FormatInt(ref.ChannelID, 10)
+	}
+	// A pass that finds nothing new still has to show up. Copy is the only other account line,
+	// so a caught-up channel used to look idle.
+	m.did(lv, "read", fmt.Sprintf("%s offset %d · %d", where, offsetID, len(page.IDs)), err)
 	if err != nil {
 		return Page{}, err
 	}
-	return val.(Page), nil
+	return page, nil
 }
 
 func postFrom(msg *tg.Message) (Post, bool) {

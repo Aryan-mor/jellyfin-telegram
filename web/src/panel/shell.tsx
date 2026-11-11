@@ -45,14 +45,16 @@ export type Session = {
 export function usePanel() {
   return useQuery({
     queryKey: ["panel-state"],
-    queryFn: () => api<PanelState>("/panel/state"),
+    queryFn: ({ signal }) => api<PanelState>("/panel/state", undefined, AbortSignal.any([signal, AbortSignal.timeout(4000)])),
     retry: (_count, error) => unreachable(error),
     retryDelay: 1000,
+    refetchIntervalInBackground: true,
     refetchInterval: (q) => {
       // Keep asking after retries, too. A dead poll must not turn into "no account".
-      if (unreachable(q.state.error)) return 1000
+      // A hidden tab still has to notice the server came back.
+      if (unreachable(q.state.error) || q.state.data?.starting) return 1000
       if (pollingPaused()) return false
-      return q.state.data?.starting ? 1000 : 8000
+      return 8000
     },
   })
 }
@@ -97,7 +99,9 @@ export function useAutomation() {
 // computer) has its own message and must not sit on the preparing screen.
 function unreachable(error: unknown) {
   if (error instanceof TypeError) return true
+  if (typeof DOMException !== "undefined" && error instanceof DOMException) return true
   if (!(error instanceof Error)) return false
+  if (error.name === "TimeoutError" || error.name === "AbortError") return true
   const msg = error.message
   return msg === "Failed to fetch" || msg === "Load failed" || msg === "Something went wrong" || msg === "starting" || msg.includes("still starting")
 }

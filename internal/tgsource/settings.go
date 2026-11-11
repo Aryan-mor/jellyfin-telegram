@@ -44,11 +44,12 @@ type Settings struct {
 // legacyDailyCap is the old default. A saved 500 is the untouched default, so it becomes unlimited.
 const legacyDailyCap = 500
 
-// Defaults are cautious: a week back, no short clips, and a steady pace. Copying is not capped per day.
+// Defaults keep every film and episode in the channel, however old the post is. A file with a
+// title, year and length is copied. Short clips and samples stay out. Copying is not capped per day.
 func Defaults() Settings {
 	return Settings{
-		LookBackDays: 7, EveryMinutes: 30, MinMinutes: 15, MinMB: 100,
-		SkipWords: "trailer,teaser,sample,promo", PauseSeconds: 180,
+		LookBackDays: 0, EveryMinutes: 30, MinMinutes: 15, MinMB: 100,
+		SkipWords: "trailer,teaser,sample,promo", PauseSeconds: 0,
 		AutoAdd: true,
 	}
 }
