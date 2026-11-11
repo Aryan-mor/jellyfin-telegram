@@ -620,6 +620,7 @@ func (p *panel) handleSourceAction(w http.ResponseWriter, r *http.Request) {
 
 var mirrorActions = map[string]bool{
 	"add": true, "save": true, "remove": true, "visibility": true, "admin": true,
+	"check": true,
 }
 
 func (p *panel) handleMirrorCreate(w http.ResponseWriter, r *http.Request) {
