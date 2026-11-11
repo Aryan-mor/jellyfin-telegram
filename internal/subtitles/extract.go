@@ -23,8 +23,9 @@ type ExtractTrack struct {
 	Ext      string
 }
 
-// ExtractTracks saves every track in one pass over the file, named <position>.<ext> in dir. This
-// reads the whole video, so it runs in the background and once per file.
+// ExtractTracks saves every track in one pass over the file, named <position>.<ext> in dir.
+// It reads the whole video. ExtractSparse is the path that does not: this remains for a
+// container whose index does not point at the subtitle bytes.
 func (t Tools) ExtractTracks(ctx context.Context, url string, tracks []ExtractTrack, dir string) error {
 	if t.FFmpeg == "" {
 		return errors.New("ffmpeg not found")

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -1329,7 +1330,11 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 	}
 	w := &subarchive.Worker{
 		Catalog: cat, Client: client, Prober: prober, Channel: pool, Extractor: tools,
-		Resolver: prober.Replacements(), SubtitlesRoot: root, StreamURL: lib.StreamURL, Log: log,
+		Resolver: prober.Replacements(), SubtitlesRoot: root,
+		Open: func(ctx context.Context, f media.File) io.ReaderAt {
+			return pool.Open(ctx, f.MessageID, f.DocID, f.Size)
+		},
+		StreamURL: lib.StreamURL, Log: log,
 	}
 	if cfg.SignedLibrary {
 		w.Forum = lazyForum{hub}

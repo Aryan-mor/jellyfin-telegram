@@ -29,6 +29,10 @@ const (
 	warmBytes        = 4096
 	// botReadGap is the rest after a file-block read. Playback stays usable.
 	botReadGap = 500 * time.Millisecond
+	// sparseGap is the rest after a subtitle-index read. Those reads are a kilobyte, not a
+	// whole block, and a movie needs thousands of them. The long playback rest would turn
+	// that into hours. Playback bots are still kept aside, because this is not botReadGap.
+	sparseGap = time.Millisecond
 	// PlaybackBots is how many bots only read while something plays. One live stream needs about three.
 	PlaybackBots = 3
 	// botAPIGap is the rest after a channel call (history, send, forward, delete).
@@ -897,7 +901,7 @@ func (p *Pool) release(s *slot, err error, gap time.Duration) {
 		}
 	}
 	if ok {
-		if gap == botReadGap {
+		if gap == botReadGap || gap == sparseGap {
 			s.reads++
 		} else {
 			s.writes++

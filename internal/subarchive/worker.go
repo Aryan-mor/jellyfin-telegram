@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -46,8 +47,10 @@ type Worker struct {
 	Extractor     Extractor
 	Resolver      *subtitles.Resolver // nil skips replacing hollow tracks
 	SubtitlesRoot string              // Jellyfin's data/subtitles folder as seen from here
-	StreamURL     func(messageID int) string
-	Log           *slog.Logger
+	// Open reads ranges of a channel file. Nil falls back to reading the whole video.
+	Open      func(ctx context.Context, f media.File) io.ReaderAt
+	StreamURL func(messageID int) string
+	Log       *slog.Logger
 	// Forum claims a file before extraction and signs the caption again once the archive exists.
 	// Nil keeps channel mode, where there is no claim.
 	Forum Forum
@@ -170,7 +173,7 @@ func (w *Worker) process(ctx context.Context, f media.File, m jellyfin.Located, 
 				return errWait
 			}
 		}
-		// Only this path reads the whole video.
+		// Only this path reads the whole video, and only when the container has no subtitle index.
 		w.Log.Info("extracting subtitles", "message", f.MessageID, "tracks", len(info.Extractable), "mib", f.Size>>20)
 		if entries, err = w.extract(ctx, f, info); err != nil {
 			return err
@@ -298,6 +301,17 @@ func (w *Worker) extract(ctx context.Context, f media.File, info jellyfin.Subtit
 	for _, s := range info.Extractable {
 		tracks = append(tracks, subtitles.ExtractTrack{Position: s.Position, Codec: s.Codec, Ext: s.Ext()})
 	}
+	if w.Open != nil && f.Size > 0 {
+		got, n, err := w.extractSparse(ctx, f, info)
+		if err == nil {
+			w.Log.Info("subtitles taken from the container index", "message", f.MessageID, "tracks", len(got), "kib", (n+1023)>>10)
+			return got, nil
+		}
+		if !errors.Is(err, subtitles.ErrSparseUnsupported) {
+			return nil, err
+		}
+		w.Log.Info("container has no subtitle index, reading the whole file", "message", f.MessageID)
+	}
 	if err := w.Extractor.ExtractTracks(ctx, w.StreamURL(f.MessageID), tracks, dir); err != nil {
 		return nil, err
 	}
@@ -313,6 +327,37 @@ func (w *Worker) extract(ctx context.Context, f media.File, info jellyfin.Subtit
 		entries = append(entries, Entry{Position: s.Position, Ext: s.Ext(), Language: s.Language, Data: data})
 	}
 	return entries, nil
+}
+
+func (w *Worker) extractSparse(ctx context.Context, f media.File, info jellyfin.SubtitleInfo) ([]Entry, int64, error) {
+	ra := w.Open(ctx, f)
+	if ra == nil {
+		return nil, 0, subtitles.ErrSparseUnsupported
+	}
+	tracks := make([]subtitles.ExtractTrack, 0, len(info.Extractable))
+	for _, s := range info.Extractable {
+		tracks = append(tracks, subtitles.ExtractTrack{Position: s.Position, Codec: s.Codec, Ext: s.Ext()})
+	}
+	out, err := subtitles.ExtractSparse(ctx, ra, f.Size, tracks)
+	var n int64
+	if d, ok := ra.(interface{ Downloaded() int64 }); ok {
+		n = d.Downloaded()
+	}
+	if err != nil {
+		return nil, n, err
+	}
+	entries := make([]Entry, 0, len(info.Extractable))
+	for _, s := range info.Extractable {
+		data, ok := out[s.Position]
+		if !ok {
+			return nil, n, fmt.Errorf("track %d was not in the index", s.Position)
+		}
+		if len(data) == 0 {
+			data = placeholder(s.Ext())
+		}
+		entries = append(entries, Entry{Position: s.Position, Ext: s.Ext(), Language: s.Language, Data: data})
+	}
+	return entries, n, nil
 }
 
 func placeholder(ext string) []byte {
