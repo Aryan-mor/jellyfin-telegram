@@ -566,8 +566,8 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			}
 			return out
 		},
-		Paused:     hold.Stopped,
-		SetPaused:  hold.Set,
+		Paused:    hold.Stopped,
+		SetPaused: hold.Set,
 		Logs: func(kind string, id int64, page, limit int) (any, int, error) {
 			if journal == nil {
 				return []actlog.Entry{}, 0, nil

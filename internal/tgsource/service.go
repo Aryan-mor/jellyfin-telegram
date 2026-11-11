@@ -22,7 +22,7 @@ import (
 
 const (
 	settingsKey = "tgsource_settings"
-	pageSize = 100
+	pageSize    = 100
 	// historyPages is how many older pages one channel reads per pass. One page, then the next
 	// channel. New posts are still taken first (peek), so a long history cannot hide a fresh file.
 	// The pass returns and comes back shortly while any channel still has older pages left.
