@@ -1,6 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react"
 import { NavLink, Outlet, useLocation } from "react-router"
-import { useQuery } from "@tanstack/react-query"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   Bot, Cable, CloudUpload, Film, Filter, Globe, Home, HardDrive, Images, KeyRound, Languages, Loader2, Menu, Moon, Newspaper,
   Radio, ScrollText, Send, Share2, Sun, Tv, UserRound,
@@ -30,6 +30,7 @@ export type PanelState = {
   telegram?: { sessions?: Session[] }
   accounts: { app: string; path: string; user?: string; password?: string; note?: string }[]
   forum?: Record<string, unknown> | null
+  paused?: boolean
   // starting is set while the process is still coming up. The reply is empty on purpose.
   starting?: boolean
 }
@@ -63,6 +64,33 @@ export function useJob(enabled = true) {
   })
 }
 
+export function useAutomation() {
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  async function setPaused(paused: boolean) {
+    if (paused) {
+      const ok = await confirmDialog(
+        t("Pause automatic work?"),
+        t("Bots and accounts stop searching, copying and uploading on their own. Watching and this panel keep working."),
+        t("Pause automatic work"),
+        false,
+      )
+      if (!ok) return
+    }
+    setBusy(true)
+    try {
+      await api("/panel/automation", { paused })
+      await qc.invalidateQueries({ queryKey: ["panel-state"] })
+      toast(paused ? t("Automatic work is paused") : t("Automatic work resumed"))
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : t("Something went wrong"))
+    } finally {
+      setBusy(false)
+    }
+  }
+  return { busy, setPaused }
+}
+
 // unreachable is a server that is down or still booting. A real refusal (wrong code, not this
 // computer) has its own message and must not sit on the preparing screen.
 function unreachable(error: unknown) {
@@ -86,6 +114,7 @@ export function Shell() {
   // Either way the pages would say nothing is signed in. Hold every page until a finished state arrives.
   const preparing = state.isPending || !!s?.starting || unreachable(state.error)
   const job = useJob(!preparing)
+  const auto = useAutomation()
   const update = useQuery({
     queryKey: ["panel-update"],
     enabled: !preparing,
@@ -195,6 +224,12 @@ export function Shell() {
           <Button type="button" size="icon" variant="ghost" aria-label={t("Open menu")} onClick={() => setOpen(true)}><Menu className="size-4" /></Button>
           <span className="text-sm font-medium">{t("Panel")}</span>
         </div>
+        {s?.paused && (
+          <div className="flex flex-wrap items-center justify-between gap-3 bg-rose-500/15 px-4 py-2 text-sm">
+            <span>{t("Automatic work is paused. Playback and this panel keep working. Bots and accounts do not start new work until you resume.")}</span>
+            <Button size="sm" disabled={auto.busy} onClick={() => void auto.setPaused(false)}>{t("Start again")}</Button>
+          </div>
+        )}
         {update.data?.available && (
           <div className="flex flex-wrap items-center justify-between gap-3 bg-sky-500/15 px-4 py-2 text-sm">
             <span>

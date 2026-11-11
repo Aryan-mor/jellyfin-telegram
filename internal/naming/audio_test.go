@@ -59,7 +59,7 @@ func TestCaptionShowsAudio(t *testing.T) {
 	tracks := []sign.AudioTrack{{Lang: "fa", Role: sign.RoleDub}, {Lang: "en", Role: sign.RoleOriginal}, {Lang: "ja"}}
 	got := Caption(Head{Title: "Inception", Year: 2010, TMDB: 27205, Label: "1080p", Audio: ShowAudio(tracks),
 		Soft: []string{"fa (srt)", "en (srt)"}, Hard: "none"})
-	want := "Inception (2010)\n🎬 Movie · TMDB 27205 · 1080p\n🔊 Audio: fa (dubbed) · en (original) · ja\n💬 Soft: fa (srt), en (srt) · Hard: none"
+	want := "Inception (2010)\n1080p\n🔊 fa dub · en · ja\n💬 fa (srt), en (srt)"
 	if got != want {
 		t.Fatalf("got:\n%s\nwant:\n%s", got, want)
 	}

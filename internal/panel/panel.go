@@ -97,6 +97,10 @@ type Options struct {
 	AutoFilter setup.Mounter
 	// Logs lists one page of what an account or a bot did. kind is "account" or "bot".
 	Logs func(kind string, actorID int64, page, limit int) (any, int, error)
+	// Paused reports that automatic bot and account work is stopped.
+	Paused func() bool
+	// SetPaused pauses or resumes that work. Nil hides the switch.
+	SetPaused func(bool) error
 }
 
 // ErrBusy means a create job is already running.
@@ -149,6 +153,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
 	mux.HandleFunc("POST /panel/restart", p.guard(p.handleRestart))
+	mux.HandleFunc("POST /panel/automation", p.guard(p.handleAutomation))
 	mux.HandleFunc("GET /panel/update", p.guard(func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, version.Check(r.Context()))
 	}))
@@ -310,6 +315,7 @@ type state struct {
 	Accounts       []Account `json:"accounts"`
 	Starting       bool      `json:"starting,omitempty"`
 	Forum          any       `json:"forum,omitempty"`
+	Paused         bool      `json:"paused"`
 }
 
 func (p *panel) handleUILanguage(w http.ResponseWriter, r *http.Request) {
@@ -661,6 +667,25 @@ func (p *panel) handleRestart(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 }
 
+func (p *panel) handleAutomation(w http.ResponseWriter, r *http.Request) {
+	if p.o.SetPaused == nil {
+		writeError(w, http.StatusNotFound, "pause is not available")
+		return
+	}
+	var body struct {
+		Paused bool `json:"paused"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	if err := p.o.SetPaused(body.Paused); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"paused": body.Paused})
+}
+
 func (p *panel) handleJobs(w http.ResponseWriter, _ *http.Request) {
 	if p.o.Job == nil {
 		writeJSON(w, http.StatusOK, JobView{Progress: []JobLine{}})
@@ -1007,6 +1032,9 @@ func (p *panel) snapshot() (state, error) {
 	}
 	if p.o.Starting != nil && p.o.Starting() {
 		s.Starting = true
+	}
+	if p.o.Paused != nil {
+		s.Paused = p.o.Paused()
 	}
 	return s, nil
 }

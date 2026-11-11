@@ -12,6 +12,7 @@ import (
 	"github.com/gotd/td/tgerr"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -190,6 +191,9 @@ func (s *Service) Run(ctx context.Context) {
 	if s.Limits.QueryGap == 0 {
 		s.Limits.QueryGap = 5 * time.Second
 	}
+	if hold.Wait(ctx) != nil {
+		return
+	}
 	timer := time.NewTimer(time.Minute)
 	defer timer.Stop()
 	for {
@@ -197,8 +201,22 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+		case <-hold.Changed():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
 		}
-		s.pass(ctx)
+		if ctx.Err() != nil {
+			return
+		}
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			s.pass(work)
+			done()
+		}
 		timer.Reset(s.Every)
 	}
 }

@@ -10,6 +10,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -22,13 +23,20 @@ func autoAddChannels(ctx context.Context, cat *catalog.Catalog, sources *tgsourc
 	tick := time.NewTicker(time.Hour)
 	defer tick.Stop()
 	for {
-		if err := autoAddPass(ctx, cat, sources, news, users, idx, log); err != nil && ctx.Err() == nil && log != nil {
-			log.Warn("channel auto-add", "err", err)
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			err := autoAddPass(work, cat, sources, news, users, idx, log)
+			cancelled := work.Err() != nil
+			done()
+			if err != nil && ctx.Err() == nil && !cancelled && log != nil {
+				log.Warn("channel auto-add", "err", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		case <-hold.Changed():
 		}
 	}
 }

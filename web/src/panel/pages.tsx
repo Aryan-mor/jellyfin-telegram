@@ -12,7 +12,7 @@ import {
 } from "@/components/ui"
 import { AutoFilterForm } from "@/components/autofilter"
 import { confirmDialog, CopyField, MultiSelect, ProgressSteps, StatusBadge, TelegramLoginDialog, type Tone } from "@/components/widgets"
-import { useJob, usePanel, type PanelState, type Session } from "@/panel/shell"
+import { useJob, usePanel, useAutomation, type PanelState, type Session } from "@/panel/shell"
 
 // ---------- shared pieces ----------
 
@@ -116,6 +116,7 @@ type Forum = { group?: boolean; delete_originals?: boolean; fingerprint?: string
 
 export function Overview() {
   const { data: s } = usePanel()
+  const auto = useAutomation()
   if (!s) return null
   const signed = (s.telegram?.sessions?.length ?? 0) > 0
   const botsOk = s.bots.filter((b) => b.ok && b.admin).length
@@ -130,6 +131,13 @@ export function Overview() {
   else if (forum?.group) { forumValue = t("Waiting"); forumSub = t("Restart to start it") }
   return (
     <Page title={t("Overview")} text={t("Everything this server runs, and where to open it.")}>
+      <Section
+        title={t("Automatic work")}
+        text={t("Bots and signed-in accounts stop searching, copying and uploading on their own. Playback, Jellyfin and anything you start here keep working.")}
+        actions={<Button disabled={auto.busy} onClick={() => void auto.setPaused(!s.paused)}>{s.paused ? t("Start again") : t("Pause automatic work")}</Button>}
+      >
+        <p className="text-sm">{s.paused ? t("Paused. Bots and accounts are not working on their own.") : t("Running. Bots and accounts are working on their own.")}</p>
+      </Section>
       {!signed && <SignInFirst />}
       <Section title={t("Apps")} text={t("User and password for each app. The name opens that app in a new tab.")}>
         <div className="grid gap-3 sm:grid-cols-2">

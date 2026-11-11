@@ -265,13 +265,13 @@ func TestPublishedCaptionNamesAPublicSourceAndHidesAPrivateOne(t *testing.T) {
 	if len(byDoc) != 3 {
 		t.Fatalf("signed posts = %d", len(byDoc))
 	}
-	if !strings.Contains(byDoc[1000], "📡 Source: Movies (@movies)") {
+	if !strings.Contains(byDoc[1000], "📡 Movies (@movies)") {
 		t.Fatalf("public source missing:\n%s", byDoc[1000])
 	}
-	if !strings.Contains(byDoc[2000], "📡 Source: private channel") || strings.Contains(byDoc[2000], "Secret Films") {
+	if !strings.Contains(byDoc[2000], "📡 private") || strings.Contains(byDoc[2000], "Secret Films") {
 		t.Fatalf("private source:\n%s", byDoc[2000])
 	}
-	if strings.Contains(byDoc[3000], "📡 Source:") {
+	if strings.Contains(byDoc[3000], "📡 ") {
 		t.Fatalf("a file posted here has a source line:\n%s", byDoc[3000])
 	}
 	if !strings.HasSuffix(byDoc[1000], "\n#tm_m_603_none_en") || len(byDoc[1000]) > sign.CaptionLimit {
@@ -838,7 +838,7 @@ func TestPostNamesTheAudioAndTheDub(t *testing.T) {
 		t.Fatalf("posts = %d", len(got))
 	}
 	text := got[0].File.Caption
-	if !strings.Contains(text, "🔊 Audio: fa (dubbed) · en (original)") {
+	if !strings.Contains(text, "🔊 fa dub · en") {
 		t.Fatalf("the readable caption lacks the audio line:\n%s", text)
 	}
 	meta, ok := sign.ParseCaption(text)
@@ -864,7 +864,61 @@ func TestAudioWithoutAnOriginalLanguageHasNoRole(t *testing.T) {
 	svc.OriginalLanguage = func(context.Context, int, bool) (string, error) { return "", errMissing }
 	passes(t, 4, svc)
 	got := posts(w)
-	if len(got) != 1 || !strings.Contains(got[0].File.Caption, "🔊 Audio: fa · en\n") {
+	if len(got) != 1 || !strings.Contains(got[0].File.Caption, "🔊 fa · en\n") {
 		t.Fatalf("caption:\n%v", got)
+	}
+}
+
+// A claim on a packed caption stays inside Telegram's limit. The title, the content hash, and the
+// hashtag stay. Lesser lines go first, and only then are subtitle tracks cut.
+func TestClaimShrinksAPackedCaption(t *testing.T) {
+	w := newWorld()
+	key := newKey(t)
+	meta := sign.Meta{
+		Kind: "e", TMDB: 248830, Quality: "1080p", Season: 1, Episode: 8,
+		DocID: 1000, Size: 1000, Status: sign.StatusSubtitles,
+		Hash: "iU1sOxZyBusmFfu8r_uVQQ", Hard: "none", IMDb: "tt1234567",
+		OSDb: "dd832ff1deb915ec", Duration: 1764,
+	}
+	for i := 0; i < 80; i++ {
+		meta.Soft = append(meta.Soft, sign.Track{Lang: "und", Codec: "srt", Index: i + 2, HasIndex: true})
+	}
+	svc := newInstall(t, w, 11, key)
+	h := naming.Head{
+		Title: "Stick", Year: 2025, Episode: true, Season: 1, Number: 8, TMDB: 248830,
+		Label: "1080p", IMDb: meta.IMDb, Soft: naming.ShowTracks(meta.Soft, "fa"), Hard: "none",
+		Source: naming.SourceLine("Movies", "movies"), AudioLang: "en", SubLang: "fa",
+	}
+	packed := svc.compose(sign.StatusSubtitles, h, "", meta)
+	if len(packed) > sign.CaptionLimit {
+		t.Fatalf("packed caption is already %d", len(packed))
+	}
+	msg := film(80, 1000, "Stick.S01E08.mkv", "")
+	msg.File.Caption = packed
+	msg.Text = packed
+	w.put(msg)
+	won, err := svc.Claim(context.Background(), *msg.File)
+	if err != nil || won {
+		t.Fatalf("claim: won=%v err=%v", won, err)
+	}
+	got := caption(w, 80)
+	if len(got) > sign.CaptionLimit {
+		t.Fatalf("len %d\n%s", len(got), got)
+	}
+	if !strings.Contains(got, "Stick (2025)") || strings.Contains(got, "TMDB") {
+		t.Fatalf("title:\n%s", got)
+	}
+	parsed, ok := sign.ParseCaption(got)
+	if !ok || parsed.Hash != meta.Hash || !parsed.Authentic() {
+		t.Fatalf("hash ok=%v %q", ok, parsed.Hash)
+	}
+	if !strings.Contains(got, "#tm_tv_248830_1_8") {
+		t.Fatalf("hashtag gone:\n%s", got)
+	}
+	if len(parsed.Soft) >= 80 && !parsed.Cut {
+		t.Fatalf("a packed track list was kept whole: %d", len(parsed.Soft))
+	}
+	if header, _ := sign.SplitHeader(got); header.Claim == nil || header.Claim.Op != "subs" {
+		t.Fatalf("no subtitle claim:\n%s", got)
 	}
 }

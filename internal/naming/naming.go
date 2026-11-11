@@ -201,7 +201,8 @@ type Head struct {
 	SubLang string
 }
 
-// Caption builds the readable head. The signed line is added by the caller.
+// Caption builds the readable head. The signed line and the hashtag are added by the caller.
+// The title stays. Ids that already live in the hashtag or the signed line are not spelled out again.
 func Caption(h Head) string {
 	title := h.Title
 	if title == "" {
@@ -210,42 +211,80 @@ func Caption(h Head) string {
 	if h.Year > 0 {
 		title = fmt.Sprintf("%s (%d)", title, h.Year)
 	}
-	kind := "Movie"
-	if h.Episode {
-		kind = "Episode"
-	}
 	var bits []string
-	bits = append(bits, kind)
-	if h.TMDB > 0 {
-		bits = append(bits, fmt.Sprintf("TMDB %d", h.TMDB))
-	}
-	if h.IMDb != "" {
-		bits = append(bits, "IMDb "+h.IMDb)
+	if h.Episode {
+		bits = append(bits, fmt.Sprintf("S%02dE%02d", h.Season, h.Number))
 	}
 	if h.Label != "" {
 		bits = append(bits, h.Label)
 	}
-	soft := "none"
-	if len(h.Soft) > 0 {
-		soft = strings.Join(h.Soft, ", ")
+	if h.IMDb != "" {
+		bits = append(bits, h.IMDb)
 	}
-	hard := h.Hard
-	if hard == "" {
-		hard = "unknown"
+	head := title
+	if len(bits) > 0 {
+		head += "\n" + strings.Join(bits, " · ")
 	}
-	head := title + "\n🎬 " + strings.Join(bits, " · ")
 	if line := audioLine(h.Audio); line != "" {
 		head += "\n" + line
 	}
-	head = fmt.Sprintf("%s\n💬 Soft: %s · Hard: %s", head, soft, hard)
-	if h.Source != "" {
-		head += "\n" + h.Source
+	if line := softLine(h.Soft, h.Hard); line != "" {
+		head += "\n" + line
+	}
+	if src := compactSource(h.Source); src != "" {
+		head += "\n" + src
 	}
 	return head
 }
 
+// Shrink drops one readable detail, least important first.
+// The title, the year, and the episode numbers stay. false means nothing is left to drop.
+func (h Head) Shrink() (Head, bool) {
+	switch {
+	case h.Source != "":
+		h.Source = ""
+	case len(h.Soft) > 0:
+		h.Soft = nil
+	case h.Hard != "" && h.Hard != "none" && h.Hard != "unknown":
+		h.Hard = ""
+	case len(h.Audio) > 0:
+		h.Audio = nil
+	case h.IMDb != "":
+		h.IMDb = ""
+	case h.Label != "":
+		h.Label = ""
+	default:
+		return h, false
+	}
+	return h, true
+}
+
+// softLine is the readable subtitle line. "none" and "unknown" hardsubs are not written.
+func softLine(soft []string, hard string) string {
+	showHard := hard != "" && hard != "none" && hard != "unknown"
+	if len(soft) == 0 && !showHard {
+		return ""
+	}
+	line := "💬"
+	if len(soft) > 0 {
+		line += " " + strings.Join(soft, ", ")
+	}
+	if showHard {
+		if len(soft) > 0 {
+			line += " · "
+		} else {
+			line += " "
+		}
+		line += "hard " + hard
+	}
+	return line
+}
+
 // Source prefix of the line that says where a copied file came from.
-const sourcePrefix = "📡 Source: "
+const sourcePrefix = "📡 "
+
+// legacySourcePrefix is the longer form written before the caption was shortened.
+const legacySourcePrefix = "📡 Source: "
 
 // SourceLine names the channel a file was copied from.
 // A public channel (one with a username) is named. A private channel is not: the caption is
@@ -254,7 +293,7 @@ func SourceLine(title, username string) string {
 	username = strings.TrimPrefix(strings.TrimSpace(username), "@")
 	title = strings.TrimSpace(title)
 	if username == "" {
-		return sourcePrefix + "private channel"
+		return sourcePrefix + "private"
 	}
 	if title == "" {
 		return sourcePrefix + "@" + username
@@ -262,11 +301,31 @@ func SourceLine(title, username string) string {
 	return fmt.Sprintf("%s%s (@%s)", sourcePrefix, title, username)
 }
 
+// compactSource writes a source line without the word "Source". An empty string stays empty.
+func compactSource(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" {
+		return ""
+	}
+	if strings.HasPrefix(line, legacySourcePrefix) {
+		line = strings.TrimSpace(strings.TrimPrefix(line, legacySourcePrefix))
+	} else if strings.HasPrefix(line, sourcePrefix) {
+		line = strings.TrimSpace(strings.TrimPrefix(line, sourcePrefix))
+	}
+	if line == "" {
+		return ""
+	}
+	if line == "private channel" {
+		line = "private"
+	}
+	return sourcePrefix + line
+}
+
 // SourceIn reads a source line already written in a caption. An empty string means there is none.
 func SourceIn(caption string) string {
 	for _, line := range strings.Split(caption, "\n") {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, sourcePrefix) {
+		if strings.HasPrefix(line, legacySourcePrefix) || strings.HasPrefix(line, sourcePrefix) {
 			return line
 		}
 	}

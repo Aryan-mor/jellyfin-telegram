@@ -8,6 +8,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/newsfeed"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
@@ -34,13 +35,20 @@ func watchChannelIndex(ctx context.Context, cat *catalog.Catalog, idx *chanindex
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for {
-		if err := voteReadyChannels(ctx, cat, idx, log); err != nil && ctx.Err() == nil {
-			log.Warn("channel index vote", "err", err)
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			err := voteReadyChannels(work, cat, idx, log)
+			cancelled := work.Err() != nil
+			done()
+			if err != nil && ctx.Err() == nil && !cancelled {
+				log.Warn("channel index vote", "err", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		case <-hold.Changed():
 		}
 	}
 }

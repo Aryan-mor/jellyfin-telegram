@@ -19,9 +19,11 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
@@ -114,13 +116,20 @@ func (s *Service) Run(ctx context.Context) {
 	tick := time.NewTicker(time.Minute)
 	defer tick.Stop()
 	for {
-		if err := s.Pass(ctx); err != nil && ctx.Err() == nil {
-			s.log().Warn("intake", "err", err)
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			err := s.Pass(work)
+			cancelled := work.Err() != nil
+			done()
+			if err != nil && ctx.Err() == nil && !cancelled {
+				s.log().Warn("intake", "err", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		case <-hold.Changed():
 		}
 	}
 }
@@ -482,7 +491,7 @@ func (s *Service) caption(ctx context.Context, file *media.File, meta sign.Meta)
 	if h.Source == "" {
 		h.Source = s.originLine(ctx, file.DocID)
 	}
-	return s.compose(meta.Status, naming.Caption(h), h.LookupTag(), "", meta)
+	return s.compose(meta.Status, h, "", meta)
 }
 
 // originLine is the source line for a document copied from another channel, or empty when this
@@ -503,18 +512,42 @@ func (s *Service) originLine(ctx context.Context, docID int64) string {
 }
 
 // compose lays out a library post. claimLine is empty unless somebody is working on it.
-func (s *Service) compose(status, head, tag, claimLine string, meta sign.Meta) string {
-	top := sign.WithHeader(status, "", claimLine, head)
-	reserve := top
-	if tag != "" {
-		reserve += "\n" + tag
+// The title, the content hash, and the hashtag stay. Everything else is shortened, and when the
+// caption would pass Telegram's limit the lesser details are dropped one at a time.
+func (s *Service) compose(status string, h naming.Head, claimLine string, meta sign.Meta) string {
+	tag := h.LookupTag()
+	signed := meta
+	for {
+		head := naming.Caption(h)
+		top := sign.WithHeader(status, "", claimLine, head)
+		reserve := top
+		if tag != "" {
+			reserve += "\n" + tag
+		}
+		line := s.Key.Sign(signed)
+		out := top + "\n" + line
+		if tag != "" {
+			out += "\n" + tag
+		}
+		if len(out) <= sign.CaptionLimit {
+			return out
+		}
+		if next, ok := h.Shrink(); ok {
+			h = next
+			continue
+		}
+		if next, ok := signed.ShrinkOptional(); ok {
+			signed = next
+			continue
+		}
+		// Tracks are the last thing to go. The hash and the hashtag are already in place.
+		line = s.Key.Post(reserve, signed)
+		out = top + "\n" + line
+		if tag != "" {
+			out += "\n" + tag
+		}
+		return out
 	}
-	line := s.Key.Post(reserve, meta)
-	out := top + "\n" + line
-	if tag != "" {
-		out += "\n" + tag
-	}
-	return out
 }
 
 func (s *Service) headOf(file *media.File, m sign.Meta) naming.Head {
@@ -564,11 +597,46 @@ func (s *Service) take(ctx context.Context, f *media.File, op string) (won, clai
 		status = sign.StatusSubtitles
 	}
 	line := s.Key.SignClaim(op, f.MessageID, int(claimFor/time.Second))
-	caption := sign.WithHeader(status, "", line, sign.StripHeader(f.Caption))
+	caption := s.claimCaption(status, line, f)
 	if err := s.write(ctx, f.MessageID, f.Caption, caption); err != nil {
 		return false, false, err
 	}
 	return false, true, nil
+}
+
+// claimCaption puts a claim on a post and keeps the result inside Telegram's caption limit.
+// A signed post is laid out again, so a long track list can shrink. A raw caption is trimmed
+// from the end.
+func (s *Service) claimCaption(status, claim string, f *media.File) string {
+	body := sign.StripHeader(f.Caption)
+	meta, ok := sign.ParseCaption(body)
+	if !ok {
+		return fitPlain(status, claim, body)
+	}
+	if status == sign.StatusSubtitles {
+		meta.Status = sign.StatusSubtitles
+	}
+	return s.compose(status, s.headOf(f, meta), claim, meta)
+}
+
+// fitPlain keeps a claim above an unsigned caption by dropping lines, then runes, from the end.
+func fitPlain(status, claim, body string) string {
+	caption := sign.WithHeader(status, "", claim, body)
+	lines := strings.Split(body, "\n")
+	for len(caption) > sign.CaptionLimit && len(lines) > 1 {
+		lines = lines[:len(lines)-1]
+		body = strings.Join(lines, "\n")
+		caption = sign.WithHeader(status, "", claim, body)
+	}
+	for len(caption) > sign.CaptionLimit && body != "" {
+		_, size := utf8.DecodeLastRuneInString(body)
+		if size == 0 {
+			break
+		}
+		body = strings.TrimRight(body[:len(body)-size], " \n")
+		caption = sign.WithHeader(status, "", claim, body)
+	}
+	return caption
 }
 
 // write sets a caption. A channel post does not say which bot sent it, so the bots are tried in
@@ -654,12 +722,19 @@ func (s *Service) ArchiveCaption(ctx context.Context, f media.File, archiveHash 
 	if title == "" {
 		title = "Untitled"
 	}
-	line := s.Key.SignSubs(sign.Subs{DocID: f.DocID, VideoHash: meta.Hash, ArchiveHash: archiveHash, Tracks: tracks})
-	out := "\U0001F4AC Subtitles: " + title + "\n" + line
-	if tag := h.LookupTag(); tag != "" {
-		out += "\n" + tag
+	subs := sign.Subs{DocID: f.DocID, VideoHash: meta.Hash, ArchiveHash: archiveHash, Tracks: tracks}
+	tag := h.LookupTag()
+	for {
+		line := s.Key.SignSubs(subs)
+		out := "💬 " + title + "\n" + line
+		if tag != "" {
+			out += "\n" + tag
+		}
+		if len(out) <= sign.CaptionLimit || len(subs.Tracks) == 0 {
+			return out
+		}
+		subs.Tracks = subs.Tracks[:len(subs.Tracks)-1]
 	}
-	return out
 }
 
 // FillIMDb writes an IMDb id Jellyfin learned after probing, and signs the caption again.
@@ -698,9 +773,7 @@ func (s *Service) edit(ctx context.Context, messageID int, anyKey bool, change f
 	if next.Status == sign.StatusReady {
 		status, claimLine = sign.StatusReady, ""
 	}
-	room := sign.WithHeader(status, "", claimLine, naming.Caption(hd)) + "\n" + hd.LookupTag()
-	line := s.Key.Post(room, next)
-	return s.write(ctx, messageID, file.Caption, sign.WithHeader(status, "", claimLine, sign.ReplaceLine(body, line)))
+	return s.write(ctx, messageID, file.Caption, s.compose(status, hd, claimLine, next))
 }
 
 // reconsider gives each rejected file one more look. A file the parser can now place as an

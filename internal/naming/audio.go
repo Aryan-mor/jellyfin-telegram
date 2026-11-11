@@ -72,9 +72,7 @@ func ShowAudio(tracks []sign.AudioTrack) []string {
 		}
 		switch t.Role {
 		case sign.RoleDub:
-			out = append(out, t.Lang+" (dubbed)")
-		case sign.RoleOriginal:
-			out = append(out, t.Lang+" (original)")
+			out = append(out, t.Lang+" dub")
 		default:
 			out = append(out, t.Lang)
 		}
@@ -87,5 +85,5 @@ func audioLine(shown []string) string {
 	if len(shown) == 0 {
 		return ""
 	}
-	return "🔊 Audio: " + strings.Join(shown, " · ")
+	return "🔊 " + strings.Join(shown, " · ")
 }

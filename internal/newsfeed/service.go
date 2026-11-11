@@ -14,6 +14,7 @@ import (
 	"github.com/gotd/td/tgerr"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
 )
@@ -108,30 +109,42 @@ func (s *Service) Stop() {
 }
 
 // Run checks the news channels until ctx ends.
+// A system pause skips the timer. A button that wakes this loop still runs one pass.
 func (s *Service) Run(ctx context.Context) {
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		set, err := s.Settings(ctx)
-		if err == nil && set.Enabled {
-			if s.Pass(ctx) {
+		if err == nil && set.Enabled && !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			busy := s.Pass(work)
+			cancelled := work.Err() != nil
+			done()
+			if busy && ctx.Err() == nil && !cancelled && !hold.Stopped() {
 				wait := 20 * time.Second
 				if s.directBusy() {
 					wait = time.Minute
 				}
-				select {
-				case <-ctx.Done():
+				ok, woken := hold.Sleep(ctx, wait, s.wake)
+				if !ok {
 					return
-				case <-time.After(wait):
-				case <-s.wake:
+				}
+				if woken {
+					s.Pass(ctx)
 				}
 				continue
 			}
 		}
 		wait := time.Duration(max(set.EveryMinutes, 5)) * time.Minute
-		select {
-		case <-ctx.Done():
+		ok, woken := hold.Sleep(ctx, wait, s.wake)
+		if !ok {
 			return
-		case <-time.After(wait):
-		case <-s.wake:
+		}
+		if woken {
+			if set, err := s.Settings(ctx); err == nil && set.Enabled {
+				s.Pass(ctx)
+			}
 		}
 	}
 }

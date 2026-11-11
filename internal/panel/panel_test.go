@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 )
@@ -615,5 +616,39 @@ func TestUpdateInstallNeedsThisComputer(t *testing.T) {
 	gone.ServeHTTP(rec, req)
 	if rec.Code != http.StatusNotFound {
 		t.Fatalf("install without a hook: %d", rec.Code)
+	}
+}
+
+func TestAutomationPause(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, ".env")
+	if err := os.WriteFile(path, []byte(envFile), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	g, err := hold.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h := New(Options{Code: "secret", EnvPath: path, Paused: g.Paused, SetPaused: g.Set})
+	post := httptest.NewRequest(http.MethodPost, "/panel/automation?code=secret", strings.NewReader(`{"paused":true}`))
+	post.RemoteAddr = "203.0.113.8:9"
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, post)
+	if rec.Code != http.StatusOK || !g.Paused() {
+		t.Fatalf("pause: %d %s paused=%v", rec.Code, rec.Body.String(), g.Paused())
+	}
+	st := httptest.NewRequest(http.MethodGet, "/panel/state?code=secret", nil)
+	st.RemoteAddr = "203.0.113.8:9"
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, st)
+	if !strings.Contains(rec.Body.String(), `"paused":true`) {
+		t.Fatalf("state: %s", rec.Body.String())
+	}
+	post = httptest.NewRequest(http.MethodPost, "/panel/automation?code=secret", strings.NewReader(`{"paused":false}`))
+	post.RemoteAddr = "203.0.113.8:9"
+	rec = httptest.NewRecorder()
+	h.ServeHTTP(rec, post)
+	if rec.Code != http.StatusOK || g.Paused() {
+		t.Fatalf("resume: %d paused=%v", rec.Code, g.Paused())
 	}
 }

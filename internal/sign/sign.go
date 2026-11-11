@@ -304,6 +304,7 @@ func (k *Key) Sign(m Meta) string {
 
 // Post signs m so that head and the machine line together stay within CaptionLimit.
 // Soft tracks are dropped from the end until the caption fits, and ss then ends with "+".
+// The content hash is kept. Callers drop lesser fields before asking for tracks to be cut.
 func (k *Key) Post(head string, m Meta) string {
 	for {
 		line := k.Sign(m)
@@ -313,6 +314,28 @@ func (k *Key) Post(head string, m Meta) string {
 		m.Soft = m.Soft[:len(m.Soft)-1]
 		m.Cut = true
 	}
+}
+
+// ShrinkOptional drops one signed field that is not needed to find the file.
+// The content hash, the ids, and the archive hash stay. false means nothing is left to drop.
+func (m Meta) ShrinkOptional() (Meta, bool) {
+	switch {
+	case len(m.Audio) > 0:
+		m.Audio = nil
+	case m.OSDb != "":
+		m.OSDb = ""
+	case m.Duration > 0:
+		m.Duration = 0
+	case m.Quality != "":
+		m.Quality = ""
+	case m.IMDb != "":
+		m.IMDb = ""
+	case m.Hard != "":
+		m.Hard = ""
+	default:
+		return m, false
+	}
+	return m, true
 }
 
 // ParseCaption finds the machine line in a caption.

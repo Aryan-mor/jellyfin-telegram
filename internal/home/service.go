@@ -17,6 +17,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/localmedia"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
@@ -77,9 +78,15 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
-			s.step(ctx)
+			if hold.Stopped() {
+				continue
+			}
+			work, done := hold.Begin(ctx)
+			s.step(work)
+			done()
 		case <-s.wake:
 			s.step(ctx)
+		case <-hold.Changed():
 		}
 	}
 }

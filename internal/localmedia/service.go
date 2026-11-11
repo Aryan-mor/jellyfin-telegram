@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autoupload"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -85,9 +86,16 @@ func (s *Service) Run(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-pass.C:
-			s.step(ctx)
+			// The timer is automatic. A button still wakes the queue below.
+			if hold.Stopped() {
+				continue
+			}
+			work, done := hold.Begin(ctx)
+			s.step(work)
+			done()
 		case <-s.wake:
 			s.step(ctx)
+		case <-hold.Changed():
 		case <-again.C:
 			s.scan(ctx)
 		case <-s.rescan:

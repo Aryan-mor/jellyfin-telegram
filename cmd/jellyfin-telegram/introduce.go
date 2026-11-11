@@ -12,6 +12,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/chanindex"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 )
 
 const (
@@ -25,13 +26,20 @@ func introduceChannels(ctx context.Context, cat *catalog.Catalog, idx *chanindex
 	tick := time.NewTicker(15 * time.Minute)
 	defer tick.Stop()
 	for {
-		if err := introducePass(ctx, cat, idx, log); err != nil && ctx.Err() == nil && log != nil {
-			log.Warn("channel index introduce", "err", err)
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			err := introducePass(work, cat, idx, log)
+			cancelled := work.Err() != nil
+			done()
+			if err != nil && ctx.Err() == nil && !cancelled && log != nil {
+				log.Warn("channel index introduce", "err", err)
+			}
 		}
 		select {
 		case <-ctx.Done():
 			return
 		case <-tick.C:
+		case <-hold.Changed():
 		}
 	}
 }

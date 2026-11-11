@@ -261,10 +261,10 @@ func TestSignedLineWinsAndOldCaptionsStay(t *testing.T) {
 	if !strings.HasSuffix(withSource, "\n"+SourceLine("Movies", "movies")) {
 		t.Fatalf("source line: %q", withSource)
 	}
-	if SourceLine("Movies", "movies") != "📡 Source: Movies (@movies)" {
+	if SourceLine("Movies", "movies") != "📡 Movies (@movies)" {
 		t.Fatal(SourceLine("Movies", "movies"))
 	}
-	if SourceLine("Secret", "") != "📡 Source: private channel" || strings.Contains(SourceLine("Secret", ""), "Secret") {
+	if SourceLine("Secret", "") != "📡 private" || strings.Contains(SourceLine("Secret", ""), "Secret") {
 		t.Fatal(SourceLine("Secret", ""))
 	}
 	if SourceIn("note\n"+SourceLine("Movies", "movies")) != SourceLine("Movies", "movies") || SourceIn("note") != "" {

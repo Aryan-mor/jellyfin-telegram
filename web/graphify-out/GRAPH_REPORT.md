@@ -1,24 +1,24 @@
-# Graph Report - web  (2026-11-10)
+# Graph Report - web  (2026-11-11)
 
 ## Corpus Check
-- 26 files · ~46,627 words
+- 26 files · ~47,650 words
 - Verdict: corpus is large enough that graph structure adds value.
 - Unclassified: 2 file(s) not represented in the graph (top: (none) 1, .css 1)
 
 ## Summary
-- 352 nodes · 1077 edges · 15 communities (14 shown, 1 thin omitted)
-- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 6 edges (avg confidence: 0.85)
+- 354 nodes · 1090 edges · 14 communities (13 shown, 1 thin omitted)
+- Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 7 edges (avg confidence: 0.85)
 - Token cost: 0 input · 0 output
 
 ## Graph Freshness
-- Built from commit: `e4e436af`
+- Built from commit: `df0c8038`
 - Run `git rev-parse HEAD` and compare to check if the graph is stale.
 - Run `graphify update .` after code changes (no API cost).
 
 ## Community Hubs (Navigation)
-- t
-- ui.tsx
 - pages.tsx
+- ui.tsx
+- RulesPage
 - devDependencies
 - shell.tsx
 - dependencies
@@ -28,15 +28,14 @@
 - .oxlintrc.json
 - React + TypeScript + Vite
 - tsconfig.json
-- panel/main.tsx
 - setup/main.tsx
 - scripts
 
 ## God Nodes (most connected - your core abstractions)
-1. `t()` - 67 edges
+1. `t()` - 69 edges
 2. `RulesPage()` - 38 edges
-3. `Button()` - 36 edges
-4. `api()` - 34 edges
+3. `Button()` - 37 edges
+4. `api()` - 36 edges
 5. `Mirrors()` - 30 edges
 6. `cn()` - 29 edges
 7. `Bots()` - 29 edges
@@ -45,8 +44,8 @@
 10. `Shared()` - 26 edges
 
 ## Surprising Connections (you probably didn't know these)
-- `ToastHost()` --calls--> `useUiLang()`  [EXTRACTED]
-  src/panel/main.tsx → src/lib/i18n.tsx
+- `open()` --calls--> `t()`  [EXTRACTED]
+  src/setup/main.tsx → src/lib/i18n.tsx
 - `summary()` --calls--> `t()`  [EXTRACTED]
   src/components/autofilter.tsx → src/lib/i18n.tsx
 - `Part()` --calls--> `FieldLabel()`  [EXTRACTED]
@@ -59,19 +58,19 @@
 ## Import Cycles
 - None detected.
 
-## Communities (15 total, 1 thin omitted)
+## Communities (14 total, 1 thin omitted)
 
-### Community 0 - "t"
-Cohesion: 0.22
-Nodes (21): clsx, tailwind-merge, save(), Disclosure(), loginCopy(), LoginForm(), next(), t() (+13 more)
+### Community 0 - "pages.tsx"
+Cohesion: 0.08
+Nodes (47): Disclosure(), Progress(), Toggles(), loginCopy(), LoginForm(), next(), Tone, t() (+39 more)
 
 ### Community 1 - "ui.tsx"
-Cohesion: 0.07
-Nodes (46): name, private, type, version, class-variance-authority, cmdk, lucide-react, oxlint (+38 more)
+Cohesion: 0.06
+Nodes (51): name, private, type, version, class-variance-authority, clsx, cmdk, lucide-react (+43 more)
 
-### Community 2 - "pages.tsx"
-Cohesion: 0.10
-Nodes (78): Alert(), Button(), Card(), Checkbox(), Collapse(), Empty(), FieldLabel(), Input() (+70 more)
+### Community 2 - "RulesPage"
+Cohesion: 0.16
+Nodes (54): Alert(), Button(), Card(), Collapse(), Empty(), FieldLabel(), Input(), Select() (+46 more)
 
 ### Community 3 - "devDependencies"
 Cohesion: 0.18
@@ -79,7 +78,7 @@ Nodes (11): devDependencies, oxlint, tailwindcss, @tailwindcss/vite, tw-animate-
 
 ### Community 4 - "shell.tsx"
 Cohesion: 0.11
-Nodes (29): Sheet(), confirmDialog(), pausePolling(), pollingPaused(), adoptServerLanguage(), applyDom(), catalogs, current (+21 more)
+Nodes (31): Sheet(), confirmDialog(), api(), ApiError, panelCode(), pausePolling(), pollingPaused(), Window (+23 more)
 
 ### Community 5 - "dependencies"
 Cohesion: 0.09
@@ -105,13 +104,9 @@ Nodes (5): plugins, rules, react/only-export-components, react/rules-of-hooks, $
 Cohesion: 0.50
 Nodes (3): Expanding the Oxlint configuration, React Compiler, React + TypeScript + Vite
 
-### Community 12 - "panel/main.tsx"
-Cohesion: 0.14
-Nodes (13): react-dom, react-router, @tanstack/react-query, Group(), LogPage, LogRow, Logs(), Pick() (+5 more)
-
 ### Community 13 - "setup/main.tsx"
-Cohesion: 0.10
-Nodes (33): sonner, AutoFilterForm(), empty, Filter, norm(), Part(), PartKey, Rule (+25 more)
+Cohesion: 0.07
+Nodes (39): react-dom, react-router, sonner, @tanstack/react-query, AutoFilterForm(), save(), empty, Filter (+31 more)
 
 ### Community 14 - "scripts"
 Cohesion: 0.40
@@ -129,13 +124,13 @@ _Questions this graph is uniquely positioned to answer:_
   _High betweenness centrality (0.103) - this node is a cross-community bridge._
 - **What connects `@radix-ui/react-scroll-area`, `@radix-ui/react-separator`, `@radix-ui/react-tooltip` to the rest of the system?**
   _10 weakly-connected nodes found - possible documentation gaps or missing edges._
-- **Should `ui.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.06966618287373004 - nodes in this community are weakly interconnected._
-- **Why does `t()` connect `t` to `ui.tsx`, `pages.tsx`, `shell.tsx`, `panel/main.tsx`, `setup/main.tsx`?**
-  _High betweenness centrality (0.069) - this node is a cross-community bridge._
 - **Should `pages.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.1002921129503408 - nodes in this community are weakly interconnected._
-- **Why does `react` connect `ui.tsx` to `panel/main.tsx`, `pages.tsx`, `shell.tsx`, `setup/main.tsx`?**
-  _High betweenness centrality (0.065) - this node is a cross-community bridge._
+  _Cohesion score 0.07624113475177305 - nodes in this community are weakly interconnected._
+- **Why does `t()` connect `pages.tsx` to `ui.tsx`, `RulesPage`, `shell.tsx`, `setup/main.tsx`?**
+  _High betweenness centrality (0.071) - this node is a cross-community bridge._
+- **Should `ui.tsx` be split into smaller, more focused modules?**
+  _Cohesion score 0.06370543541788427 - nodes in this community are weakly interconnected._
+- **Why does `react` connect `ui.tsx` to `pages.tsx`, `RulesPage`, `shell.tsx`, `setup/main.tsx`?**
+  _High betweenness centrality (0.064) - this node is a cross-community bridge._
 - **Should `shell.tsx` be split into smaller, more focused modules?**
-  _Cohesion score 0.11229946524064172 - nodes in this community are weakly interconnected._
+  _Cohesion score 0.11379800853485064 - nodes in this community are weakly interconnected._

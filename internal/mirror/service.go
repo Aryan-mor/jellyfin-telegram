@@ -15,6 +15,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/pace"
@@ -49,11 +50,18 @@ func (s *Service) Run(ctx context.Context) {
 		s.Log = slog.Default()
 	}
 	for {
-		if err := s.Pass(ctx); err != nil && ctx.Err() == nil {
-			s.Log.Warn("mirror", "err", err)
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			err := s.Pass(work)
+			cancelled := work.Err() != nil
+			done()
+			if err != nil && ctx.Err() == nil && !cancelled {
+				s.Log.Warn("mirror", "err", err)
+			}
 		}
 		// Each pass sends a burst of 20 to 50 posts, then rests a random 10 to 60 seconds.
-		if wait(ctx, pace.Pause(pace.MaxPause)) != nil {
+		// A pause or a resume ends the rest early.
+		if ok, _ := hold.Sleep(ctx, pace.Pause(pace.MaxPause), nil); !ok {
 			return
 		}
 	}

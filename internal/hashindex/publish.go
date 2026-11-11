@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 )
 
 // Shares is the queue of mirror posts to hand over.
@@ -46,21 +47,29 @@ func (p *Publisher) Run(ctx context.Context) {
 		every = time.Minute
 	}
 	for {
-		full, err := p.Pass(ctx)
-		if err != nil && ctx.Err() == nil && p.Log != nil {
-			p.Log.Warn("hashtag index share", "err", err)
+		var full bool
+		var err error
+		if !hold.Stopped() {
+			work, done := hold.Begin(ctx)
+			full, err = p.Pass(work)
+			cancelled := work.Err() != nil
+			done()
+			if err != nil && ctx.Err() == nil && !cancelled && p.Log != nil {
+				p.Log.Warn("hashtag index share", "err", err)
+			}
+			if cancelled {
+				err = context.Canceled
+			}
 		}
 		wait := every
 		switch {
 		case errors.Is(err, ErrRateLimited):
 			wait = 2 * every
-		case err == nil && !full:
+		case err == nil && !full && !hold.Stopped():
 			// Nothing waits: look again later.
 			wait = 5 * time.Minute
 		}
-		select {
-		case <-time.After(wait):
-		case <-ctx.Done():
+		if ok, _ := hold.Sleep(ctx, wait, nil); !ok {
 			return
 		}
 	}

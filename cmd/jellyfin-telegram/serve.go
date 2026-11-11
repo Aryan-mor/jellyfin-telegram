@@ -26,6 +26,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/front"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/gateway"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/home"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/indexer"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/intake"
@@ -150,6 +151,14 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return err
+	}
+	if gate, err := hold.Open(cfg.DataDir); err != nil {
+		return fmt.Errorf("pause switch: %w", err)
+	} else {
+		hold.Use(gate)
+		if gate.Paused() {
+			log.Info("automatic work is paused")
+		}
 	}
 	token, err := cfg.EnsureGatewayToken()
 	if err != nil {
@@ -543,6 +552,8 @@ func settingsPanel(envPath, dataDir, code string, pool *tgpool.Pool, cat *catalo
 			return scheduleRestart(restartStop)
 		},
 		AutoFilter: autoFilter(envPath),
+		Paused:     hold.Stopped,
+		SetPaused:  hold.Set,
 		Logs: func(kind string, id int64, page, limit int) (any, int, error) {
 			if journal == nil {
 				return []actlog.Entry{}, 0, nil
@@ -1302,20 +1313,32 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 	idle := time.NewTicker(archiveIdle)
 	defer idle.Stop()
 	runVerify := func() {
-		if err := w.Verify(ctx); err != nil && ctx.Err() == nil {
+		if hold.Stopped() {
+			return
+		}
+		work, stop := hold.Begin(ctx)
+		defer stop()
+		if err := w.Verify(work); err != nil && ctx.Err() == nil && work.Err() == nil {
 			log.Warn("subtitle cache check failed", "err", err)
 		}
 	}
+	if hold.Wait(ctx) != nil {
+		return
+	}
 	runVerify()
 	for {
-		for {
-			did, err := w.RunOnce(ctx)
-			if err != nil && ctx.Err() == nil {
-				log.Warn("subtitle archive step failed", "err", err)
+		if !hold.Stopped() {
+			work, stop := hold.Begin(ctx)
+			for {
+				did, err := w.RunOnce(work)
+				if err != nil && ctx.Err() == nil && work.Err() == nil {
+					log.Warn("subtitle archive step failed", "err", err)
+				}
+				if !did || err != nil || work.Err() != nil {
+					break
+				}
 			}
-			if !did || err != nil {
-				break
-			}
+			stop()
 		}
 		select {
 		case <-ctx.Done():
@@ -1323,6 +1346,7 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 		case <-verify.C:
 			runVerify()
 		case <-idle.C:
+		case <-hold.Changed():
 		}
 	}
 }
@@ -1346,7 +1370,8 @@ func syncHome(ctx context.Context, idx *indexer.Indexer, log *slog.Logger) {
 	}
 }
 
-func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Indexer, prober *jellyfin.Prober, pool *tgpool.Pool, cat *catalog.Catalog, log *slog.Logger) {
+func syncLoop(parent context.Context, cfg config.Config, idx, homeIdx *indexer.Indexer, prober *jellyfin.Prober, pool *tgpool.Pool, cat *catalog.Catalog, log *slog.Logger) {
+	ctx := parent
 	probe := func(refresh bool) {
 		if prober == nil {
 			return
@@ -1386,7 +1411,12 @@ func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Inde
 		}
 	}
 
-	if err := idx.Rewrite(ctx); err != nil {
+	if hold.Wait(parent) != nil {
+		return
+	}
+	work, stop := hold.Begin(parent)
+	ctx = work
+	if err := idx.Rewrite(ctx); err != nil && ctx.Err() == nil {
 		log.Error("cannot refresh .strm files", "err", err)
 	}
 	added, err := idx.Sync(ctx, indexer.FullWindow)
@@ -1406,6 +1436,11 @@ func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Inde
 	warmUp(ctx, cat, pool, log)
 	probe(true)
 	refresh(changed)
+	stop()
+	ctx = parent
+	if parent.Err() != nil {
+		return
+	}
 
 	syncTick := time.NewTicker(cfg.SyncInterval)
 	defer syncTick.Stop()
@@ -1413,22 +1448,33 @@ func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Inde
 	defer reconcileTick.Stop()
 	for {
 		select {
-		case <-ctx.Done():
+		case <-parent.Done():
 			return
+		case <-hold.Changed():
 		case <-syncTick.C:
-			added, err := idx.Sync(ctx, indexer.IncrementalWindow)
-			if err != nil && ctx.Err() == nil {
+			if hold.Stopped() {
+				continue
+			}
+			ctx, stop = hold.Begin(parent)
+			added, err = idx.Sync(ctx, indexer.IncrementalWindow)
+			if err != nil && parent.Err() == nil && ctx.Err() == nil {
 				log.Warn("sync failed", "err", err)
 			}
-			if err := idx.RefreshStatus(ctx); err != nil && ctx.Err() == nil {
+			if err := idx.RefreshStatus(ctx); err != nil && parent.Err() == nil && ctx.Err() == nil {
 				log.Warn("cannot refresh post status", "err", err)
 			}
 			if added > 0 {
 				probe(true)
 			}
 			syncHome(ctx, homeIdx, log)
+			stop()
+			ctx = parent
 		case <-reconcileTick.C:
-			if err := idx.Rewrite(ctx); err != nil {
+			if hold.Stopped() {
+				continue
+			}
+			ctx, stop = hold.Begin(parent)
+			if err := idx.Rewrite(ctx); err != nil && ctx.Err() == nil {
 				log.Error("cannot refresh .strm files", "err", err)
 			}
 			reconcile()
@@ -1436,6 +1482,8 @@ func syncLoop(ctx context.Context, cfg config.Config, idx, homeIdx *indexer.Inde
 			probe(true)
 			refresh(changed)
 			syncHome(ctx, homeIdx, log)
+			stop()
+			ctx = parent
 		}
 	}
 }
