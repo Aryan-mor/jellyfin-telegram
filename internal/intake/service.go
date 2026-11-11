@@ -18,8 +18,11 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode/utf8"
+
+	"github.com/gotd/td/tgerr"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/fileid"
@@ -82,6 +85,8 @@ type Service struct {
 	Check *sign.Checker
 	// Bots are this installation's bot user ids.
 	Bots []int64
+	// turn picks which bot edits first, so the edits go round the bots.
+	turn atomic.Uint32
 	// Identify fills a TMDB id when the file name has none. episode selects a series search.
 	// Nil leaves that file waiting.
 	Identify func(ctx context.Context, title string, episode bool) (tmdb int, imdb string, ok bool, err error)
@@ -357,10 +362,6 @@ func (s *Service) one(ctx context.Context, id int) (did bool, err error) {
 	if !ok {
 		return true, s.reject(ctx, file, "unidentified")
 	}
-	bot, err := s.TG.ReadyBot()
-	if err != nil {
-		return true, transient{err}
-	}
 	meta.DocID = file.DocID
 	meta.Size = file.Size
 	meta.Subs = "no"
@@ -369,7 +370,7 @@ func (s *Service) one(ctx context.Context, id int) (did bool, err error) {
 		status = sign.StatusSubtitles
 	}
 	meta.Status = status
-	readyID, err := s.TG.Repost(ctx, bot, id, s.caption(ctx, file, meta))
+	readyID, err := s.TG.Repost(ctx, 0, id, s.caption(ctx, file, meta))
 	if err != nil {
 		return true, err
 	}
@@ -639,18 +640,24 @@ func fitPlain(status, claim, body string) string {
 	return caption
 }
 
-// write sets a caption. A channel post does not say which bot sent it, so the bots are tried in
-// turn. The catalog row, if there is one, follows. A caption that is already in place is not sent
-// again.
+// write sets a caption. The first bot to try changes with every call, so the bots take turns. If
+// that bot is refused, the next one is tried. An error that no other bot could fix, such as a
+// caption that is too long, stops at once instead of being repeated on every bot. The catalog row,
+// if there is one, follows. A caption that is already in place is not sent again.
 func (s *Service) write(ctx context.Context, messageID int, current, caption string) error {
 	if caption == current {
 		return nil
 	}
 	var last error
-	for _, bot := range s.Bots {
+	start := int(s.turn.Add(1)) % max(len(s.Bots), 1)
+	for i := range s.Bots {
+		bot := s.Bots[(start+i)%len(s.Bots)]
 		if last = s.TG.EditCaption(ctx, bot, messageID, caption); last == nil {
 			_ = s.Cat.SetCaption(ctx, messageID, caption)
 			return nil
+		}
+		if tgerr.Is(last, "MEDIA_CAPTION_TOO_LONG", "MESSAGE_ID_INVALID") || ctx.Err() != nil {
+			break
 		}
 	}
 	if last == nil {

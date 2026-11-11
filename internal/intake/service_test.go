@@ -96,6 +96,9 @@ func (c *client) Repost(_ context.Context, botID int64, sourceID int, caption st
 	file.Date = c.w.clock
 	file.Edited = time.Time{}
 	c.w.msgs[id] = media.Message{ID: id, Exists: true, Text: caption, Date: c.w.clock, File: &file}
+	if botID == 0 {
+		botID = c.bot // the pool picks a bot when none is named
+	}
 	c.w.author[id] = botID
 	return id, nil
 }

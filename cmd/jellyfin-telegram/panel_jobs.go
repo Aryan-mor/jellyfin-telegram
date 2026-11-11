@@ -125,17 +125,13 @@ func (j *panelJobs) mirrorCreate(cat *catalog.Catalog, pool *tgpool.Pool, users 
 		if err != nil {
 			return nil, err
 		}
-		fresh, botID, err := parseBotChoice(body["bot"])
-		if err != nil {
-			return nil, err
-		}
-		if !fresh {
-			if _, err := poolBotName(pool, botID); err != nil {
-				return nil, err
-			}
+		// Every connected bot becomes an admin. "new" also makes one more bot for the pool.
+		fresh := false
+		if v, _ := body["bot"].(string); strings.TrimSpace(v) == "new" {
+			fresh = true
 		}
 		return nil, j.start(func(ctx context.Context, progress panel.Step) (any, error) {
-			return createMirror(ctx, cat, pool, users, envPath, main, title, public, preferred, kinds, fresh, botID, progress)
+			return createMirror(ctx, cat, pool, users, envPath, main, title, public, preferred, kinds, fresh, progress)
 		})
 	}
 }
@@ -245,7 +241,7 @@ func ownedView(owned []tgsetup.OwnedBot) []map[string]any {
 	return out
 }
 
-func createMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, envPath string, main int64, title string, public bool, preferred string, kinds []string, fresh bool, botID int64, progress panel.Step) (any, error) {
+func createMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, envPath string, main int64, title string, public bool, preferred string, kinds []string, fresh bool, progress panel.Step) (any, error) {
 	progress("Creating the channel", "wait")
 	val, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
 		return tgsetup.CreateChannel(ctx, api, title, "Mirror of the library. Managed by jellyfin-telegram.")
@@ -303,7 +299,6 @@ func createMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, 
 	}
 	result := map[string]any{"ok": true, "channel_id": ch.ID, "title": ch.Title, "username": username, "link": link}
 
-	var postBot int64
 	if fresh {
 		mainCh, err := resolveCreated(ctx, users, main)
 		if err != nil {
@@ -317,36 +312,26 @@ func createMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, 
 			if aerr := appendBotTokens(envPath, []string{bot.Token}); aerr != nil && err == nil {
 				err = aerr
 			}
-			postBot, _ = config.BotID(bot.Token)
 		}
 		if err != nil {
 			return result, err
 		}
-	} else {
-		name, err := poolBotName(pool, botID)
+	}
+	if err := promoteAllBots(ctx, users, pool, ch, progress); err != nil {
+		return result, err
+	}
+	if !fresh {
+		acceptBot, err := pool.ReadyBot()
 		if err != nil {
 			return result, err
 		}
-		progress("Making @"+name+" an admin", "wait")
-		if _, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
-			u, err := tgsetup.ResolveBot(ctx, api, name)
-			if err != nil {
-				return nil, err
-			}
-			return nil, tgsetup.PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
-		}); err != nil {
-			progress("Making @"+name+" an admin", "bad")
-			return result, err
-		}
-		progress("@"+name+" is an admin", "ok")
-		got, titleGot, err := pool.AcceptMirror(ctx, botID, ch.ID, username)
+		got, titleGot, err := pool.AcceptMirror(ctx, acceptBot, ch.ID, username)
 		if err != nil {
 			return result, err
 		}
 		ch.ID, ch.Title = got, titleGot
-		postBot = botID
 	}
-	row, err := cat.AddMirror(ctx, ch.ID, postBot, ch.Title, kinds)
+	row, err := cat.AddMirror(ctx, ch.ID, 0, ch.Title, kinds)
 	if err != nil {
 		return result, err
 	}
@@ -441,24 +426,19 @@ func mirrorAdmin(r *http.Request, pool *tgpool.Pool, users *tguser.Manager, body
 	if users == nil {
 		return nil, errors.New("sign in a Telegram account first")
 	}
-	botID := int64(number(body["bot_id"]))
 	channel, _ := body["channel"].(string)
-	name, err := poolBotName(pool, botID)
-	if err != nil {
-		return nil, err
-	}
-	_, err = users.Run(tguser.Prioritise(r.Context()), func(ctx context.Context, api *tg.Client) (any, error) {
+	ctx := tguser.Prioritise(r.Context())
+	val, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
 		ch, err := tguser.ResolveChannelInput(ctx, api, channel)
 		if err != nil {
 			return nil, err
 		}
-		u, err := tgsetup.ResolveBot(ctx, api, name)
-		if err != nil {
-			return nil, err
-		}
-		return nil, tgsetup.PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
+		return tgsetup.Created{ID: ch.ID, AccessHash: ch.AccessHash, Title: ch.Title}, nil
 	})
 	if err != nil {
+		return nil, err
+	}
+	if err := promoteAllBots(ctx, users, pool, val.(tgsetup.Created), nil); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ok": true}, nil
@@ -479,6 +459,49 @@ func poolBotName(pool *tgpool.Pool, id int64) (string, error) {
 		return name, nil
 	}
 	return "", errors.New("that bot is not listed")
+}
+
+// promoteAllBots makes every connected bot of the pool an admin of the channel, with the account that
+// is signed in. The bots then share the copies. A bot that cannot be promoted is reported but does
+// not stop the others, as long as one of them is an admin.
+func promoteAllBots(ctx context.Context, users *tguser.Manager, pool *tgpool.Pool, ch tgsetup.Created, progress panel.Step) error {
+	var names []string
+	for _, st := range pool.Statuses() {
+		if name := strings.TrimPrefix(st.Username, "@"); st.Ready && name != "" {
+			names = append(names, name)
+		}
+	}
+	if len(names) == 0 {
+		return errors.New("no bot is connected")
+	}
+	var failed []string
+	for _, name := range names {
+		if progress != nil {
+			progress("Making @"+name+" an admin", "wait")
+		}
+		_, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+			u, err := tgsetup.ResolveBot(ctx, api, name)
+			if err != nil {
+				return nil, err
+			}
+			return nil, tgsetup.PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
+		})
+		if err != nil {
+			failed = append(failed, "@"+name+": "+err.Error())
+			if progress != nil {
+				progress("Making @"+name+" an admin", "bad")
+			}
+			continue
+		}
+		if progress != nil {
+			progress("@"+name+" is an admin", "ok")
+		}
+	}
+	pool.ForgetMirrorDenials(ch.ID)
+	if len(failed) == len(names) {
+		return errors.New(strings.Join(failed, "; "))
+	}
+	return nil
 }
 
 func parseBotChoice(v any) (fresh bool, id int64, err error) {

@@ -35,6 +35,9 @@ const (
 	botAPIGap = 3 * time.Second
 )
 
+// ErrNoMirrorAccess means the bot is not an admin that can post in the other channel.
+var ErrNoMirrorAccess = errors.New("bot cannot post in that channel")
+
 // ErrMessageGone means the message no longer holds the expected document.
 var ErrMessageGone = errors.New("message no longer holds this document")
 
@@ -86,6 +89,8 @@ type Pool struct {
 	log         *slog.Logger
 	journal     actlog.Journal
 	start       func(context.Context)
+	// denied remembers, per other channel, the bots that could not post there and until when.
+	denied map[int64]map[int64]time.Time
 }
 
 // SetJournal records what each bot does. Nil turns that off.
@@ -382,9 +387,22 @@ func (p *Pool) React(ctx context.Context, messageID int, emoji string) error {
 }
 
 // Repost posts a document that is already in the channel again, with a new caption.
-// The document id stays the same.
+// The document id stays the same. Bot id 0 lets the pool pick the next free bot, so the work is
+// shared in turn.
 func (p *Pool) Repost(ctx context.Context, botID int64, sourceID int, caption string) (int, error) {
 	var id int
+	if botID == 0 {
+		err := p.callDid(ctx, 0, botAPIGap, "repost", fmt.Sprintf("message %d", sourceID), func(w worker) error {
+			b, ok := w.(*bot)
+			if !ok {
+				return errors.New("this worker cannot repost")
+			}
+			var err error
+			id, err = b.repostDocument(ctx, sourceID, caption)
+			return err
+		})
+		return id, err
+	}
 	err := p.callOn(ctx, botID, func(b *bot) error {
 		var err error
 		id, err = b.repostDocument(ctx, sourceID, caption)
@@ -434,6 +452,68 @@ func (p *Pool) CopyMessage(ctx context.Context, botID int64, messageID int, chan
 	})
 	p.didID(botID, "copy message", fmt.Sprintf("message %d", messageID), err)
 	return id, err
+}
+
+// CopyToMirror forwards one message from the main channel into channelID. The next free bot does
+// it, so every bot that is an admin of the mirror shares the work. A bot that cannot post there is
+// benched for a while and the call goes on with another one. Each bot keeps its own rest and its
+// own flood wait.
+func (p *Pool) CopyToMirror(ctx context.Context, messageID int, channelID int64) (int, error) {
+	var id int
+	err := p.callDid(ctx, messageID, botAPIGap, "copy message", fmt.Sprintf("message %d", messageID), func(w worker) error {
+		b, ok := w.(*bot)
+		if !ok {
+			return errors.New("this worker cannot copy")
+		}
+		botID := b.status().ID
+		if p.isDenied(channelID, botID) {
+			return ErrNoMirrorAccess
+		}
+		ch, err := b.openChannel(ctx, channelID, "")
+		if err != nil {
+			if errors.Is(err, ErrNoMirrorAccess) || tgerr.Is(err, "CHANNEL_PRIVATE", "CHAT_ADMIN_REQUIRED", "CHANNEL_INVALID", "USER_BANNED_IN_CHANNEL") {
+				p.deny(channelID, botID)
+				return fmt.Errorf("%w: %v", ErrNoMirrorAccess, err)
+			}
+			return err
+		}
+		id, err = b.forwardTo(ctx, messageID, ch)
+		if err != nil && tgerr.Is(err, "CHAT_ADMIN_REQUIRED", "CHAT_WRITE_FORBIDDEN") {
+			p.deny(channelID, botID)
+			return fmt.Errorf("%w: %v", ErrNoMirrorAccess, err)
+		}
+		return err
+	})
+	return id, err
+}
+
+const mirrorDenyTime = 10 * time.Minute
+
+func (p *Pool) isDenied(channelID, botID int64) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	until, ok := p.denied[channelID][botID]
+	return ok && time.Now().Before(until)
+}
+
+func (p *Pool) deny(channelID, botID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if p.denied == nil {
+		p.denied = map[int64]map[int64]time.Time{}
+	}
+	if p.denied[channelID] == nil {
+		p.denied[channelID] = map[int64]time.Time{}
+	}
+	p.denied[channelID][botID] = time.Now().Add(mirrorDenyTime)
+}
+
+// ForgetMirrorDenials clears the memory of bots that could not post in a channel, for example
+// after the bots were made admins there.
+func (p *Pool) ForgetMirrorDenials(channelID int64) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	delete(p.denied, channelID)
 }
 
 func (p *Pool) findBot(id int64) (*bot, error) {
@@ -526,6 +606,7 @@ func (p *Pool) callAPI(ctx context.Context, messageID int, fn func(worker) error
 
 func (p *Pool) callGap(ctx context.Context, messageID int, gap time.Duration, fn func(worker) error) error {
 	var lastErr error
+	skipped := 0
 	for attempt := 0; attempt < maxAttempts; {
 		s, err := p.acquire(ctx)
 		if err != nil {
@@ -557,6 +638,13 @@ func (p *Pool) callGap(ctx context.Context, messageID int, gap time.Duration, fn
 		case tgerr.Is(err, "CHANNEL_PRIVATE", "CHANNEL_INVALID", "CHAT_ADMIN_REQUIRED", "AUTH_KEY_UNREGISTERED", "USER_DEACTIVATED"):
 			p.bench(s, accessBenchTime, false)
 			p.log.Warn("bot lost access and is benched", "bot", s.w.status().ID, "err", err)
+		case errors.Is(err, ErrNoMirrorAccess):
+			// Only that other channel is closed to this bot. Reading and playback go on, and the
+			// next bot in turn gets the call at once.
+			if skipped < 2*len(p.slots) {
+				skipped++
+				attempt--
+			}
 		default:
 			select {
 			case <-time.After(time.Duration(attempt) * 200 * time.Millisecond):

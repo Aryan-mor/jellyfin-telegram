@@ -34,9 +34,9 @@ func TestPassCopiesOnlyTheChosenParts(t *testing.T) {
 		t.Fatal(err)
 	}
 	var got []int
-	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), Copy: func(_ context.Context, bot int64, message int, channel int64) (int, error) {
-		if bot != 7 || channel != 50 {
-			t.Fatalf("copy bot %d channel %d", bot, channel)
+	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), Copy: func(_ context.Context, message int, channel int64) (int, error) {
+		if channel != 50 {
+			t.Fatalf("copy channel %d", channel)
 		}
 		got = append(got, message)
 		return message + 100, nil
@@ -75,7 +75,7 @@ func TestBannedMirrorIsReplacedOnce(t *testing.T) {
 	var copiedTo int64
 	s := &Service{
 		Cat: c, Log: slog.New(slog.DiscardHandler),
-		Copy: func(_ context.Context, _ int64, _ int, channel int64) (int, error) {
+		Copy: func(_ context.Context, _ int, channel int64) (int, error) {
 			copiedTo = channel
 			if channel == 50 {
 				return 0, tgerr.New(400, "CHANNEL_PRIVATE")
@@ -153,7 +153,7 @@ func TestReadyOnlyWaitsForFinishedPosts(t *testing.T) {
 	var got []int
 	on := true
 	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), ReadyOnly: func() bool { return on },
-		Copy: func(_ context.Context, _ int64, message int, _ int64) (int, error) {
+		Copy: func(_ context.Context, message int, _ int64) (int, error) {
 			got = append(got, message)
 			return message + 100, nil
 		}}
@@ -229,7 +229,7 @@ func TestVideoAndItsArchiveGoTogether(t *testing.T) {
 	}
 	var got []int
 	s := &Service{Cat: c, Log: slog.New(slog.DiscardHandler), ReadyOnly: func() bool { return true },
-		Copy: func(_ context.Context, _ int64, message int, _ int64) (int, error) {
+		Copy: func(_ context.Context, message int, _ int64) (int, error) {
 			got = append(got, message)
 			return message + 1000, nil
 		}}

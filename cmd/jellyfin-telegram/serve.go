@@ -350,7 +350,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		go news.Run(ctx)
 	}
 	go (&mirror.Service{
-		Cat: cat, Copy: pool.CopyMessage, Log: log,
+		Cat: cat, Copy: pool.CopyToMirror, Log: log,
 		ReadyOnly: func() bool { return hub.Get() != nil },
 		Replace: func(ctx context.Context, m catalog.Mirror) error {
 			if users == nil {
@@ -617,10 +617,6 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 			}
 			return map[string]any{"ok": true}, nil
 		case "add", "save":
-			botID := int64(number(body["bot_id"]))
-			if botID <= 0 {
-				return nil, errors.New("choose the bot that posts in this channel")
-			}
 			kinds, err := kindList(body["kinds"])
 			if err != nil {
 				return nil, err
@@ -634,11 +630,16 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 				if channelID != 0 && channelID == main {
 					return nil, errors.New("that is the main channel")
 				}
-				id, title, err := pool.AcceptMirror(ctx, botID, channelID, username)
+				acceptBot, err := pool.ReadyBot()
 				if err != nil {
 					return nil, err
 				}
-				if _, err := cat.AddMirror(r.Context(), id, botID, title, kinds); err != nil {
+				id, title, err := pool.AcceptMirror(ctx, acceptBot, channelID, username)
+				if err != nil {
+					return nil, err
+				}
+				pool.ForgetMirrorDenials(id)
+				if _, err := cat.AddMirror(r.Context(), id, 0, title, kinds); err != nil {
 					return nil, err
 				}
 				// Muted once, when the channel is first listed. A mirror only receives copies, so the
@@ -667,14 +668,18 @@ func mirrorsDo(cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, m
 			if !found {
 				return nil, errors.New("that mirror is not listed")
 			}
-			got, title, err := pool.AcceptMirror(tguser.Prioritise(r.Context()), botID, current.ChannelID, "")
+			acceptBot, err := pool.ReadyBot()
+			if err != nil {
+				return nil, err
+			}
+			got, title, err := pool.AcceptMirror(tguser.Prioritise(r.Context()), acceptBot, current.ChannelID, "")
 			if err != nil {
 				return nil, err
 			}
 			if got != current.ChannelID {
-				return nil, errors.New("that bot cannot see this mirror")
+				return nil, errors.New("the bots cannot see this mirror")
 			}
-			if _, err := cat.UpdateMirror(r.Context(), id, botID, title, kinds); err != nil {
+			if _, err := cat.UpdateMirror(r.Context(), id, 0, title, kinds); err != nil {
 				return nil, err
 			}
 			return map[string]any{"ok": true}, nil

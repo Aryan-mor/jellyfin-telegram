@@ -1,7 +1,7 @@
 // Package mirror copies files from the main channel into other channels.
 //
-// Each mirror names the parts it wants (films, series, music, general video) and the bot that
-// posts them. That bot has to be an admin of both channels.
+// Each mirror names the parts it wants (films, series, music, general video). Every bot is an
+// admin of the mirror, and the bots take the copies in turn.
 package mirror
 
 import (
@@ -30,7 +30,7 @@ const (
 // Service walks the mirrors until ctx ends.
 type Service struct {
 	Cat  *catalog.Catalog
-	Copy func(ctx context.Context, botID int64, messageID int, channelID int64) (int, error)
+	Copy func(ctx context.Context, messageID int, channelID int64) (int, error)
 	Log  *slog.Logger
 	// ReadyOnly is asked at each pass. When it is true, only posts that are finished are copied:
 	// their status line says ready and so does their signed line. A post that is still being
@@ -100,7 +100,7 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 				return false, err
 			}
 		}
-		dest, err := s.Copy(ctx, m.BotID, messageID, m.ChannelID)
+		dest, err := s.Copy(ctx, messageID, m.ChannelID)
 		if err != nil {
 			if channelGone(err) {
 				return true, err

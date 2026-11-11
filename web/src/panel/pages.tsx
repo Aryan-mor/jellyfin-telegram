@@ -259,12 +259,6 @@ function KindPicks({ value, onChange, disabled }: { value: string[]; onChange: (
   )
 }
 
-function botOptions(bots: PanelState["bots"], extra?: number): [string, string][] {
-  const out: [string, string][] = bots.map((b) => [String(b.id), b.name + (b.connected ? "" : t(" (after restart)"))])
-  if (extra && !bots.some((b) => b.id === extra)) out.push([String(extra), t("bot {{id}}", { id: extra })])
-  return out
-}
-
 export function Mirrors() {
   const { data: s } = usePanel()
   const job = useJob()
@@ -275,21 +269,18 @@ export function Mirrors() {
   const [pub, setPub] = useState(true)
   const [user, setUser] = useState("")
   const [pick, setPick] = useState<string[]>(["movie", "series"])
-  const [bot, setBot] = useState("")
+  const [newBot, setNewBot] = useState(false)
   const [existing, setExisting] = useState("")
-  const [exBot, setExBot] = useState("")
   const [exKinds, setExKinds] = useState<string[]>(["movie", "series"])
   const { busy, run } = useBusy()
   const running = !!job.data?.running
   useEffect(() => { if (mine && job.data && !job.data.running) void refresh() }, [mine, job.data?.running])
   if (!s) return null
   const live = s.bots.filter((b) => b.connected)
-  const chosen = bot || (live[0] ? String(live[0].id) : "new")
   const badUser = pub && user.trim() !== "" && !usernameOk(user.trim().replace(/^@/, ""))
-  const createOptions: [string, string][] = [...live.map((b) => [String(b.id), b.name] as [string, string]), ["new", t("Create a new bot (needs a restart)")]]
   return (
-    <Page title={t("Mirrors")} text={t("Each mirror is another channel. Choose which parts are copied there, and which bot posts them.")}>
-      <Section title={t("Create mirror")} text={t("Makes a new channel with your Telegram account, adds a bot as admin, and starts copying. Nothing to do in Telegram.")}
+    <Page title={t("Mirrors")} text={t("Each mirror is another channel. Choose which parts are copied there, The bots take turns posting them.")}>
+      <Section title={t("Create mirror")} text={t("Makes a new channel with your Telegram account, makes every bot an admin, and starts copying. Nothing to do in Telegram.")}
         actions={!open && <Button size="sm" onClick={() => setOpen(true)}>{t("Create mirror")}</Button>}>
         {open && <div className="grid gap-3 sm:grid-cols-2">
           <div className="space-y-1.5 sm:col-span-2">
@@ -303,11 +294,11 @@ export function Mirrors() {
             {badUser && <p className="text-xs text-destructive">{t("Use 5 to 32 letters, digits or _, starting with a letter.")}</p>}
           </div>}
           <div className="space-y-1.5 sm:col-span-2"><FieldLabel>{t("Parts to copy")}</FieldLabel><KindPicks value={pick} onChange={setPick} /></div>
-          <div className="space-y-1.5 sm:col-span-2"><FieldLabel>{t("Bot that posts")}</FieldLabel><Select label={t("Bot that posts")} value={chosen} onValueChange={setBot} options={createOptions} /></div>
+          <div className="sm:col-span-2"><Row title={t("Create a new bot too")} text={t("Every connected bot is made an admin of the mirror. A new bot joins the pool after a restart.")}><SwitchBox label={t("Create a new bot too")} checked={newBot || live.length === 0} onCheckedChange={setNewBot} /></Row></div>
           <div className="flex justify-end gap-2 sm:col-span-2">
             <Button size="sm" variant="ghost" onClick={() => setOpen(false)}>{t("Cancel")}</Button>
             <Button size="sm" disabled={running || !title.trim() || !pick.length || badUser || busy === "create"} onClick={() => void run("create", async () => {
-              await api("/panel/mirrors/create", { title: title.trim(), public: pub, username: user.trim().replace(/^@/, ""), kinds: pick, bot: chosen === "new" ? "new" : Number(chosen) })
+              await api("/panel/mirrors/create", { title: title.trim(), public: pub, username: user.trim().replace(/^@/, ""), kinds: pick, bot: newBot || live.length === 0 ? "new" : "" })
               setMine(true); setOpen(false); setTitle(""); setUser("")
               await job.refetch()
             })}>{running ? t("Working…") : t("Create")}</Button>
@@ -322,7 +313,7 @@ export function Mirrors() {
 
       <Card>
         <Table>
-          <THead><TR><TH className="pl-4">{t("Channel")}</TH><TH>{t("Parts")}</TH><TH className="w-48">{t("Bot")}</TH><TH className="pr-4 text-right">{t("Actions")}</TH></TR></THead>
+          <THead><TR><TH className="pl-4">{t("Channel")}</TH><TH>{t("Parts")}</TH><TH className="pr-4 text-right">{t("Actions")}</TH></TR></THead>
           <TBody>
             {(s.mirrors ?? []).map((m) => <MirrorRow key={m.id} m={m} bots={s.bots} onDone={refresh} />)}
           </TBody>
@@ -330,14 +321,13 @@ export function Mirrors() {
         {!s.mirrors?.length && <Empty>{t("No mirror yet.")}</Empty>}
       </Card>
 
-      <Section title={t("Add existing channel")} text={t("A channel you already own. The bot is made an admin there with your account, so nothing has to be done by hand.")}>
+      <Section title={t("Add existing channel")} text={t("A channel you already own. Every bot is made an admin there with your account, so nothing has to be done by hand.")}>
         <Input value={existing} placeholder={t("https://t.me/c/1234567890/5 or @films")} onChange={(e) => setExisting(e.target.value)} />
         <KindPicks value={exKinds} onChange={setExKinds} />
-        <Select label={t("Bot that posts")} value={exBot} onValueChange={setExBot} placeholder={live.length ? t("Choose a bot") : t("Add a bot first")} options={live.map((b) => [String(b.id), b.name])} />
         <div className="flex justify-end">
-          <Button size="sm" disabled={!existing.trim() || !exBot || !exKinds.length || busy === "existing"} onClick={() => void run("existing", async () => {
-            await api("/panel/mirrors/admin", { channel: existing.trim(), bot_id: Number(exBot) })
-            await api("/panel/mirrors/add", { channel: existing.trim(), bot_id: Number(exBot), kinds: exKinds })
+          <Button size="sm" disabled={!existing.trim() || !live.length || !exKinds.length || busy === "existing"} onClick={() => void run("existing", async () => {
+            await api("/panel/mirrors/admin", { channel: existing.trim() })
+            await api("/panel/mirrors/add", { channel: existing.trim(), kinds: exKinds })
             setExisting(""); toast(t("Mirror added")); await refresh()
           })}>{t("Add channel")}</Button>
         </div>
@@ -348,10 +338,10 @@ export function Mirrors() {
 
 function MirrorRow({ m, bots, onDone }: { m: NonNullable<PanelState["mirrors"]>[number]; bots: PanelState["bots"]; onDone: () => Promise<unknown> }) {
   const { busy, run } = useBusy()
-  const botLive = bots.some((b) => b.id === m.bot_id && b.connected)
+  const botLive = bots.some((b) => b.connected)
   // Every change is saved at once and the row redraws from the server, so it never shows stale values.
-  const save = (bot_id: number, k: string[]) => void run("save", async () => {
-    await api("/panel/mirrors/save", { id: m.id, bot_id, kinds: k })
+  const save = (k: string[]) => void run("save", async () => {
+    await api("/panel/mirrors/save", { id: m.id, kinds: k })
     toast(t("Saved")); await onDone()
   })
   return (
@@ -366,8 +356,7 @@ function MirrorRow({ m, bots, onDone }: { m: NonNullable<PanelState["mirrors"]>[
         </div>
         {m.error && botLive && <div className="pt-0.5 text-xs text-destructive">{m.error}</div>}
       </TD>
-      <TD><KindPicks value={m.kinds} disabled={busy === "save"} onChange={(k) => { if (k.length) save(m.bot_id, k) }} /></TD>
-      <TD><Select size="sm" label={t("Bot")} value={String(m.bot_id)} onValueChange={(v) => save(Number(v), m.kinds)} options={botOptions(bots, m.bot_id)} /></TD>
+      <TD><KindPicks value={m.kinds} disabled={busy === "save"} onChange={(k) => { if (k.length) save(k) }} /></TD>
       <TD className="pr-4">
         <div className="flex justify-end gap-1">
           <Button size="sm" variant="outline" disabled={busy === "vis"} onClick={() => void run("vis", async () => {

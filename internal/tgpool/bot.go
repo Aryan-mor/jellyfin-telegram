@@ -272,7 +272,7 @@ func (b *bot) openChannel(ctx context.Context, id int64, username string) (*tg.C
 		if who == "" {
 			who = fmt.Sprintf("%d", b.id)
 		}
-		return nil, fmt.Errorf("@%s must be an admin of %s, with permission to post, and an admin of the main channel", strings.TrimPrefix(who, "@"), name)
+		return nil, fmt.Errorf("%w: @%s must be an admin of %s, with permission to post, and an admin of the main channel", ErrNoMirrorAccess, strings.TrimPrefix(who, "@"), name)
 	}
 	return ch, nil
 }

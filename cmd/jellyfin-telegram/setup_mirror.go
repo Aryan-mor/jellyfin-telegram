@@ -50,17 +50,11 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 		clear()
 		return
 	}
-	botID, err := config.BotID(cfg.BotTokens[0])
-	if err != nil {
-		log.Warn("public mirror was not created", "err", err)
-		clear()
-		return
-	}
 	if raw := strings.TrimSpace(os.Getenv("MIRROR_CHANNEL")); raw != "" {
 		wizard.SetStatus(setup.Status{Stage: "Adding the public mirror", Percent: 99})
 		mctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 		defer cancel()
-		err := attachExistingMirror(mctx, cat, pool, users, cfg.ChannelID, botID, raw)
+		err := attachExistingMirror(mctx, cat, pool, users, cfg.ChannelID, raw)
 		clear()
 		if err != nil {
 			log.Warn("public mirror was not added", "err", err)
@@ -78,7 +72,7 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 	wizard.SetStatus(setup.Status{Stage: "Creating a public mirror", Percent: 99})
 	mctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
 	defer cancel()
-	_, err = createMirror(mctx, cat, pool, users, envPath, cfg.ChannelID, title, true, username, []string{"movie", "series"}, false, botID, func(text, state string) {
+	_, err = createMirror(mctx, cat, pool, users, envPath, cfg.ChannelID, title, true, username, []string{"movie", "series"}, false, func(text, state string) {
 		log.Info("setup mirror", "step", text, "state", state)
 		if state != "bad" {
 			wizard.SetStatus(setup.Status{Stage: text, Percent: 99})
@@ -90,7 +84,7 @@ func setupMirror(ctx context.Context, cfg config.Config, envPath string, cat *ca
 	}
 }
 
-func attachExistingMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, main, botID int64, raw string) error {
+func attachExistingMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, main int64, raw string) error {
 	ctx = tguser.Prioritise(ctx)
 	channelID, username, err := mirror.ParseTarget(raw)
 	if err != nil {
@@ -99,11 +93,7 @@ func attachExistingMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpoo
 	if channelID != 0 && channelID == main {
 		return errors.New("that is the main channel")
 	}
-	name, err := poolBotName(pool, botID)
-	if err != nil {
-		return err
-	}
-	_, err = users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
+	val, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
 		ch, err := tguser.ResolveChannelInput(ctx, api, raw)
 		if err != nil {
 			return nil, err
@@ -111,23 +101,26 @@ func attachExistingMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpoo
 		if ch.ID == main {
 			return nil, errors.New("that is the main channel")
 		}
-		u, err := tgsetup.ResolveBot(ctx, api, name)
-		if err != nil {
-			return nil, err
-		}
-		return nil, tgsetup.PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
+		return tgsetup.Created{ID: ch.ID, AccessHash: ch.AccessHash, Title: ch.Title}, nil
 	})
 	if err != nil {
 		return err
 	}
-	id, title, err := pool.AcceptMirror(ctx, botID, channelID, username)
+	if err := promoteAllBots(ctx, users, pool, val.(tgsetup.Created), nil); err != nil {
+		return err
+	}
+	acceptBot, err := pool.ReadyBot()
+	if err != nil {
+		return err
+	}
+	id, title, err := pool.AcceptMirror(ctx, acceptBot, channelID, username)
 	if err != nil {
 		return err
 	}
 	if id == main {
 		return errors.New("that is the main channel")
 	}
-	row, err := cat.AddMirror(ctx, id, botID, title, []string{"movie", "series"})
+	row, err := cat.AddMirror(ctx, id, 0, title, []string{"movie", "series"})
 	if err != nil {
 		return err
 	}

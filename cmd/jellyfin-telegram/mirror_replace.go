@@ -20,9 +20,6 @@ func replaceBannedMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool
 	if users == nil {
 		return errors.New("sign in a Telegram account before a banned mirror can be replaced")
 	}
-	if m.BotID == 0 {
-		return errors.New("that mirror has no bot")
-	}
 	title := m.Title
 	if title == "" {
 		title = "Library mirror"
@@ -59,20 +56,14 @@ func replaceBannedMirror(ctx context.Context, cat *catalog.Catalog, pool *tgpool
 	_, _ = users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
 		return nil, tgsetup.MuteChannel(ctx, api, ch.ID, ch.AccessHash)
 	})
-	name, err := poolBotName(pool, m.BotID)
+	if err := promoteAllBots(ctx, users, pool, ch, nil); err != nil {
+		return err
+	}
+	acceptBot, err := pool.ReadyBot()
 	if err != nil {
 		return err
 	}
-	if _, err := users.Run(ctx, func(ctx context.Context, api *tg.Client) (any, error) {
-		u, err := tgsetup.ResolveBot(ctx, api, name)
-		if err != nil {
-			return nil, err
-		}
-		return nil, tgsetup.PromoteBot(ctx, api, ch.ID, ch.AccessHash, u)
-	}); err != nil {
-		return err
-	}
-	got, titleGot, err := pool.AcceptMirror(ctx, m.BotID, ch.ID, username)
+	got, titleGot, err := pool.AcceptMirror(ctx, acceptBot, ch.ID, username)
 	if err != nil {
 		return err
 	}
