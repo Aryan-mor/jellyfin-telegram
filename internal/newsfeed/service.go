@@ -21,9 +21,9 @@ import (
 
 const pageSize = 100
 
-// newsPages is how much of one channel a pass reads before it looks at the others again.
-// A channel set to all of its history therefore does not hold up a new daily post.
-const newsPages = 8
+// newsPages is how many older pages one channel reads before the pass moves on.
+// New posts are taken first, so one page of history cannot hide a fresh link behind a long channel.
+const newsPages = 1
 
 // Telegram is the signed-in account that reads channels and posts into the library channel.
 type Telegram interface {

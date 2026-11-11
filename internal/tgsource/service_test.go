@@ -75,6 +75,17 @@ func (f *fakeTG) all() []int {
 	return out
 }
 
+// drain runs passes until older history is finished.
+func drain(t *testing.T, s *Service) {
+	t.Helper()
+	for i := 0; i < 40; i++ {
+		if !s.Pass(context.Background()) {
+			return
+		}
+	}
+	t.Fatal("history did not finish")
+}
+
 func movie(id int, date time.Time) tguser.Post {
 	return tguser.Post{ID: id, Date: date, DocID: int64(1000 + id), Size: 900 << 20, MIME: "video/x-matroska",
 		Name: fmt.Sprintf("Movie.%d.2020.mkv", id), Duration: 100 * time.Minute}
@@ -178,13 +189,15 @@ func TestWalkCopiesOnceAndOnlyNew(t *testing.T) {
 	tg.posts = append(tg.posts, tguser.Post{ID: 251, Date: now.Add(-time.Hour), DocID: 9, Size: 1 << 20, MIME: "video/mp4", Name: "x.mp4"})
 	s, _ := newService(t, tg, now)
 	enable(t, s, func(set *Settings) { set.MaxPerDay = 0 })
-	s.Pass(context.Background())
+	drain(t, s)
 	if got := len(tg.all()); got != 250 {
-		t.Fatalf("first pass copied %d, want 250", got)
+		t.Fatalf("history copied %d, want 250", got)
 	}
-	// Nothing new: a second pass copies nothing.
+	// Nothing new: a later pass copies nothing.
 	before := len(tg.copied)
-	s.Pass(context.Background())
+	if s.Pass(context.Background()) {
+		t.Fatal("a caught-up channel asked to run again at once")
+	}
 	if len(tg.copied) != before {
 		t.Fatalf("second pass copied again")
 	}
@@ -263,7 +276,7 @@ func TestSubtitleOnTheNewerPageIsKept(t *testing.T) {
 	}
 	s, _ := newService(t, tg, now)
 	enable(t, s, func(set *Settings) { set.MaxPerDay = 0; set.LookBackDays = 0 })
-	s.Pass(context.Background())
+	drain(t, s)
 	var paired bool
 	for _, batch := range tg.copied {
 		hasFilm, hasSub := false, false

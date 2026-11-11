@@ -22,10 +22,11 @@ import (
 
 const (
 	settingsKey = "tgsource_settings"
-	pageSize    = 100
-	// deepPages is how many history pages one channel keeps before the pass moves to the next
-	// channel. A channel set to all of its history therefore does not block a channel set to a few days.
-	deepPages = 8
+	pageSize = 100
+	// historyPages is how many older pages one channel reads per pass. One page, then the next
+	// channel. New posts are still taken first (peek), so a long history cannot hide a fresh file.
+	// The pass returns and comes back shortly while any channel still has older pages left.
+	historyPages = 1
 	// maxFloodWait is the longest Telegram wait that is slept out inside a pass.
 	// Shorter than this used to give up and try again within minutes, which only
 	// lengthened the wait. 3281 seconds is inside this limit.
@@ -197,7 +198,8 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-// Pass walks every enabled channel once. It returns true when no account was free, so the caller
+// Pass reads every enabled channel once: new posts first, then one page of older history.
+// It returns true when the account was busy or a channel still has older history, so the caller
 // tries again shortly instead of waiting for the normal interval.
 func (s *Service) Pass(parent context.Context) bool {
 	s.run.Lock()
@@ -219,35 +221,31 @@ func (s *Service) Pass(parent context.Context) bool {
 		return false
 	}
 	s.setNote("")
-	for {
-		if ctx.Err() != nil {
-			return false
+	if ctx.Err() != nil {
+		return false
+	}
+	sources, err := s.Cat.Sources(ctx)
+	if err != nil {
+		s.setNote(err.Error())
+		return false
+	}
+	more := false
+	for _, src := range sources {
+		if ctx.Err() != nil || !src.Enabled || src.NoForwards {
+			continue
 		}
-		sources, err := s.Cat.Sources(ctx)
+		err := s.walk(ctx, src, set, historyPages)
+		if errors.Is(err, errWalkMore) {
+			more = true
+			continue
+		}
 		if err != nil {
-			s.setNote(err.Error())
-			return false
-		}
-		more := false
-		for _, src := range sources {
-			if ctx.Err() != nil || !src.Enabled || src.NoForwards {
-				continue
+			if stop := s.record(ctx, src, err); stop {
+				return errors.Is(err, tguser.ErrNoFreeSession)
 			}
-			err := s.walk(ctx, src, set, deepPages)
-			if errors.Is(err, errWalkMore) {
-				more = true
-				continue
-			}
-			if err != nil {
-				if stop := s.record(ctx, src, err); stop {
-					return errors.Is(err, tguser.ErrNoFreeSession)
-				}
-			}
-		}
-		if !more {
-			return false
 		}
 	}
+	return more
 }
 
 // Running reports that a direct-file pass is in progress. News checks only its newest posts then.
@@ -334,8 +332,9 @@ var errDailyCap = errors.New("daily limit reached")
 var errWalkMore = errors.New("more history")
 
 // walk goes through one channel from its newest message downwards, until it meets what an earlier
-// walk handled, the channel's look-back, or budget pages. Progress is saved after every page, so a
-// restart resumes. A negative budget means no page limit.
+// walk handled, the channel's look-back, or budget pages. New posts above the walk are copied
+// before any older page. Progress is saved after every page, so a restart resumes. A negative
+// budget means no page limit.
 func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings, budget int) error {
 	days := src.DaysBack(set.LookBackDays)
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
