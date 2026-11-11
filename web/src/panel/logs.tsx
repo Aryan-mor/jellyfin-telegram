@@ -3,7 +3,8 @@ import { Navigate, NavLink, useLocation, useSearchParams } from "react-router"
 import { useQuery } from "@tanstack/react-query"
 import { api, pollingPaused } from "@/lib/api"
 import { t } from "@/lib/i18n"
-import { ago, cn } from "@/lib/utils"
+import { ago, bytes, cn } from "@/lib/utils"
+import { LiveChart, useFeed, type LiveRow } from "@/panel/livechart"
 import { Button, Card, Empty, Table, TBody, TD, TH, THead, TR } from "@/components/ui"
 import { usePanel, type BotCounters } from "@/panel/shell"
 
@@ -31,6 +32,11 @@ export function LogsHome() {
         <p className="mt-1 max-w-2xl text-sm text-muted-foreground">{t("What each bot did since the service started, and everything the bots and accounts do as it happens.")}</p>
       </div>
       <LogTabs />
+      <LiveChart />
+      <Card>
+        <div className="border-b px-4 py-3"><h2 className="font-medium">{t("Users")}</h2></div>
+        <UsersLive />
+      </Card>
       <Card>
         <div className="border-b px-4 py-3"><h2 className="font-medium">{t("Bots")}</h2></div>
         <BotsLive />
@@ -155,12 +161,49 @@ function mib(n: number) {
   return n >= 1 << 30 ? (n / (1 << 30)).toFixed(1) + " GiB" : (n / (1 << 20)).toFixed(0) + " MiB"
 }
 
-type LiveRow = LogRow & { kind: string; actor_id: number; name: string }
-
 const LIVE_KEY = "panel-live-log"
 
 function liveOn() {
   try { return localStorage.getItem(LIVE_KEY) !== "off" } catch { return true }
+}
+
+// UsersLive lists every signed-in Telegram account. Accounts have no read counters, so the last work comes from the log.
+export function UsersLive() {
+  const { data: s } = usePanel()
+  const feed = useFeed()
+  const users = s?.telegram?.sessions ?? []
+  if (!users.length) return <Empty>{t("No Telegram account is signed in.")}</Empty>
+  const rows = feed.data?.items ?? []
+  return (
+    <Table>
+      <THead>
+        <TR>
+          <TH>{t("User")}</TH>
+          <TH>{t("State")}</TH>
+          <TH>{t("Last work")}</TH>
+          <TH>{t("Last action")}</TH>
+          <TH>{t("Plan")}</TH>
+          <TH>{t("Largest file")}</TH>
+        </TR>
+      </THead>
+      <TBody>
+        {users.map((u) => {
+          const last = rows.find((r) => r.kind === "account" && r.actor_id === u.user_id)
+          const state = !u.connected ? t("Offline") : u.busy ? t("Working now.").replace(/\.$/, "") : t("Free.").replace(/\.$/, "")
+          return (
+            <TR key={u.user_id}>
+              <TD className="whitespace-nowrap font-medium">{u.username ? "@" + u.username : (u.phone || t("user {{id}}", { id: u.user_id }))}</TD>
+              <TD className={cn("whitespace-nowrap", u.error ? "text-destructive" : "text-muted-foreground")}><span title={u.error}>{u.error ? t("Problem") : state}</span></TD>
+              <TD className="whitespace-nowrap text-muted-foreground">{last ? <span title={new Date(last.at * 1000).toLocaleString()}>{ago(last.at)}</span> : "–"}</TD>
+              <TD className="max-w-xs truncate text-muted-foreground"><span title={last?.detail}>{last ? t(last.action) : "–"}</span></TD>
+              <TD className="whitespace-nowrap text-muted-foreground">{u.premium ? "Premium" : t("Free plan")}</TD>
+              <TD className="whitespace-nowrap tabular-nums">{u.max_bytes ? bytes(u.max_bytes) : "–"}</TD>
+            </TR>
+          )
+        })}
+      </TBody>
+    </Table>
+  )
 }
 
 // BotsLive lists every bot with what it did since the service started, one bot per row.
@@ -207,12 +250,7 @@ export function BotsLive() {
 export function LiveLog() {
   const { data: s } = usePanel()
   const [on, setOn] = useState(liveOn)
-  const logs = useQuery({
-    queryKey: ["panel-logs", "all"],
-    enabled: on,
-    queryFn: () => api<{ items: LiveRow[] }>("/panel/activity?kind=all&page=1"),
-    refetchInterval: () => (pollingPaused() ? false : 3000),
-  })
+  const logs = useFeed()
   function toggle(v: boolean) {
     setOn(v)
     try { localStorage.setItem(LIVE_KEY, v ? "on" : "off") } catch { /* private window */ }

@@ -5,6 +5,8 @@
   "scripts": {
     "setup": "pnpm --dir web install && node scripts/install-git-hooks.mjs",
     "ui:dev": "pnpm --dir web dev",
+    "ui:setup": "pnpm --dir web exec vite --open /ui/setup.html",
+    "install:dev": "pnpm run ui:build && powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/install-dev.ps1",
     "ui:build": "pnpm --dir web build",
     "ui:check": "pnpm --dir web exec tsc -p tsconfig.app.json --noEmit && pnpm --dir web exec oxlint",
     "restart": "pnpm run ui:build && powershell -NoProfile -ExecutionPolicy Bypass -File ./restart.ps1 -Build",

@@ -4,6 +4,19 @@ import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
 const root = import.meta.dirname
+const api = "http://127.0.0.1:8097"
+
+// /setup and /panel are API prefixes. The dev pages are /setup.html and /panel.html,
+// and a prefix proxy would send those HTML files to the running server.
+function apiProxy(page: string) {
+  return {
+    target: api,
+    bypass(req: { url?: string }) {
+      const path = (req.url ?? "").split("?")[0]
+      if (path === page) return path
+    },
+  }
+}
 
 export default defineConfig({
   base: "/ui/",
@@ -21,8 +34,8 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      "/panel": "http://127.0.0.1:8097",
-      "/setup": "http://127.0.0.1:8097",
+      "/panel": apiProxy("/panel.html"),
+      "/setup": apiProxy("/setup.html"),
     },
   },
 })
