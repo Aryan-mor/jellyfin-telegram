@@ -20,6 +20,10 @@ import (
 
 const pageSize = 100
 
+// newsPages is how much of one channel a pass reads before it looks at the others again.
+// A channel set to all of its history therefore does not hold up a new daily post.
+const newsPages = 8
+
 // Telegram is the signed-in account that reads channels and posts into the library channel.
 type Telegram interface {
 	Lookup(ctx context.Context, input string) (tguser.Channel, error)
@@ -46,6 +50,9 @@ type Service struct {
 	Now            func() time.Time
 	// InReady reports that the library already has this lookup hashtag. Nil skips the check.
 	InReady func(ctx context.Context, tag string) (bool, error)
+	// DirectBusy reports that direct file channels are being read. While that is true, news only
+	// checks posts newer than the last walk, so a daily post is not stuck behind a long history.
+	DirectBusy func() bool
 
 	mu      sync.Mutex
 	loaded  bool
@@ -107,6 +114,9 @@ func (s *Service) Run(ctx context.Context) {
 		if err == nil && set.Enabled {
 			if s.Pass(ctx) {
 				wait := 20 * time.Second
+				if s.directBusy() {
+					wait = time.Minute
+				}
 				select {
 				case <-ctx.Done():
 					return
@@ -147,24 +157,38 @@ func (s *Service) Pass(parent context.Context) bool {
 		return false
 	}
 	ctx = tguser.WithUser(ctx, set.UserID)
+	if s.directBusy() {
+		return s.heads(ctx, set)
+	}
 	s.setNote("")
 	channels, err := s.Cat.NewsChannels(ctx)
 	if err != nil {
 		s.setNote(err.Error())
 		return false
 	}
+	again := false
 	for _, src := range channels {
 		if ctx.Err() != nil || !src.Enabled {
 			continue
 		}
 		if err := s.walk(ctx, src, set); err != nil {
+			if errors.Is(err, errYield) || errors.Is(err, errMore) {
+				again = true
+				continue
+			}
 			if s.record(ctx, src, err) {
 				return errors.Is(err, tguser.ErrNoFreeSession)
 			}
 		}
 	}
-	return false
+	return again
 }
+
+// errYield means direct file channels started a pass, so news stops its history and checks again soon.
+var errYield = errors.New("direct files are reading")
+
+// errMore means this channel still has history left. The pass comes back after the newer posts.
+var errMore = errors.New("more history")
 
 func (s *Service) setNote(text string) {
 	s.mu.Lock()
@@ -197,20 +221,116 @@ func (s *Service) record(ctx context.Context, src catalog.Source, err error) boo
 
 var errDailyCap = errors.New("daily limit reached")
 
+func (s *Service) directBusy() bool {
+	return s != nil && s.DirectBusy != nil && s.DirectBusy()
+}
+
+// heads reads only posts newer than each channel's last walk. It returns true so the caller
+// checks again soon instead of waiting out the normal interval.
+func (s *Service) heads(ctx context.Context, set Settings) bool {
+	channels, err := s.Cat.NewsChannels(ctx)
+	if err != nil {
+		s.setNote(err.Error())
+		return false
+	}
+	for _, src := range channels {
+		if ctx.Err() != nil || !src.Enabled {
+			continue
+		}
+		if err := s.head(ctx, src, set); err != nil {
+			if s.record(ctx, src, err) {
+				return true
+			}
+		}
+	}
+	return true
+}
+
+// head takes links posted after the walk's top. It does not move a history cursor.
+func (s *Service) head(ctx context.Context, src catalog.Source, set Settings) error {
+	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
+	top := src.Watermark
+	if src.Cursor != 0 && src.ScanTop > top {
+		top = src.ScanTop
+	}
+	page, err := s.TG.History(ctx, ref, 0, pageSize)
+	if err != nil {
+		return err
+	}
+	for _, hit := range page.Links {
+		if hit.ID <= top {
+			continue
+		}
+		if err := s.one(ctx, src, hit, set); err != nil {
+			return err
+		}
+	}
+	if src.Cursor == 0 && page.Highest > src.Watermark {
+		return s.Cat.SaveNewsWalk(ctx, src.ID, catalog.SourceWalk{Watermark: page.Highest, CoveredDays: src.CoveredDays}, "")
+	}
+	return nil
+}
+
+// peek opens links newer than the walk's top and raises that top. The history cursor stays.
+func (s *Service) peek(ctx context.Context, src catalog.Source, set Settings, w *catalog.SourceWalk) error {
+	if w.ScanTop == 0 {
+		return nil
+	}
+	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
+	cursor := 0
+	for {
+		page, err := s.TG.History(ctx, ref, cursor, pageSize)
+		if err != nil {
+			return err
+		}
+		for _, hit := range page.Links {
+			if hit.ID <= w.ScanTop {
+				continue
+			}
+			if err := s.one(ctx, src, hit, set); err != nil {
+				return err
+			}
+		}
+		if page.Highest > w.ScanTop {
+			w.ScanTop = page.Highest
+		}
+		if !page.More || page.Lowest == 0 || page.Lowest <= w.ScanTop {
+			return s.Cat.SaveNewsWalk(ctx, src.ID, *w, "")
+		}
+		cursor = page.Lowest
+	}
+}
+
 func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings) error {
+	days := src.DaysBack(set.LookBackDays)
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
 	w := catalog.SourceWalk{Cursor: src.Cursor, ScanTop: src.ScanTop, Watermark: src.Watermark, CoveredDays: src.CoveredDays}
-	if w.Cursor == 0 && !covers(w.CoveredDays, set.LookBackDays) {
+	if w.Cursor == 0 && !covers(w.CoveredDays, days) {
 		w.Watermark = 0
+	} else if w.Cursor != 0 {
+		if err := s.peek(ctx, src, set, &w); err != nil {
+			return err
+		}
 	}
 	var cutoff time.Time
-	if set.LookBackDays > 0 {
-		cutoff = s.now().AddDate(0, 0, -set.LookBackDays)
+	if days > 0 {
+		cutoff = s.now().AddDate(0, 0, -days)
 	}
 	floor := w.Watermark
+	pages := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
+		}
+		if pages >= newsPages {
+			return errMore
+		}
+		pages++
+		if s.directBusy() {
+			if err := s.Cat.SaveNewsWalk(ctx, src.ID, w, ""); err != nil {
+				return err
+			}
+			return errYield
 		}
 		page, err := s.TG.History(ctx, ref, w.Cursor, pageSize)
 		if err != nil {
@@ -235,7 +355,7 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings) er
 			if w.ScanTop > w.Watermark {
 				w.Watermark = w.ScanTop
 			}
-			w.Cursor, w.ScanTop, w.CoveredDays = 0, 0, set.LookBackDays
+			w.Cursor, w.ScanTop, w.CoveredDays = 0, 0, days
 			return s.Cat.SaveNewsWalk(ctx, src.ID, w, "")
 		}
 		w.Cursor = page.Lowest
@@ -500,6 +620,36 @@ func (s *Service) Add(ctx context.Context, input string) (catalog.Source, error)
 
 // Remove forgets a news channel.
 func (s *Service) Remove(ctx context.Context, id int64) error { return s.Cat.DeleteNews(ctx, id) }
+
+// SetLookBack sets how far back this news channel is read. Negative uses the shared rule. Zero means
+// all of its history. A wider window than the last finished walk starts that walk again.
+func (s *Service) SetLookBack(ctx context.Context, id int64, days int) error {
+	if days < 0 {
+		days = catalog.InheritLookBack
+	}
+	src, ok, err := s.Cat.News(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("no such channel")
+	}
+	if err := s.Cat.SetNewsLookBack(ctx, id, days); err != nil {
+		return err
+	}
+	set, err := s.Settings(ctx)
+	if err != nil {
+		return err
+	}
+	src.LookBack = days
+	if !covers(src.CoveredDays, src.DaysBack(set.LookBackDays)) {
+		if err := s.Cat.SaveNewsWalk(ctx, id, catalog.SourceWalk{CoveredDays: catalog.InheritLookBack}, ""); err != nil {
+			return err
+		}
+	}
+	s.Kick()
+	return nil
+}
 
 // Pause stops or resumes one news channel.
 func (s *Service) Pause(ctx context.Context, id int64, enabled bool) error {

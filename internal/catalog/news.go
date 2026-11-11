@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS tgnews (
 	scan_top INTEGER NOT NULL DEFAULT 0,
 	watermark INTEGER NOT NULL DEFAULT 0,
 	covered_days INTEGER NOT NULL DEFAULT -1,
+	look_back_days INTEGER NOT NULL DEFAULT -1,
 	last_scan_unix INTEGER NOT NULL DEFAULT 0,
 	error TEXT NOT NULL DEFAULT '',
 	found INTEGER NOT NULL DEFAULT 0,
@@ -39,7 +40,7 @@ CREATE TABLE IF NOT EXISTS tgnewslinks (
 	updated_unix INTEGER NOT NULL
 );`
 
-const newsColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, last_scan_unix, error, found, copied, added_unix, 'manual', '' FROM tgnews`
+const newsColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, look_back_days, last_scan_unix, error, found, copied, added_unix, 'manual', '' FROM tgnews`
 
 // NewsLink is one bot deep link taken from a news post.
 type NewsLink struct {
@@ -64,6 +65,15 @@ func (c *Catalog) AddNews(ctx context.Context, s Source) (Source, error) {
 		return Source{}, err
 	}
 	return scanSource(c.db.QueryRowContext(ctx, newsColumns+` WHERE channel_id=?`, s.ChannelID))
+}
+
+// News returns one news channel.
+func (c *Catalog) News(ctx context.Context, id int64) (Source, bool, error) {
+	s, err := scanSource(c.db.QueryRowContext(ctx, newsColumns+` WHERE id=?`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Source{}, false, nil
+	}
+	return s, err == nil, err
 }
 
 // NewsChannels lists every news channel in the order it was added.
@@ -101,6 +111,15 @@ func (c *Catalog) SaveNewsWalk(ctx context.Context, id int64, w SourceWalk, errT
 	_, err := c.db.ExecContext(ctx, `UPDATE tgnews SET cursor=?, scan_top=?, watermark=?, covered_days=?,
 		last_scan_unix=?, error=? WHERE id=?`,
 		w.Cursor, w.ScanTop, w.Watermark, w.CoveredDays, time.Now().Unix(), errText, id)
+	return err
+}
+
+// SetNewsLookBack stores one news channel's window. Negative means the shared rule.
+func (c *Catalog) SetNewsLookBack(ctx context.Context, id int64, days int) error {
+	if days < 0 {
+		days = InheritLookBack
+	}
+	_, err := c.db.ExecContext(ctx, `UPDATE tgnews SET look_back_days=? WHERE id=?`, days, id)
 	return err
 }
 

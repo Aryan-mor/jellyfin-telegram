@@ -469,3 +469,17 @@ func TestIdleDiscoveredChannelFreesASlot(t *testing.T) {
 		t.Fatal("a banned channel was kept")
 	}
 }
+
+func TestChannelLookBackOverridesTheRule(t *testing.T) {
+	now := time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+	tg := &fakeTG{free: true, posts: []tguser.Post{movie(2, now), movie(1, now.AddDate(0, 0, -3))}}
+	s, src := newService(t, tg, now)
+	enable(t, s, func(set *Settings) { set.LookBackDays = 7 })
+	if err := s.SetLookBack(context.Background(), src.ID, 1); err != nil {
+		t.Fatal(err)
+	}
+	s.Pass(context.Background())
+	if got := tg.all(); len(got) != 1 || got[0] != 2 {
+		t.Fatalf("channel window copied %v, want only the post from today", got)
+	}
+}

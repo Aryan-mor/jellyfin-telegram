@@ -127,6 +127,7 @@ func startNews(ctx context.Context, cfg config.Config, cat *catalog.Catalog, use
 	}
 	svc := newsfeed.New()
 	svc.Cat, svc.TG, svc.LibraryChannel, svc.Log = cat, users, cfg.ChannelID, log
+	svc.DirectBusy = sources.Running
 	rc := fileresolver.DefaultConfig()
 	rc.StateDir, rc.Log = filepath.Join(cfg.DataDir, "resolver"), log
 	// Several private channels per link add up quickly. A slower pace keeps Telegram's join limit away.
@@ -186,6 +187,13 @@ func sourceActions(cat *catalog.Catalog, svc *tgsource.Service, news *newsfeed.S
 		case "strict":
 			on, _ := body["strict"].(bool)
 			return nil, svc.Strict(ctx, int64(number(body["id"])), on)
+		case "lookback":
+			return nil, svc.SetLookBack(ctx, int64(number(body["id"])), int(number(body["days"])))
+		case "news_lookback":
+			if news == nil {
+				return nil, errors.New("news channels are not available")
+			}
+			return nil, news.SetLookBack(ctx, int64(number(body["id"])), int(number(body["days"])))
 		case "check":
 			svc.CheckNow()
 			if news != nil {

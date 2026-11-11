@@ -22,6 +22,9 @@ import (
 const (
 	settingsKey = "tgsource_settings"
 	pageSize    = 100
+	// deepPages is how many history pages one channel keeps before the pass moves to the next
+	// channel. A channel set to all of its history therefore does not block a channel set to a few days.
+	deepPages = 8
 	// maxFloodWait is the longest Telegram wait that is slept out inside a pass.
 	// Shorter than this used to give up and try again within minutes, which only
 	// lengthened the wait. 3281 seconds is inside this limit.
@@ -203,25 +206,45 @@ func (s *Service) Pass(parent context.Context) bool {
 		return false
 	}
 	s.setNote("")
-	sources, err := s.Cat.Sources(ctx)
-	if err != nil {
-		s.setNote(err.Error())
-		return false
-	}
-	for _, src := range sources {
-		if ctx.Err() != nil || !src.Enabled {
-			continue
+	for {
+		if ctx.Err() != nil {
+			return false
 		}
-		if src.NoForwards {
-			continue
+		sources, err := s.Cat.Sources(ctx)
+		if err != nil {
+			s.setNote(err.Error())
+			return false
 		}
-		if err := s.walk(ctx, src, set); err != nil {
-			if stop := s.record(ctx, src, err); stop {
-				return errors.Is(err, tguser.ErrNoFreeSession)
+		more := false
+		for _, src := range sources {
+			if ctx.Err() != nil || !src.Enabled || src.NoForwards {
+				continue
+			}
+			err := s.walk(ctx, src, set, deepPages)
+			if errors.Is(err, errWalkMore) {
+				more = true
+				continue
+			}
+			if err != nil {
+				if stop := s.record(ctx, src, err); stop {
+					return errors.Is(err, tguser.ErrNoFreeSession)
+				}
 			}
 		}
+		if !more {
+			return false
+		}
 	}
-	return false
+}
+
+// Running reports that a direct-file pass is in progress. News checks only its newest posts then.
+func (s *Service) Running() bool {
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.running
 }
 
 func (s *Service) setNote(text string) {
@@ -294,28 +317,47 @@ func friendly(err error) string {
 
 var errDailyCap = errors.New("daily limit reached")
 
+// errWalkMore means this channel still has history left, and the pass should visit the other channels first.
+var errWalkMore = errors.New("more history")
+
 // walk goes through one channel from its newest message downwards, until it meets what an earlier
-// walk handled or the look-back limit. Progress is saved after every page, so a restart resumes.
-func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings) error {
+// walk handled, the channel's look-back, or budget pages. Progress is saved after every page, so a
+// restart resumes. A negative budget means no page limit.
+func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings, budget int) error {
+	days := src.DaysBack(set.LookBackDays)
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
 	w := catalog.SourceWalk{Cursor: src.Cursor, ScanTop: src.ScanTop, Watermark: src.Watermark, CoveredDays: src.CoveredDays}
+	var edge edgeMsg
 	if w.Cursor == 0 {
 		// A new walk. If an earlier one covered less time than is wanted now, it starts again from the top.
-		if !covers(w.CoveredDays, set.LookBackDays) {
+		if !covers(w.CoveredDays, days) {
 			w.Watermark = 0
 		}
 		w.ScanTop = 0
+	} else {
+		var err error
+		if edge, err = s.edgeAt(ctx, ref, w.Cursor); err != nil {
+			return err
+		}
+		// Posts that arrived after this walk started sit above its top. Take them before going on.
+		if err := s.peek(ctx, src, set, &w); err != nil {
+			return err
+		}
 	}
 	var cutoff time.Time
-	if set.LookBackDays > 0 {
-		cutoff = s.now().AddDate(0, 0, -set.LookBackDays)
+	if days > 0 {
+		cutoff = s.now().AddDate(0, 0, -days)
 	}
 	floor := w.Watermark
-	var edge edgeMsg
+	pages := 0
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
+		if budget > 0 && pages >= budget {
+			return errWalkMore
+		}
+		pages++
 		page, err := s.TG.History(ctx, ref, w.Cursor, pageSize)
 		if err != nil {
 			return err
@@ -344,13 +386,64 @@ func (s *Service) walk(ctx context.Context, src catalog.Source, set Settings) er
 			if w.ScanTop > w.Watermark {
 				w.Watermark = w.ScanTop
 			}
-			w.Cursor, w.ScanTop, w.CoveredDays = 0, 0, set.LookBackDays
+			w.Cursor, w.ScanTop, w.CoveredDays = 0, 0, days
 			return s.Cat.SaveSourceWalk(ctx, src.ID, w, "")
 		}
 		w.Cursor = page.Lowest
 		if err := s.Cat.SaveSourceWalk(ctx, src.ID, w, ""); err != nil {
 			return err
 		}
+	}
+}
+
+// edgeAt is the message saved as the cursor: the one directly under the next older page.
+func (s *Service) edgeAt(ctx context.Context, ref tguser.SourceRef, cursor int) (edgeMsg, error) {
+	if cursor <= 0 {
+		return edgeMsg{}, nil
+	}
+	page, err := s.TG.History(ctx, ref, cursor+1, 1)
+	if err != nil {
+		return edgeMsg{}, err
+	}
+	edge := edgeMsg{id: page.Lowest}
+	for _, p := range page.Posts {
+		if p.ID == page.Lowest {
+			edge.post = p
+			edge.doc = true
+			break
+		}
+	}
+	return edge, nil
+}
+
+// peek copies posts newer than the walk's top and raises that top. The backfill cursor stays.
+func (s *Service) peek(ctx context.Context, src catalog.Source, set Settings, w *catalog.SourceWalk) error {
+	if w.ScanTop == 0 {
+		return nil
+	}
+	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
+	cursor := 0
+	for {
+		page, err := s.TG.History(ctx, ref, cursor, pageSize)
+		if err != nil {
+			return err
+		}
+		var take []tguser.Post
+		for _, p := range page.Posts {
+			if p.ID > w.ScanTop {
+				take = append(take, p)
+			}
+		}
+		if err := s.copyPosts(ctx, src, take, set, subsBelow(page, edgeMsg{})); err != nil {
+			return err
+		}
+		if page.Highest > w.ScanTop {
+			w.ScanTop = page.Highest
+		}
+		if !page.More || page.Lowest == 0 || page.Lowest <= w.ScanTop {
+			return s.Cat.SaveSourceWalk(ctx, src.ID, *w, "")
+		}
+		cursor = page.Lowest
 	}
 }
 
@@ -672,6 +765,36 @@ func sourceBannedText(msg string) bool {
 // Strict makes one channel keep only files whose name shows a year or an episode number.
 func (s *Service) Strict(ctx context.Context, id int64, on bool) error {
 	return s.Cat.SetSourceStrict(ctx, id, on)
+}
+
+// SetLookBack sets how far back this channel is read. Negative uses the shared rule. Zero means
+// all of its history. A wider window than the last finished walk starts that walk again.
+func (s *Service) SetLookBack(ctx context.Context, id int64, days int) error {
+	if days < 0 {
+		days = catalog.InheritLookBack
+	}
+	src, ok, err := s.Cat.Source(ctx, id)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("no such channel")
+	}
+	if err := s.Cat.SetSourceLookBack(ctx, id, days); err != nil {
+		return err
+	}
+	set, err := s.Settings(ctx)
+	if err != nil {
+		return err
+	}
+	src.LookBack = days
+	if !covers(src.CoveredDays, src.DaysBack(set.LookBackDays)) {
+		if err := s.Cat.SaveSourceWalk(ctx, id, catalog.SourceWalk{CoveredDays: catalog.InheritLookBack}, ""); err != nil {
+			return err
+		}
+	}
+	s.kick()
+	return nil
 }
 
 // Pause stops or resumes one channel.

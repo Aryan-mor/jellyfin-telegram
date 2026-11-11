@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS tgsources (
 	scan_top INTEGER NOT NULL DEFAULT 0,
 	watermark INTEGER NOT NULL DEFAULT 0,
 	covered_days INTEGER NOT NULL DEFAULT -1,
+	look_back_days INTEGER NOT NULL DEFAULT -1,
 	last_scan_unix INTEGER NOT NULL DEFAULT 0,
 	error TEXT NOT NULL DEFAULT '',
 	found INTEGER NOT NULL DEFAULT 0,
@@ -63,13 +64,16 @@ type Source struct {
 	// Watermark is the newest message every older walk has fully handled.
 	Watermark int `json:"watermark"`
 	// CoveredDays is how far back the last finished walk reached. Zero means all of it, and -1 none yet.
-	CoveredDays int    `json:"-"`
-	LastScan    int64  `json:"last_scan"`
-	Error       string `json:"error,omitempty"`
-	Found       int    `json:"found"`
-	Copied      int    `json:"copied"`
-	Added       int64  `json:"added"`
-	InProgress  bool   `json:"in_progress"`
+	CoveredDays int `json:"-"`
+	// LookBack is this channel's own window in days. Zero means all of its history. Negative means
+	// use the shared rule.
+	LookBack   int    `json:"look_back_days"`
+	LastScan   int64  `json:"last_scan"`
+	Error      string `json:"error,omitempty"`
+	Found      int    `json:"found"`
+	Copied     int    `json:"copied"`
+	Added      int64  `json:"added"`
+	InProgress bool   `json:"in_progress"`
 	// Origin is OriginManual for a channel a person added and OriginDiscovered for one the search
 	// promoted after its files kept passing verification.
 	Origin string `json:"origin"`
@@ -77,13 +81,25 @@ type Source struct {
 	OriginNote string `json:"origin_note,omitempty"`
 }
 
-const sourceColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, last_scan_unix, error, found, copied, added_unix, origin, origin_note FROM tgsources`
+const sourceColumns = `SELECT id, channel_id, username, title, no_forwards, enabled, strict, cursor, scan_top, watermark, covered_days, look_back_days, last_scan_unix, error, found, copied, added_unix, origin, origin_note FROM tgsources`
+
+// InheritLookBack means the channel uses the shared look-back rule.
+const InheritLookBack = -1
+
+// DaysBack is how many days this channel is walked. A negative LookBack uses the shared rule.
+// Zero, either here or in the shared rule, means all of the history.
+func (s Source) DaysBack(shared int) int {
+	if s.LookBack < 0 {
+		return shared
+	}
+	return s.LookBack
+}
 
 func scanSource(s scanner) (Source, error) {
 	var src Source
 	var nf, en, st int
 	err := s.Scan(&src.ID, &src.ChannelID, &src.Username, &src.Title, &nf, &en, &st, &src.Cursor, &src.ScanTop,
-		&src.Watermark, &src.CoveredDays, &src.LastScan, &src.Error, &src.Found, &src.Copied, &src.Added, &src.Origin, &src.OriginNote)
+		&src.Watermark, &src.CoveredDays, &src.LookBack, &src.LastScan, &src.Error, &src.Found, &src.Copied, &src.Added, &src.Origin, &src.OriginNote)
 	src.NoForwards = nf != 0
 	src.Enabled = en != 0
 	src.Strict = st != 0
@@ -168,6 +184,15 @@ func (c *Catalog) SetSourceEnabled(ctx context.Context, id int64, on bool) error
 // SetSourceStrict turns the stricter name check on or off for one channel.
 func (c *Catalog) SetSourceStrict(ctx context.Context, id int64, on bool) error {
 	_, err := c.db.ExecContext(ctx, `UPDATE tgsources SET strict=? WHERE id=?`, b2i(on), id)
+	return err
+}
+
+// SetSourceLookBack stores one channel's window. Negative means the shared rule.
+func (c *Catalog) SetSourceLookBack(ctx context.Context, id int64, days int) error {
+	if days < 0 {
+		days = InheritLookBack
+	}
+	_, err := c.db.ExecContext(ctx, `UPDATE tgsources SET look_back_days=? WHERE id=?`, days, id)
 	return err
 }
 

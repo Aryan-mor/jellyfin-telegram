@@ -90,6 +90,10 @@ func Open(path string) (*Catalog, error) {
 		db.Close()
 		return nil, fmt.Errorf("apply news schema: %w", err)
 	}
+	if err := ensureLookBack(db); err != nil {
+		db.Close()
+		return nil, fmt.Errorf("migrate look back: %w", err)
+	}
 	if _, err := db.Exec(chanindexSchema); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("apply channel index schema: %w", err)
@@ -107,6 +111,23 @@ func Open(path string) (*Catalog, error) {
 		return nil, fmt.Errorf("apply forum schema: %w", err)
 	}
 	return &Catalog{db: db}, nil
+}
+
+func ensureLookBack(db *sql.DB) error {
+	for _, table := range []string{"tgsources", "tgnews"} {
+		var n int
+		err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('` + table + `') WHERE name='look_back_days'`).Scan(&n)
+		if err != nil {
+			return err
+		}
+		if n > 0 {
+			continue
+		}
+		if _, err := db.Exec(`ALTER TABLE ` + table + ` ADD COLUMN look_back_days INTEGER NOT NULL DEFAULT -1`); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func migrate(db *sql.DB) error {

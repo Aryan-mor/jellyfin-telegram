@@ -693,7 +693,7 @@ export function ApiPage() {
 const lookbacks: [string, string][] = [["1", "1 day"], ["3", "3 days"], ["7", "1 week"], ["14", "2 weeks"], ["30", "1 month"], ["90", "3 months"], ["180", "6 months"], ["365", "1 year"], ["0", "No limit, all history"]]
 
 type Rule = { enabled?: boolean; auto_add?: boolean; look_back_days?: number; every_minutes?: number; min_minutes?: number; min_mb?: number; max_gb?: number; max_per_day?: number; pause_seconds?: number; skip_words?: string; only_words?: string; need_title?: boolean }
-type Src = { id: number; title?: string; username?: string; channel_id: number; enabled: boolean; strict?: boolean; no_forwards?: boolean; in_progress?: boolean; last_scan?: number; copied?: number; error?: string }
+type Src = { id: number; title?: string; username?: string; channel_id: number; enabled: boolean; strict?: boolean; no_forwards?: boolean; in_progress?: boolean; last_scan?: number; copied?: number; error?: string; look_back_days?: number }
 type Recent = { name?: string; url?: string; source_id?: number; size?: number; updated?: number; state?: string; error?: string; detail?: string }
 type SourcesView = {
   settings?: Rule; running?: boolean; today?: number; note?: string; last_pass?: number; accounts?: { total?: number; healthy?: number }
@@ -807,6 +807,7 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
   const look = draft.value.look_back_days ?? 0
   const lookChoices = lookbacks.some(([k]) => k === String(look)) ? lookbacks : [...lookbacks, [String(look), look + " days"] as [string, string]]
   const lookOptions: [string, string][] = lookChoices.map(([k, lbl]) => [k, k === String(look) && !lookbacks.some(([bk]) => bk === String(look)) ? t("{{days}} days", { days: look }) : t(lbl)])
+  const channelLooks: [string, string][] = [["-1", t("Same as the rule")], ...lookbacks.map(([k, lbl]): [string, string] => [k, t(lbl)])]
   return (
     <Page title={title} text={news ? t("These channels post a bot link instead of the film. Any free signed-in account opens the link and forwards the file into the library.") : t("Give the signed-in Telegram account other channels that post the film itself. New files are copied into the library.")}>
       <Section>
@@ -860,6 +861,7 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
                 </TD>
                 <TD className="pr-4">
                   <div className="flex justify-end gap-1">
+                    <Select size="sm" className="w-40" label={t("Look back")} value={String(src.look_back_days ?? -1)} onValueChange={(x) => void run("lb" + src.id, async () => { await api(act("lookback"), { id: src.id, days: Number(x) }); await q.refetch() })} options={channelLooks} />
                     {!src.no_forwards && <Button size="sm" variant="ghost" onClick={() => void run("p" + src.id, async () => { await api(act("pause"), { id: src.id, enabled: !src.enabled }); await q.refetch() })}>{src.enabled ? t("Pause") : t("Resume")}</Button>}
                     {!news && <Button size="sm" variant="ghost" title={t("Strict keeps only files whose name shows a year or an episode number. Use it for a channel that posts everything.")} onClick={() => void run("s" + src.id, async () => { await api("/panel/sources/strict", { id: src.id, strict: !src.strict }); await q.refetch() })}>{src.strict ? t("Strict: on") : t("Strict: off")}</Button>}
                     <Button size="sm" variant="ghost" className="text-destructive" onClick={() => void run("r" + src.id, async () => {
@@ -882,7 +884,7 @@ function RulesPage({ kind }: { kind: "direct" | "news" }) {
           <p>{t("A public channel is @name. For a private one, forward a message to @id_bot or @getidsbot. An invite link does not work.")}</p>
         </Collapse>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          <div className="space-y-1.5"><FieldLabel>{t("Look back")}</FieldLabel><Select label={t("Look back")} value={String(draft.value.look_back_days ?? 0)} onValueChange={(x) => draft.set({ ...draft.value!, look_back_days: Number(x) })} options={lookOptions} /></div>
+          <div className="space-y-1.5"><FieldLabel>{t("Default look back")}</FieldLabel><Select label={t("Default look back")} value={String(draft.value.look_back_days ?? 0)} onValueChange={(x) => draft.set({ ...draft.value!, look_back_days: Number(x) })} options={lookOptions} /></div>
           <Num label={t("Check every, minutes")} k="every_minutes" draft={draft} />
           <Num label={t("Shortest video, minutes")} k="min_minutes" draft={draft} />
           <Num label={t("Smallest file, MB")} k="min_mb" draft={draft} />

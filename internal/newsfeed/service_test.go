@@ -132,3 +132,44 @@ func (f *failOpen) Open(context.Context, string) ([]tguser.Post, error) {
 	f.calls++
 	return nil, ErrSlowDown
 }
+
+func TestNewsChecksOnlyNewPostsWhileDirectFilesAreReading(t *testing.T) {
+	cat, err := catalog.Open(filepath.Join(t.TempDir(), "c.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cat.Close() })
+	ctx := context.Background()
+	src, err := cat.AddNews(ctx, catalog.Source{ChannelID: 50, Title: "Fans"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cat.SaveNewsWalk(ctx, src.ID, catalog.SourceWalk{Watermark: 5, CoveredDays: 7}, ""); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	tg := &fakeTG{page: tguser.Page{
+		Highest: 9, Lowest: 3,
+		Links: []tguser.StartHit{
+			{ID: 9, Date: now, URL: "https://t.me/bot?start=new"},
+			{ID: 3, Date: now.AddDate(0, 0, -2), URL: "https://t.me/bot?start=old"},
+		},
+	}}
+	op := &fakeOpen{posts: []tguser.Post{{ID: 40, DocID: 7, Name: "Today.2026.mkv", Size: 800 << 20, MIME: "video/x-matroska", Duration: 100 * time.Minute}}}
+	svc := New()
+	svc.Cat, svc.TG, svc.Open = cat, tg, op
+	svc.DirectBusy = func() bool { return true }
+	set := Defaults()
+	set.Enabled = true
+	set.PauseSeconds = 0
+	set.LookBackDays = 7
+	if err := svc.Save(ctx, set); err != nil {
+		t.Fatal(err)
+	}
+	if !svc.Pass(ctx) {
+		t.Fatal("a head check should run again soon")
+	}
+	if op.calls != 1 {
+		t.Fatalf("opened %d links, want only the new post", op.calls)
+	}
+}
