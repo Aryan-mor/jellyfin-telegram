@@ -97,7 +97,7 @@ function Setup() {
   const [picked, setPicked] = useState<string[]>([])
   const [langs, setLangs] = useState<string[]>([])
   const [title, setTitle] = useState(() => (languagePicked() ? t("Jellyfin library") : ""))
-  const [bots, setBots] = useState(5)
+  const [bots, setBots] = useState(6)
   const [channel, setChannel] = useState("")
   const [manual, setManual] = useState({ api_id: "", api_hash: "", channel: "", bots: "" })
   const [prefs, setPrefs] = useState({ seerr: true, group: true, telegram_search: true, jellyfin_url: "", jellyfin_key: "" })

@@ -29,6 +29,8 @@ const (
 	warmBytes        = 4096
 	// botReadGap is the rest after a file-block read. Playback stays usable.
 	botReadGap = 500 * time.Millisecond
+	// PlaybackBots is how many bots only read while something plays. One live stream needs about three.
+	PlaybackBots = 3
 	// botAPIGap is the rest after a channel call (history, send, forward, delete).
 	// Those are what made the bots answer FLOOD_WAIT every minute. One bot runs
 	// one of them at a time, then waits.
@@ -107,6 +109,7 @@ type Pool struct {
 	next        int
 	log         *slog.Logger
 	journal     actlog.Journal
+	playing     func() bool
 	start       func(context.Context)
 	// denied remembers, per other channel, the bots that could not post there and until when.
 	denied map[int64]map[int64]time.Time
@@ -705,7 +708,7 @@ func (p *Pool) callGap(ctx context.Context, messageID int, gap time.Duration, fn
 	var lastErr error
 	skipped := 0
 	for attempt := 0; attempt < maxAttempts; {
-		s, err := p.acquire(ctx)
+		s, err := p.acquire(ctx, gap == botReadGap)
 		if err != nil {
 			if lastErr != nil {
 				return fmt.Errorf("%w (last error: %v)", err, lastErr)
@@ -753,10 +756,10 @@ func (p *Pool) callGap(ctx context.Context, messageID int, gap time.Duration, fn
 	return fmt.Errorf("gave up after %d attempts: %w", maxAttempts, lastErr)
 }
 
-func (p *Pool) acquire(ctx context.Context) (*slot, error) {
+func (p *Pool) acquire(ctx context.Context, read bool) (*slot, error) {
 	user := tguser.UserJob(ctx)
 	for {
-		if s := p.tryAcquire(time.Now(), user); s != nil {
+		if s := p.tryAcquire(time.Now(), user, read); s != nil {
 			return s, nil
 		}
 		select {
@@ -768,15 +771,21 @@ func (p *Pool) acquire(ctx context.Context) (*slot, error) {
 }
 
 // tryAcquire picks the ready bot with the fewest running calls, rotating between ties.
-func (p *Pool) tryAcquire(now time.Time, user bool) *slot {
+func (p *Pool) tryAcquire(now time.Time, user, read bool) *slot {
+	// Work that is not a read and that nobody asked for leaves the playback bots alone while something plays.
+	hold := !user && !read && p.playing != nil && p.playing()
 	p.mu.Lock()
 	defer p.mu.Unlock()
+	var kept map[*slot]bool
+	if hold {
+		kept = p.playbackSlots()
+	}
 	var best *slot
 	bestIndex := 0
 	for i := range p.slots {
 		idx := (p.next + i) % len(p.slots)
 		s := p.slots[idx]
-		if slotBusy(s, now, p.concurrency, user) {
+		if kept[s] || slotBusy(s, now, p.concurrency, user) {
 			continue
 		}
 		if best == nil || s.inflight < best.inflight {
@@ -789,6 +798,31 @@ func (p *Pool) tryAcquire(now time.Time, user bool) *slot {
 	best.inflight++
 	p.next = (bestIndex + 1) % len(p.slots)
 	return best
+}
+
+// playbackSlots are the bots kept for playback while something plays: the first few that are ready,
+// but never all of them, so a pool of two still has a bot for everything else. The caller holds the lock.
+func (p *Pool) playbackSlots() map[*slot]bool {
+	var ready []*slot
+	for _, s := range p.slots {
+		if s.w.status().Ready {
+			ready = append(ready, s)
+		}
+	}
+	n := min(PlaybackBots, len(ready)-1)
+	kept := map[*slot]bool{}
+	for _, s := range ready[:max(n, 0)] {
+		kept[s] = true
+	}
+	return kept
+}
+
+// SetPlaying tells the pool how to see that something is playing. While it returns true,
+// PlaybackBots bots only read for playback. Nil turns the reservation off.
+func (p *Pool) SetPlaying(f func() bool) {
+	p.mu.Lock()
+	p.playing = f
+	p.mu.Unlock()
 }
 
 func (p *Pool) findSlot(id int64) (*slot, *bot, error) {

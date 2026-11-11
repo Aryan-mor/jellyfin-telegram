@@ -59,6 +59,9 @@ func (e *Engine) busy() bool {
 	return time.Since(time.Unix(0, e.lastForeground.Load())) < foregroundHold
 }
 
+// Playing reports whether something is being read for a person right now.
+func (e *Engine) Playing() bool { return e.busy() }
+
 // BeginProbe marks a message as being probed until the returned function is called.
 // Blocks read in that window are pinned, because Jellyfin repeats the same reads on
 // every playback. The returned function reports how many blocks were read, which proves

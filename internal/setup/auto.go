@@ -353,7 +353,7 @@ func (w *Wizard) autoCreate(rw http.ResponseWriter, r *http.Request) {
 	}
 	rememberAPI(w)
 	if b.Bots == 0 {
-		b.Bots = 5
+		b.Bots = 6
 	}
 	if b.Bots < 2 || b.Bots > tgsetup.MaxBots {
 		writeError(rw, http.StatusBadRequest, "choose between 2 and 10 bots")

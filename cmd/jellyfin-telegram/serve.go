@@ -277,6 +277,8 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 
 	engine := gateway.NewEngine(store, pool, log)
+	// While a film plays, a few bots only read for it, so other work cannot slow it or use up its flood limit.
+	pool.SetPlaying(engine.Playing)
 	gw := gateway.Handler(engine, cat, gateway.Options{
 		Token:         token,
 		ChannelID:     cfg.ChannelID,

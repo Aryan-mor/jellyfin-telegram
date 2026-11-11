@@ -309,3 +309,55 @@ func TestGapHoldsTheSameBot(t *testing.T) {
 		t.Fatal("a flood wait let a user job through")
 	}
 }
+
+func TestPlaybackKeepsThreeBotsForReading(t *testing.T) {
+	var ws []worker
+	for i := int64(1); i <= 5; i++ {
+		ws = append(ws, &fakeWorker{id: i, onGet: full})
+	}
+	p := pool(1, ws...)
+	playing := true
+	p.SetPlaying(func() bool { return playing })
+	now := time.Now()
+
+	// Other work (a write, not a read) may only use the bots that are not kept.
+	used := map[*slot]bool{}
+	for i := 0; i < 2; i++ {
+		s := p.tryAcquire(now, false, false)
+		if s == nil {
+			t.Fatalf("write %d found no free bot", i)
+		}
+		used[s] = true
+	}
+	if used[p.slots[0]] || used[p.slots[1]] || used[p.slots[2]] {
+		t.Fatal("a write took a bot kept for playback")
+	}
+	if p.tryAcquire(now, false, false) != nil {
+		t.Fatal("a third write found a bot, but only two are free of playback")
+	}
+	// Playback reads and jobs the person started may use any bot.
+	if p.tryAcquire(now, false, true) == nil {
+		t.Fatal("a read found no bot")
+	}
+	if p.tryAcquire(now, true, false) == nil {
+		t.Fatal("a job the person started found no bot")
+	}
+	// Once nothing plays, every bot is open again.
+	playing = false
+	for _, s := range p.slots {
+		s.inflight = 0
+	}
+	for i := 0; i < 5; i++ {
+		if p.tryAcquire(now, false, false) == nil {
+			t.Fatalf("bot %d stayed closed after playback", i)
+		}
+	}
+}
+
+func TestPlaybackNeverTakesEveryBot(t *testing.T) {
+	p := pool(1, &fakeWorker{id: 1, onGet: full}, &fakeWorker{id: 2, onGet: full})
+	p.SetPlaying(func() bool { return true })
+	if p.tryAcquire(time.Now(), false, false) == nil {
+		t.Fatal("with two bots, nothing was left for other work")
+	}
+}

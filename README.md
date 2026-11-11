@@ -285,7 +285,7 @@ it from the same folder (or pass `-env /path/to/.env`).
    - **Automatic**: sign in with your phone number (a code arrives in your Telegram app). If you
      set up a channel before, give a link to one message in it: the bots of yours that are admins
      there are found through @BotFather and reused. If not, a private channel and the number of
-     bots you pick (3 by default) are created and made admins for you. The account stays signed in
+     bots you pick (6 by default, at least 2) are created and made admins for you. The account stays signed in
      for downloads, Channels and the shared library. Sign-in is allowed only from this computer
      or over Tailscale. It uses the `api_id` built into your build; under *Advanced* you can
      enter your own. Build with `-ldflags "-X github.com/Aryan-mor/jellyfin-telegram/internal/config.DefaultAPIID=... -X github.com/Aryan-mor/jellyfin-telegram/internal/config.DefaultAPIHash=..."`

@@ -88,3 +88,23 @@ func TestAccountHelpsWhenNoBotIsFree(t *testing.T) {
 		t.Fatalf("account took %+v", j)
 	}
 }
+
+func TestPlaybackHoldsBackLowPriorityJobs(t *testing.T) {
+	p := New()
+	playing := true
+	p.SetPlaying(func() bool { return playing })
+	p.Add(Job{Name: "crawl", Priority: Background})
+	p.Add(Job{Name: "seerr", Priority: Urgent})
+	if j := take(t, p, Worker{ID: 1}); j == nil || j.Name != "seerr" {
+		t.Fatalf("took %+v", j)
+	}
+	if j := take(t, p, Worker{ID: 1}); j != nil {
+		t.Fatalf("took %s while playing", j.Name)
+	}
+	playing = false
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	if j, ok := p.Next(ctx, Worker{ID: 1}); !ok || j.Name != "crawl" {
+		t.Fatalf("after playback: %+v", j)
+	}
+}

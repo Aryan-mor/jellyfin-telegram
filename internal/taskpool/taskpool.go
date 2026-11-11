@@ -6,6 +6,8 @@
 //     while one exists. A bot does the same with the jobs only bots can do.
 //   - A shared job goes to a free bot first. An account takes one only when no bot is waiting for work,
 //     so the account helps and never gets in the way of the bots.
+//   - While something is playing, only jobs of Requested priority or higher are handed out, so the bots keep
+//     their reads and their flood limit for the person watching. The rest wait until playback has stopped.
 //   - Among the jobs a worker may take, the highest priority goes first, and the oldest first when equal.
 package taskpool
 
@@ -61,6 +63,20 @@ type Pool struct {
 	jobs    []*Job
 	seq     int64
 	waiting map[bool]int // workers blocked in Next, by kind (true is an account)
+	playing func() bool
+}
+
+// recheck is how often a waiting worker looks again, so jobs held back by playback start soon after it ends.
+const recheck = time.Second
+
+// SetPlaying tells the pool how to see that something is playing. Nil means nothing ever holds jobs back.
+func (p *Pool) SetPlaying(f func() bool) {
+	p.mu.Lock()
+	p.playing = f
+	p.mu.Unlock()
+	p.mu.Lock()
+	p.changed()
+	p.mu.Unlock()
 }
 
 // New returns an empty pool.
@@ -103,6 +119,8 @@ func (p *Pool) Next(ctx context.Context, w Worker) (*Job, bool) {
 		select {
 		case <-wake:
 			p.mu.Lock()
+		case <-time.After(recheck):
+			p.mu.Lock()
 		case <-ctx.Done():
 			p.mu.Lock()
 			return nil, false
@@ -116,8 +134,12 @@ func (p *Pool) pick(w Worker) *Job {
 	if w.User {
 		own = UserOnly
 	}
+	hold := p.playing != nil && p.playing()
 	var mine, either []*Job
 	for _, j := range p.jobs {
+		if hold && j.Priority < Requested {
+			continue
+		}
 		switch j.Who {
 		case own:
 			mine = append(mine, j)
