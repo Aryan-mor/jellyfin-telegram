@@ -406,7 +406,7 @@
   "Search": "Ara",
   "Skip": "Atla",
   "The genre list from TMDB could not be loaded, so the built-in list is shown.": "TMDB'den tür listesi yüklenemedi, bu yüzden yerleşik liste gösteriliyor.",
-  "This only affects titles added automatically from trending. Seerr requests are never filtered.": "Bu yalnızca trendlerden otomatik eklenen yapımları etkiler. Seerr istekleri asla filtrelenmez.",
+  "An excluded country is left out when a film or series is indexed. The other parts only affect titles added automatically from trending. Seerr requests are still searched.": "Hariç tutulan bir ülke, film veya dizi indekslenirken dışarıda bırakılır. Diğer kısımlar yalnızca trendlerden otomatik eklenen yapımları etkiler. Seerr istekleri aranmaya devam eder.",
   "Updated successfully": "Güncelleme başarılı",
   "Resume": "Sürdürmek",
   "Rules saved": "Kurallar kaydedildi",

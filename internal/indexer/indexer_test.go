@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -162,6 +163,49 @@ func TestSyncWritesStrmFiles(t *testing.T) {
 	last, err := r.cat.LastMessageID(ctx)
 	if err != nil || last != 4 {
 		t.Errorf("last = %d, %v", last, err)
+	}
+}
+
+func TestSyncLeavesOutAnExcludedCountry(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	env := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(env, []byte("AUTO_FILTER_EXCLUDE_COUNTRIES=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.idx.SetCountryFilter(func(_ context.Context, tmdb int, _ bool) ([]string, error) {
+		if tmdb == 7 {
+			return []string{"IN"}, nil
+		}
+		return []string{"US"}, nil
+	}, env)
+	r.src.video(1, "Heat.1995.mkv", "tmdb 603")
+	r.src.video(2, "Biker.2026.mkv", "tmdb 7")
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env, []byte("AUTO_FILTER_EXCLUDE_COUNTRIES=IN\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.src.video(3, "Mask.2026.mkv", "tmdb 8")
+	added, err := r.idx.Sync(ctx, FullWindow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if added != 1 {
+		t.Fatalf("added %d", added)
+	}
+	all, err := r.cat.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int
+	for _, f := range all {
+		ids = append(ids, f.MessageID)
+	}
+	slices.Sort(ids)
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
+		t.Fatalf("kept %v", ids)
 	}
 }
 

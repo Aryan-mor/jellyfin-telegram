@@ -10,6 +10,70 @@ import (
 	"time"
 )
 
+// Places asks Seerr which countries a film or series comes from.
+type Places struct {
+	Base string
+	Key  string
+
+	mu    sync.Mutex
+	cache map[string][]string
+}
+
+// Codes returns the ISO 3166-1 codes of the origin country and the production countries.
+// An empty list means Seerr named none. Only an answer is remembered.
+func (p *Places) Codes(ctx context.Context, tmdb int, series bool) ([]string, error) {
+	if p == nil || tmdb <= 0 {
+		return nil, nil
+	}
+	kind := "movie"
+	if series {
+		kind = "tv"
+	}
+	id := fmt.Sprintf("%s/%d", kind, tmdb)
+	p.mu.Lock()
+	if got, ok := p.cache[id]; ok {
+		p.mu.Unlock()
+		return got, nil
+	}
+	p.mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	defer cancel()
+	c := &client{base: strings.TrimRight(p.Base, "/"), key: p.Key, http: &http.Client{}}
+	var body struct {
+		OriginCountry       []string `json:"originCountry"`
+		ProductionCountries []struct {
+			Code string `json:"iso_3166_1"`
+		} `json:"productionCountries"`
+	}
+	if err := c.callOK(ctx, http.MethodGet, "/api/v1/"+id, nil, &body); err != nil {
+		return nil, err
+	}
+	seen := map[string]bool{}
+	var codes []string
+	add := func(code string) {
+		code = strings.ToUpper(strings.TrimSpace(code))
+		if code == "" || seen[code] {
+			return
+		}
+		seen[code] = true
+		codes = append(codes, code)
+	}
+	for _, code := range body.OriginCountry {
+		add(code)
+	}
+	for _, country := range body.ProductionCountries {
+		add(country.Code)
+	}
+	p.mu.Lock()
+	if p.cache == nil {
+		p.cache = map[string][]string{}
+	}
+	p.cache[id] = codes
+	p.mu.Unlock()
+	return codes, nil
+}
+
 // Languages asks Seerr, which keeps TMDB's data, what language a film or series was made in. The
 // answer decides which audio track of a file is the original and which is a dub.
 type Languages struct {

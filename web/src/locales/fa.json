@@ -406,7 +406,7 @@
   "Search": "جستجو",
   "Skip": "رد کردن",
   "The genre list from TMDB could not be loaded, so the built-in list is shown.": "فهرست ژانرها از TMDB بارگذاری نشد، پس فهرست داخلی نمایش داده می‌شود.",
-  "This only affects titles added automatically from trending. Seerr requests are never filtered.": "این فقط روی عنوان‌هایی اثر دارد که خودکار از پرطرفدارها اضافه می‌شوند. درخواست‌های Seerr هرگز فیلتر نمی‌شوند.",
+  "An excluded country is left out when a film or series is indexed. The other parts only affect titles added automatically from trending. Seerr requests are still searched.": "کشور حذف‌شده هنگام ایندکس فیلم یا سریال کنار گذاشته می‌شود. بقیه بخش‌ها فقط روی عنوان‌هایی اثر دارند که خودکار از پرطرفدارها اضافه می‌شوند. درخواست‌های Seerr همچنان جستجو می‌شوند.",
   "Updated successfully": "به‌روزرسانی شد",
   "Resume": "رزومه",
   "Rules saved": "قوانین ذخیره شد",

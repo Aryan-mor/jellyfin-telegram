@@ -80,6 +80,16 @@ func (f Filter) Configured() bool {
 	return !f.Genres.Empty() || !f.Countries.Empty() || !f.Languages.Empty() || !f.Networks.Empty()
 }
 
+// BlocksCountry reports that these countries fall outside the country rule. No codes means the
+// country is not known, which is not a block. Countries are judged on their own, so an include in
+// another part cannot keep an excluded country in the library.
+func (f Filter) BlocksCountry(codes []string) bool {
+	if len(codes) == 0 || f.Countries.Empty() {
+		return false
+	}
+	return f.Countries.judge(codes) == reject
+}
+
 // Title is what is known about one title. A nil Countries or Networks means not known yet; Allows
 // may then ask for more.
 type Title struct {

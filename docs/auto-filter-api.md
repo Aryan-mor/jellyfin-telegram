@@ -5,10 +5,12 @@ edited in the panel (Sources, Auto-add filter) and in the setup wizard (Filter s
 
 ## Scope
 
-- Only automatically added titles (TMDB trending) are filtered.
-- Seerr requests are never filtered. They are always searched and added.
-- Direct files and News channels are not filtered either. The title is not identified before the
-  file is copied, so there is nothing to match against.
+- Genre, language and network rules apply to titles added automatically from TMDB trending.
+- An excluded or not-included country is also left out when a film or series is indexed into the
+  library. That uses the origin country and the production countries from Seerr.
+- Seerr requests are still searched. A requested title from an excluded country is not indexed.
+- Direct files and News channels are copied before the title is identified. The country check
+  happens at index time, once a TMDB id is known. A file with no TMDB id is not checked.
 
 ## Rules
 
@@ -21,9 +23,11 @@ Each part (genres, countries, languages, networks) has an include list and an ex
 | set | set | the include list passes, the exclude list is rejected (a value cannot be in both) |
 | empty | empty | the part has no say |
 
-- Parts are joined with OR. A title is added when any part that has a rule accepts it. Example:
-  exclude one country but include one network, and a series from that country on that network is
-  still added.
+- Parts are joined with OR for trending. A title is added when any part that has a rule accepts
+  it. Example: exclude one country but include one network, and a series from that country on that
+  network is still added to the trending search.
+- The country rule is applied on its own at index time. An excluded country is not indexed, even
+  when another part would have accepted the title for trending.
 - When no part has any value, only titles with one of the default genres pass.
 - Adult titles are blocked unless `allow_adult` is on, whatever the other rules say.
 

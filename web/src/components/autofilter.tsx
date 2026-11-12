@@ -87,7 +87,7 @@ export function AutoFilterForm({ path, saveLabel, onSaved, extra, needsChange }:
       <ul className="list-disc space-y-1 ps-5 text-sm text-muted-foreground">
         <li>{t("Each part works alone. Include only: just those. Exclude only: everything except those. Nothing: that part has no say.")}</li>
         <li>{t("A title is added if any part with a rule accepts it. For example, exclude one country but include one network: a series from that country on that network is still added.")}</li>
-        <li>{t("This only affects titles added automatically from trending. Seerr requests are never filtered.")}</li>
+        <li>{t("An excluded country is left out when a film or series is indexed. The other parts only affect titles added automatically from trending. Seerr requests are still searched.")}</li>
         <li>{t("Adult titles are blocked unless you allow them below, whatever the other rules say.")}</li>
       </ul>
       {!configured && !dirty && <p className="text-sm">{t("No rules are set. Only titles with one of these genres are added: {{list}}.", { list: v.default_genres.join(", ") })}</p>}

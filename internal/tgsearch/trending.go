@@ -171,7 +171,13 @@ func (t *Trending) fetch(ctx context.Context, filter autofilter.Filter) ([]Query
 				genres = append(genres, n)
 			}
 		}
-		title := autofilter.Title{Adult: it.Adult, Genres: genres, Countries: it.OriginCountry}
+		// An empty list is not "no country". Films on the trending list usually send one,
+		// and the detail call is what names the production country.
+		countries := it.OriginCountry
+		if len(countries) == 0 {
+			countries = nil
+		}
+		title := autofilter.Title{Adult: it.Adult, Genres: genres, Countries: countries}
 		if it.OriginalLanguage != "" {
 			title.Languages = []string{it.OriginalLanguage}
 		}
@@ -278,11 +284,21 @@ func (t *Trending) details(ctx context.Context, id int, movie bool) details {
 	if err := t.get(ctx, path, q, &res); err != nil {
 		return details{}
 	}
-	d := details{runtime: res.Runtime, countries: append([]string{}, res.OriginCountry...)}
-	if len(d.countries) == 0 {
-		for _, c := range res.ProductionCountries {
-			d.countries = append(d.countries, c.Code)
+	d := details{runtime: res.Runtime}
+	seen := map[string]bool{}
+	add := func(code string) {
+		code = strings.ToUpper(strings.TrimSpace(code))
+		if code == "" || seen[code] {
+			return
 		}
+		seen[code] = true
+		d.countries = append(d.countries, code)
+	}
+	for _, c := range res.OriginCountry {
+		add(c)
+	}
+	for _, c := range res.ProductionCountries {
+		add(c.Code)
 	}
 	var ids []int
 	if movie {

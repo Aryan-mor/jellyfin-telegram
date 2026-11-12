@@ -48,6 +48,17 @@ func TestAllows(t *testing.T) {
 		{"adult veto beats an include", Filter{Networks: Rule{Include: []string{"netflix"}}}, Title{Adult: true, Networks: []string{"netflix"}}, false},
 		{"allow adult", Filter{AllowAdult: true}, Title{Adult: true, Genres: []string{"Drama"}}, true},
 	}
+	india := Filter{Countries: Rule{Exclude: []string{"IN"}}}
+	if !india.BlocksCountry([]string{"in"}) {
+		t.Error("excluded country was not blocked")
+	}
+	if india.BlocksCountry(nil) {
+		t.Error("unknown country was blocked")
+	}
+	onlyUS := Filter{Countries: Rule{Include: []string{"US"}}}
+	if !onlyUS.BlocksCountry([]string{"IN"}) {
+		t.Error("country outside the include list was kept")
+	}
 	for _, c := range cases {
 		if got := c.f.Allows(c.t, nil); got != c.want {
 			t.Errorf("%s: got %v, want %v", c.name, got, c.want)

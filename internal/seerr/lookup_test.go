@@ -101,3 +101,34 @@ func TestOriginalLanguageIsAskedOnceAndSendsTheKey(t *testing.T) {
 		t.Fatalf("calls: %d", calls.Load())
 	}
 }
+
+func TestPlacesReadsOriginAndProductionCountries(t *testing.T) {
+	var calls atomic.Int32
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		switch r.URL.Path {
+		case "/api/v1/movie/7":
+			_, _ = w.Write([]byte(`{"productionCountries":[{"iso_3166_1":"in"}]}`))
+		case "/api/v1/tv/8":
+			_, _ = w.Write([]byte(`{"originCountry":["cn"],"productionCountries":[{"iso_3166_1":"CN"},{"iso_3166_1":"hk"}]}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+	p := &Places{Base: srv.URL, Key: "k"}
+	got, err := p.Codes(context.Background(), 7, false)
+	if err != nil || len(got) != 1 || got[0] != "IN" {
+		t.Fatalf("movie %v %v", got, err)
+	}
+	if _, err := p.Codes(context.Background(), 7, false); err != nil {
+		t.Fatal(err)
+	}
+	if calls.Load() != 1 {
+		t.Fatalf("calls %d", calls.Load())
+	}
+	got, err = p.Codes(context.Background(), 8, true)
+	if err != nil || len(got) != 2 || got[0] != "CN" || got[1] != "HK" {
+		t.Fatalf("series %v %v", got, err)
+	}
+}

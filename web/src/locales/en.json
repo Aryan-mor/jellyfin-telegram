@@ -406,7 +406,7 @@
   "Search": "Search",
   "Skip": "Skip",
   "The genre list from TMDB could not be loaded, so the built-in list is shown.": "The genre list from TMDB could not be loaded, so the built-in list is shown.",
-  "This only affects titles added automatically from trending. Seerr requests are never filtered.": "This only affects titles added automatically from trending. Seerr requests are never filtered.",
+  "An excluded country is left out when a film or series is indexed. The other parts only affect titles added automatically from trending. Seerr requests are still searched.": "An excluded country is left out when a film or series is indexed. The other parts only affect titles added automatically from trending. Seerr requests are still searched.",
   "Updated successfully": "Updated successfully",
   "Resume": "Resume",
   "Rules saved": "Rules saved",

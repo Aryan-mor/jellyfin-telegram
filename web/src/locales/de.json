@@ -406,7 +406,7 @@
   "Search": "Suchen",
   "Skip": "Überspringen",
   "The genre list from TMDB could not be loaded, so the built-in list is shown.": "Die Genre-Liste von TMDB konnte nicht geladen werden, daher wird die eingebaute Liste angezeigt.",
-  "This only affects titles added automatically from trending. Seerr requests are never filtered.": "Das betrifft nur Titel, die automatisch aus den Trends hinzugefügt werden. Seerr-Anfragen werden nie gefiltert.",
+  "An excluded country is left out when a film or series is indexed. The other parts only affect titles added automatically from trending. Seerr requests are still searched.": "Ein ausgeschlossenes Land wird beim Indexieren ausgelassen. Die anderen Teile gelten nur für Titel, die automatisch aus den Trends hinzugefügt werden. Seerr-Anfragen werden weiter gesucht.",
   "Updated successfully": "Erfolgreich aktualisiert",
   "Resume": "Wieder aufnehmen",
   "Rules saved": "Regeln gespeichert",

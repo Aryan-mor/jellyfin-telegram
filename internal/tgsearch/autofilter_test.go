@@ -65,6 +65,43 @@ func ids(qs []Query) []int {
 	return out
 }
 
+func TestTrendingExcludedCountryUsesProductionWhenTheListOmitsIt(t *testing.T) {
+	var calls int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		enc := json.NewEncoder(w)
+		switch {
+		case r.URL.Path == "/trending/all/day":
+			_ = enc.Encode(map[string]any{"results": []map[string]any{
+				{"id": 7, "media_type": "movie", "release_date": "2025-01-01", "genre_ids": []int{18}, "origin_country": []string{}, "original_language": "hi"},
+				{"id": 8, "media_type": "tv", "first_air_date": "2025-01-01", "genre_ids": []int{18}, "origin_country": []string{"IN"}, "original_language": "hi"},
+				{"id": 9, "media_type": "movie", "release_date": "2025-01-01", "genre_ids": []int{18}, "origin_country": []string{}, "original_language": "en"},
+			}})
+		case strings.HasPrefix(r.URL.Path, "/genre/"):
+			_ = enc.Encode(map[string]any{"genres": []map[string]any{{"id": 18, "name": "Drama"}}})
+		case r.URL.Path == "/movie/7":
+			calls++
+			_ = enc.Encode(map[string]any{"runtime": 100, "production_countries": []map[string]any{{"iso_3166_1": "IN"}}})
+		case r.URL.Path == "/movie/9":
+			calls++
+			_ = enc.Encode(map[string]any{"runtime": 100, "origin_country": []string{"US"}, "production_countries": []map[string]any{{"iso_3166_1": "US"}}})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	f := autofilter.Filter{Countries: autofilter.Rule{Exclude: []string{"IN"}}}
+	qs, err := trendingWith(srv, f).Queries(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := ids(qs); len(got) != 1 || got[0] != 9 {
+		t.Fatalf("got %v", got)
+	}
+	if calls != 2 {
+		t.Fatalf("detail calls %d", calls)
+	}
+}
+
 func TestTrendingExcludedCountryButIncludedNetwork(t *testing.T) {
 	var calls int
 	srv := filterTMDB(t, &calls)

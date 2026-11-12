@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Aryan-mor/jellyfin-telegram/internal/autofilter"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/idscan"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
@@ -85,6 +86,18 @@ type Indexer struct {
 
 	// OnStrm runs after a .strm file is written. Nil does nothing.
 	OnStrm func(ctx context.Context)
+
+	// countries names the countries of a TMDB film or series. countryEnv is the settings file
+	// the auto-add filter is read from. Together they keep an excluded country out of the library.
+	countries  func(ctx context.Context, tmdb int, episode bool) ([]string, error)
+	countryEnv string
+}
+
+// SetCountryFilter keeps titles whose country the auto-add filter excludes out of the library.
+// lookup asks Seerr. envPath is the settings file, read again on every pass.
+func (x *Indexer) SetCountryFilter(lookup func(ctx context.Context, tmdb int, episode bool) ([]string, error), envPath string) {
+	x.countries = lookup
+	x.countryEnv = envPath
 }
 
 // Signed is the shared-library mode.
@@ -132,6 +145,9 @@ func (x *Indexer) wrote(ctx context.Context) {
 // It returns how many videos were added.
 func (x *Indexer) Sync(ctx context.Context, window int) (int, error) {
 	added := 0
+	if err := x.dropExcluded(ctx); err != nil {
+		return added, err
+	}
 	scan := &idscan.Scan{
 		Lookup: x.lookup,
 		Store:  x.cat,
@@ -359,6 +375,16 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 		}
 		// The folder name stays without the id, so a later correction does not move the item.
 		fromTitle = id
+	}
+	tmdb, episode := p.TMDBID, p.Episode
+	if fromTitle > 0 {
+		tmdb = fromTitle
+	}
+	if blocked, err := x.countryBlocked(ctx, tmdb, episode); err != nil {
+		x.log.Warn("cannot read country", "message", f.MessageID, "tmdb", tmdb, "err", err)
+	} else if blocked {
+		x.log.Info("skipped excluded country", "message", f.MessageID, "tmdb", tmdb, "file", f.FileName)
+		return errSkip
 	}
 	rel := p.RelPath(f.MessageID, "")
 	taken, err := x.cat.PathTaken(ctx, rel, f.MessageID)
@@ -658,6 +684,69 @@ func (x *Indexer) Identify(ctx context.Context) ([]media.File, error) {
 		x.log.Info("removed unidentified", "message", f.MessageID, "title", p.Title, "file", f.FileName)
 	}
 	return changed, nil
+}
+
+// countryBlocked reports that this title's country is excluded. Unknown and unset filters pass.
+func (x *Indexer) countryBlocked(ctx context.Context, tmdb int, episode bool) (bool, error) {
+	if x.personal || x.countries == nil || x.countryEnv == "" || tmdb <= 0 {
+		return false, nil
+	}
+	f := autofilter.Load(x.countryEnv)
+	if f.Countries.Empty() {
+		return false, nil
+	}
+	codes, err := x.countries(ctx, tmdb, episode)
+	if err != nil {
+		return false, err
+	}
+	return f.BlocksCountry(codes), nil
+}
+
+// dropExcluded removes titles already in the catalog whose country is now excluded.
+func (x *Indexer) dropExcluded(ctx context.Context) error {
+	if x.personal || x.countries == nil || x.countryEnv == "" {
+		return nil
+	}
+	if autofilter.Load(x.countryEnv).Countries.Empty() {
+		return nil
+	}
+	all, err := x.cat.All(ctx)
+	if err != nil {
+		return err
+	}
+	asked := map[string]bool{}
+	blocked := map[string]bool{}
+	for _, f := range all {
+		if strings.HasPrefix(f.RelPath, "Music/") || strings.HasPrefix(f.RelPath, "Home/") {
+			continue
+		}
+		p := naming.Parse(f.FileName, f.Caption)
+		if p.TMDBID <= 0 {
+			continue
+		}
+		key := "m"
+		if p.Episode {
+			key = "e"
+		}
+		key += strconv.Itoa(p.TMDBID)
+		if !asked[key] {
+			no, err := x.countryBlocked(ctx, p.TMDBID, p.Episode)
+			if err != nil {
+				x.log.Warn("cannot read country", "message", f.MessageID, "tmdb", p.TMDBID, "err", err)
+				continue
+			}
+			asked[key] = true
+			blocked[key] = no
+		}
+		if !blocked[key] {
+			continue
+		}
+		if err := x.remove(ctx, f); err != nil {
+			return err
+		}
+		x.log.Info("removed excluded country", "message", f.MessageID, "tmdb", p.TMDBID, "file", f.FileName)
+	}
+	return nil
 }
 
 func (x *Indexer) remove(ctx context.Context, f media.File) error {

@@ -413,6 +413,14 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 
 	idx := indexer.New(pool, cat, lib, store, log)
+	if cfg.SeerrManaged {
+		if key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr")); err != nil {
+			log.Warn("country filter is off", "err", err)
+		} else {
+			places := &seerr.Places{Base: (&seerr.Server{}).URL(), Key: key}
+			idx.SetCountryFilter(places.Codes, envPath)
+		}
+	}
 	if search.Scan != nil {
 		idx.OnStrm = func(ctx context.Context) { _ = search.Scan(ctx) }
 	}
