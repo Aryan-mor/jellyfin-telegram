@@ -870,9 +870,19 @@ func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	if err := p.commit(r, apiID, hash, channel, language, cur.tokens); err != nil {
-		writePanelError(w, err)
-		return
+	// A language or key change must not open a second bot pool and scan the channel.
+	// That check is what hangs the save while the bots are in a flood wait, and the
+	// keys are written only after it returns, so the page sits there with no error.
+	if apiID != cur.apiID || hash != cur.hash || channel != cur.channel {
+		if err := p.commit(r, apiID, hash, channel, language, cur.tokens); err != nil {
+			writePanelError(w, err)
+			return
+		}
+	} else if language != cur.language {
+		if err := setup.UpdateEnv(p.o.EnvPath, map[string]string{"SUBTITLE_LANGUAGE": language}); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	keys := map[string]string{}
 	if body.SubDL != nil {

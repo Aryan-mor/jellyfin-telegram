@@ -1,13 +1,43 @@
 package tgpool
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/gotd/td/tg"
 )
 
 func message(doc *tg.Document, caption string) *tg.Message {
 	return &tg.Message{ID: 7, Date: 1700000000, Message: caption, Media: &tg.MessageMediaDocument{Document: doc}}
+}
+
+func TestPaceLookupSpacesGetMessages(t *testing.T) {
+	b := &bot{}
+	gap := 40 * time.Millisecond
+	start := time.Now()
+	if err := b.waitLookup(context.Background(), gap); err != nil {
+		t.Fatal(err)
+	}
+	if err := b.waitLookup(context.Background(), gap); err != nil {
+		t.Fatal(err)
+	}
+	if time.Since(start) < gap-10*time.Millisecond {
+		t.Fatalf("second lookup followed after %s, want at least %s", time.Since(start), gap)
+	}
+}
+
+func TestPaceLookupStopsWhenContextEnds(t *testing.T) {
+	b := &bot{}
+	if err := b.waitLookup(context.Background(), time.Hour); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	err := b.waitLookup(ctx, time.Hour)
+	if err == nil {
+		t.Fatal("expected the deadline")
+	}
 }
 
 func TestFileFromMessage(t *testing.T) {

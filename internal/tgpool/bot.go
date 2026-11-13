@@ -129,6 +129,7 @@ type bot struct {
 	dests       map[int64]*tg.Channel
 	extra       map[int64]*tg.InputChannel
 	extraLoc    map[string]location
+	nextLookup  time.Time
 	settledOnce sync.Once
 	settledCh   chan struct{}
 }
@@ -415,6 +416,33 @@ func (b *bot) invalidate(messageID int) {
 	delete(b.locations, messageID)
 }
 
+// paceLookup spaces channels.getMessages. A file read rests for a short time, but this
+// method is what made Telegram answer FLOOD_WAIT. One lookup per bot per botAPIGap.
+func (b *bot) paceLookup(ctx context.Context) error {
+	return b.waitLookup(ctx, botAPIGap)
+}
+
+func (b *bot) waitLookup(ctx context.Context, gap time.Duration) error {
+	b.mu.Lock()
+	wait := time.Until(b.nextLookup)
+	if wait < 0 {
+		wait = 0
+	}
+	b.nextLookup = time.Now().Add(wait + gap)
+	b.mu.Unlock()
+	if wait == 0 {
+		return nil
+	}
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
+
 func (b *bot) location(ctx context.Context, messageID int, docID int64) (location, error) {
 	b.mu.RLock()
 	loc, ok := b.locations[messageID]
@@ -424,6 +452,9 @@ func (b *bot) location(ctx context.Context, messageID int, docID int64) (locatio
 	}
 	api, channel, err := b.conn()
 	if err != nil {
+		return location{}, err
+	}
+	if err := b.paceLookup(ctx); err != nil {
 		return location{}, err
 	}
 	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
@@ -485,6 +516,9 @@ func (b *bot) messages(ctx context.Context, ids []int) ([]media.Message, error) 
 	input := make([]tg.InputMessageClass, len(ids))
 	for i, id := range ids {
 		input[i] = &tg.InputMessageID{ID: id}
+	}
+	if err := b.paceLookup(ctx); err != nil {
+		return nil, err
 	}
 	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{Channel: channel, ID: input})
 	if err != nil {
@@ -653,6 +687,9 @@ func (b *bot) messagesIn(ctx context.Context, channelID int64, ids []int) ([]med
 	for i, id := range ids {
 		input[i] = &tg.InputMessageID{ID: id}
 	}
+	if err := b.paceLookup(ctx); err != nil {
+		return nil, err
+	}
 	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{Channel: channel, ID: input})
 	if err != nil {
 		return nil, fmt.Errorf("channels.getMessages: %w", err)
@@ -728,6 +765,9 @@ func (b *bot) locationIn(ctx context.Context, channelID int64, messageID int, do
 	}
 	channel, err := b.inputFor(ctx, api, channelID)
 	if err != nil {
+		return location{}, err
+	}
+	if err := b.paceLookup(ctx); err != nil {
 		return location{}, err
 	}
 	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{
@@ -999,6 +1039,9 @@ func (b *bot) react(ctx context.Context, messageID int, emoji string) error {
 func (b *bot) repostDocument(ctx context.Context, sourceID int, caption string) (int, error) {
 	peer, channel, api, err := b.peer()
 	if err != nil {
+		return 0, err
+	}
+	if err := b.paceLookup(ctx); err != nil {
 		return 0, err
 	}
 	res, err := api.ChannelsGetMessages(ctx, &tg.ChannelsGetMessagesRequest{

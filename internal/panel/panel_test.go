@@ -172,6 +172,34 @@ func TestStateOmitsTheBuiltInAPI(t *testing.T) {
 	}
 }
 
+func TestSubtitleSaveDoesNotScanTelegram(t *testing.T) {
+	called := false
+	srv, path := serve(t, func(context.Context, int, string, int64, []string) (setup.Report, error) {
+		called = true
+		return setup.Report{}, nil
+	}, nil)
+	res, err := http.Post(srv.URL+"/panel/settings?code=secret", "application/json", strings.NewReader(`{"language":"fa","subdl":"","gemini":""}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(res.Body)
+		t.Fatalf("status %d %s", res.StatusCode, body)
+	}
+	if called {
+		t.Fatal("saving subtitles scanned Telegram")
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(saved)
+	if !strings.Contains(text, "SUBTITLE_LANGUAGE=fa") || !strings.Contains(text, "SUBDL_API_KEYS=") || !strings.Contains(text, "GEMINI_API_KEY=") {
+		t.Fatalf("file = %s", text)
+	}
+}
+
 func TestReplacingTheDefaultAPINeedsBoth(t *testing.T) {
 	config.DefaultAPIID, config.DefaultAPIHash = "12345", "abcdef"
 	t.Cleanup(func() { config.DefaultAPIID, config.DefaultAPIHash = "", "" })
