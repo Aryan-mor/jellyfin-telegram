@@ -46,7 +46,11 @@ func OpenRequests(ctx context.Context, base, key string) ([]OpenTitle, error) {
 			return nil, err
 		}
 		for _, row := range body.Results {
-			if row.Status == 3 || row.Media.TMDB <= 0 || row.Media.Status >= 5 {
+			if row.Status == 3 || row.Media.TMDB <= 0 {
+				continue
+			}
+			// AVAILABLE and BLOCKLISTED need no more copies. DELETED titles stay open.
+			if row.Media.Status == 5 || row.Media.Status == 6 {
 				continue
 			}
 			series := row.Media.Type == "tv"

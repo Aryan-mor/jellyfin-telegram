@@ -413,16 +413,27 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 
 	idx := indexer.New(pool, cat, lib, store, log)
+	var seerrScanLib func(context.Context) error
 	if cfg.SeerrManaged {
 		if key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr")); err != nil {
 			log.Warn("country filter is off", "err", err)
 		} else {
-			places := &seerr.Places{Base: (&seerr.Server{}).URL(), Key: key}
+			base := (&seerr.Server{}).URL()
+			seerrRoot := filepath.Join(cfg.DataDir, "seerr")
+			places := &seerr.Places{Base: base, Key: key}
 			idx.SetCountryFilter(places.Codes, envPath)
+			keep := &seerr.Wanted{Base: base, Key: key, Root: seerrRoot}
+			idx.SetSeerrKeep(keep.Keep)
+			seerrScanLib = seerrScan(base, key, log)
 		}
 	}
 	if search.Scan != nil {
 		idx.OnStrm = func(ctx context.Context) { _ = search.Scan(ctx) }
+	} else if seerrScanLib != nil {
+		idx.OnStrm = func(ctx context.Context) { _ = seerrScanLib(ctx) }
+	}
+	if seerrScanLib != nil {
+		idx.OnLibraryChange = func(ctx context.Context) { _ = seerrScanLib(ctx) }
 	}
 	hub.SetIndexer(idx)
 	if cfg.JellyfinEnabled() {

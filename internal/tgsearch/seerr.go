@@ -49,7 +49,7 @@ func (s *Seerr) Queries(ctx context.Context) ([]Query, error) {
 		}
 		s.key = key
 	}
-	titles, err := seerr.OpenRequests(ctx, s.Base, s.key)
+	titles, err := seerr.WantedTitlesFromAPI(ctx, s.Base, s.key, s.Root)
 	if err != nil {
 		return nil, err
 	}

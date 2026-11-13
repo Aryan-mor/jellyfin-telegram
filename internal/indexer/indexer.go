@@ -86,6 +86,11 @@ type Indexer struct {
 
 	// OnStrm runs after a .strm file is written. Nil does nothing.
 	OnStrm func(ctx context.Context)
+	// OnLibraryChange runs after a title leaves the catalog or library. Nil does nothing.
+	OnLibraryChange func(ctx context.Context)
+
+	// seerrKeep reports titles that a Seerr request or watchlist entry protects from the country filter.
+	seerrKeep func(ctx context.Context, tmdb int, episode bool) (bool, error)
 
 	// countries names the countries of a TMDB film or series. countryEnv is the settings file
 	// the auto-add filter is read from. Together they keep an excluded country out of the library.
@@ -98,6 +103,11 @@ type Indexer struct {
 func (x *Indexer) SetCountryFilter(lookup func(ctx context.Context, tmdb int, episode bool) ([]string, error), envPath string) {
 	x.countries = lookup
 	x.countryEnv = envPath
+}
+
+// SetSeerrKeep spares Seerr requests and watchlist entries from the country filter.
+func (x *Indexer) SetSeerrKeep(keep func(ctx context.Context, tmdb int, episode bool) (bool, error)) {
+	x.seerrKeep = keep
 }
 
 // Signed is the shared-library mode.
@@ -380,7 +390,11 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	if fromTitle > 0 {
 		tmdb = fromTitle
 	}
-	if blocked, err := x.countryBlocked(ctx, tmdb, episode); err != nil {
+	if keep, err := x.seerrProtected(ctx, tmdb, episode); err != nil {
+		x.log.Warn("cannot read Seerr keep list", "message", f.MessageID, "tmdb", tmdb, "err", err)
+	} else if keep {
+		// protected by Seerr request or watchlist
+	} else if blocked, err := x.countryBlocked(ctx, tmdb, episode); err != nil {
 		x.log.Warn("cannot read country", "message", f.MessageID, "tmdb", tmdb, "err", err)
 	} else if blocked {
 		x.log.Info("skipped excluded country", "message", f.MessageID, "tmdb", tmdb, "file", f.FileName)
@@ -686,6 +700,13 @@ func (x *Indexer) Identify(ctx context.Context) ([]media.File, error) {
 	return changed, nil
 }
 
+func (x *Indexer) seerrProtected(ctx context.Context, tmdb int, episode bool) (bool, error) {
+	if x.seerrKeep == nil || tmdb <= 0 {
+		return false, nil
+	}
+	return x.seerrKeep(ctx, tmdb, episode)
+}
+
 // countryBlocked reports that this title's country is excluded. Unknown and unset filters pass.
 func (x *Indexer) countryBlocked(ctx context.Context, tmdb int, episode bool) (bool, error) {
 	if x.personal || x.countries == nil || x.countryEnv == "" || tmdb <= 0 {
@@ -729,6 +750,11 @@ func (x *Indexer) dropExcluded(ctx context.Context) error {
 			key = "e"
 		}
 		key += strconv.Itoa(p.TMDBID)
+		if keep, err := x.seerrProtected(ctx, p.TMDBID, p.Episode); err != nil {
+			x.log.Warn("cannot read Seerr keep list", "message", f.MessageID, "tmdb", p.TMDBID, "err", err)
+		} else if keep {
+			continue
+		}
 		if !asked[key] {
 			no, err := x.countryBlocked(ctx, p.TMDBID, p.Episode)
 			if err != nil {
@@ -756,7 +782,13 @@ func (x *Indexer) remove(ctx context.Context, f media.File) error {
 	if err := x.cat.Delete(ctx, f.MessageID); err != nil {
 		return err
 	}
-	return x.blocks.RemoveDoc(f.DocID)
+	if err := x.blocks.RemoveDoc(f.DocID); err != nil {
+		return err
+	}
+	if x.OnLibraryChange != nil {
+		x.OnLibraryChange(ctx)
+	}
+	return nil
 }
 
 func (x *Indexer) lookup(ctx context.Context, ids []int) ([]media.Message, error) {
