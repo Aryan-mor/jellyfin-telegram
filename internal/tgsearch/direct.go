@@ -19,7 +19,8 @@ type channelSearch interface {
 // searchDirect looks through the direct file channels for one film. It stops at the first
 // channel that yields a file the title check and the size check both accept.
 func (s *Service) searchDirect(ctx context.Context, q Query, searches, copied *int) (found int, stop, have bool) {
-	if !q.Movie || s.Lists == nil || copied == nil || *copied >= 3 {
+	// Films always. A Seerr request also, including a series: a channel search is cheap.
+	if (!q.Movie && !q.Request) || s.Lists == nil || copied == nil || *copied >= 3 {
 		return 0, false, false
 	}
 	finder, ok := s.TG.(channelSearch)
@@ -45,7 +46,7 @@ func (s *Service) searchDirect(ctx context.Context, q Query, searches, copied *i
 			if used >= channelBudget {
 				break
 			}
-			if !s.gap(ctx, searches) {
+			if !q.Request && !s.gap(ctx, searches) {
 				return found, true, false
 			}
 			used++

@@ -21,6 +21,8 @@ export type PanelState = {
   channel_title?: string
   language: string
   ui_language?: string
+  subdl_set?: boolean
+  gemini_set?: boolean
   bots: { id: number; name: string; hint: string; ok: boolean; admin: boolean; connected: boolean; error?: string; counters?: BotCounters }[]
   addresses: { url: string; away: boolean }[]
   seerr: boolean

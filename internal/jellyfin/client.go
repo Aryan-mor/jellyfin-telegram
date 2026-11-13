@@ -268,7 +268,7 @@ func (c *Client) ProgramDataPath(ctx context.Context) (string, error) {
 // Item returns one item, such as the series of an episode.
 func (c *Client) Item(ctx context.Context, itemID, userID string) (Item, error) {
 	var out Item
-	q := url.Values{"userId": {userID}}
+	q := url.Values{"userId": {userID}, "Fields": {"ProviderIds"}}
 	err := c.do(ctx, http.MethodGet, "/Items/"+url.PathEscape(itemID), q, &out)
 	return out, err
 }

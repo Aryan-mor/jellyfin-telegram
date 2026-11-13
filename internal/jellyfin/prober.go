@@ -201,8 +201,13 @@ func (p *Prober) meta(ctx context.Context, f media.File, it Item, userID string)
 		if it.SeriesID != "" {
 			if series, err := p.client.Item(ctx, it.SeriesID, userID); err == nil {
 				m.IMDb, m.Year = series.IMDb(), series.Year
+				if id := tmdbOf(series); id > 0 {
+					m.TMDB = id
+				}
 			}
 		}
+	} else if id := tmdbOf(it); id > 0 {
+		m.TMDB = id
 	}
 	// Jellyfin translates titles into the metadata language, so its title says nothing about the
 	// language of the film and may not match anything online. The name in the channel does both.
@@ -211,7 +216,11 @@ func (p *Prober) meta(ctx context.Context, f media.File, it Item, userID string)
 		if parsed.Year > 0 {
 			m.Year = parsed.Year
 		}
+		if parsed.TMDBID > 0 && (it.Type != "Episode" || m.TMDB == 0) {
+			m.TMDB = parsed.TMDBID
+		}
 	}
+	m.Quality = subtitles.FileQuality(f.FileName, f.Caption)
 	return m
 }
 

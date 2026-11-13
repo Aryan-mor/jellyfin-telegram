@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type Query struct {
 	DigitalOut bool
 	// Release is that date, or the premiere when no digital date is known yet.
 	Release time.Time
+	// Request is a Seerr request. Those run before anything else, and a new one is searched
+	// at once. Direct-channel lookup for a request does not wait between channels.
+	Request bool
 }
 
 // Text is the hashtag Telegram is asked for.
@@ -119,8 +123,10 @@ func (l Limits) withDefaults() Limits {
 
 // Service searches with the signed-in account and copies a found file into the library channel.
 type Service struct {
-	TG             Telegram
-	Want           Wanted
+	TG   Telegram
+	Want Wanted
+	// Requests is only the Seerr list. It is polled often so a new request is searched at once.
+	Requests       Wanted
 	LibraryChannel int64
 	Log            *slog.Logger
 	// On reports whether the switch is still on. Nil means on.
@@ -183,7 +189,12 @@ func (s *Service) sleep(ctx context.Context, d time.Duration) error {
 	}
 }
 
-// Run searches until ctx ends. The first pass waits a minute so Seerr can finish starting.
+// requestPoll is how often Seerr is asked for new requests. A direct-channel lookup is cheap,
+// so a request that was not there on the last look is searched at once.
+const requestPoll = 15 * time.Second
+
+// Run searches until ctx ends. The full pass waits a minute so Seerr can finish starting.
+// New Seerr requests are searched on their own, without waiting for that pass.
 func (s *Service) Run(ctx context.Context) {
 	if s.Every <= 0 {
 		s.Every = 15 * time.Minute
@@ -195,12 +206,20 @@ func (s *Service) Run(ctx context.Context) {
 		return
 	}
 	timer := time.NewTimer(time.Minute)
+	poll := time.NewTimer(requestPoll)
 	defer timer.Stop()
+	defer poll.Stop()
+	seen := map[string]bool{}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-timer.C:
+			s.onePass(ctx)
+			timer.Reset(s.Every)
+		case <-poll.C:
+			s.rushRequests(ctx, seen)
+			poll.Reset(requestPoll)
 		case <-hold.Changed():
 			if !timer.Stop() {
 				select {
@@ -208,17 +227,19 @@ func (s *Service) Run(ctx context.Context) {
 				default:
 				}
 			}
+			s.onePass(ctx)
+			timer.Reset(s.Every)
 		}
-		if ctx.Err() != nil {
-			return
-		}
-		if !hold.Stopped() {
-			work, done := hold.Begin(ctx)
-			s.pass(work)
-			done()
-		}
-		timer.Reset(s.Every)
 	}
+}
+
+func (s *Service) onePass(ctx context.Context) {
+	if ctx.Err() != nil || hold.Stopped() {
+		return
+	}
+	work, done := hold.Begin(ctx)
+	s.pass(work)
+	done()
 }
 
 func hitKey(h tguser.SearchHit) string { return fmt.Sprintf("hit:%d:%d", h.ChannelID, h.MessageID) }
@@ -289,44 +310,140 @@ func (s *Service) pass(ctx context.Context) {
 		return
 	}
 	s.loadTrust(ctx)
+	s.searchAll(ctx, queries)
+}
+
+// rushRequests searches a Seerr request the moment it appears. Titles already on a schedule
+// stay there. A title this call did not reach (the copy cap) stays unseen, so the next poll
+// tries it.
+func (s *Service) rushRequests(ctx context.Context, seen map[string]bool) {
+	if s == nil || s.Requests == nil || hold.Stopped() {
+		return
+	}
+	queries, err := s.Requests.Queries(ctx)
+	if err != nil {
+		s.warn("list seerr requests", err)
+		return
+	}
+	live := map[string]bool{}
+	var fresh []Query
+	for _, q := range queries {
+		q.Request = true
+		key := q.Text()
+		if key == "" {
+			continue
+		}
+		live[key] = true
+		if seen[key] {
+			continue
+		}
+		if s.coolingDown(ctx, q) {
+			seen[key] = true
+			continue
+		}
+		fresh = append(fresh, q)
+	}
+	for key := range seen {
+		if !live[key] {
+			delete(seen, key)
+		}
+	}
+	if len(fresh) == 0 || ctx.Err() != nil {
+		return
+	}
+	if s.Log != nil {
+		s.Log.Info("new seerr request", "count", len(fresh), "tmdb", fresh[0].TMDB)
+	}
+	work, done := hold.Begin(ctx)
+	handled := s.searchAll(work, fresh)
+	done()
+	for _, key := range handled {
+		seen[key] = true
+	}
+}
+
+// searchAll runs the queries in order. Seerr requests look in the direct channels first.
+// It returns the queries it finished. A query left behind by the copy cap is not in the list.
+func (s *Service) searchAll(ctx context.Context, queries []Query) []string {
+	if s.On != nil && !s.On() {
+		return nil
+	}
+	if s.TG == nil {
+		return nil
+	}
+	if s.now().Before(s.backoffTil) {
+		return nil
+	}
+	s.loadTrust(ctx)
+	sort.SliceStable(queries, func(i, j int) bool {
+		return queries[i].Request && !queries[j].Request
+	})
 	copied, searches := 0, 0
+	var handled []string
 	for _, q := range queries {
 		if copied >= 3 {
-			return
+			return handled
 		}
 		if q.Text() == "" || s.coolingDown(ctx, q) {
 			continue
 		}
 		before := copied
 		var notes []stepNote
+		// A request looks in the direct channels first. That search does not wait between channels.
+		if q.Request {
+			found, stop, have := s.searchDirect(ctx, q, &searches, &copied)
+			notes = append(notes, stepNote{"direct", found, copied > before})
+			if stop {
+				s.logSteps(ctx, q, notes)
+				return handled
+			}
+			if copied > before || have {
+				s.noteSearched(ctx, q)
+				s.logSteps(ctx, q, notes)
+				handled = append(handled, q.Text())
+				continue
+			}
+			before = copied
+		}
 		found, stop := s.searchHashtag(ctx, q, &searches, &copied)
 		notes = append(notes, stepNote{"hashtag", found, copied > before})
 		if stop {
 			s.logSteps(ctx, q, notes)
-			return
+			return handled
+		}
+		// A request film that the direct channels missed still checks news.
+		if copied == before && q.Movie && q.Request {
+			found, stop = s.searchNews(ctx, q, &searches, &copied)
+			notes = append(notes, stepNote{"news", found, copied > before})
+			if stop {
+				s.logSteps(ctx, q, notes)
+				return handled
+			}
 		}
 		// Films that the hashtag did not copy are looked up in the direct channels, then in news.
-		if copied == before && q.Movie {
+		if copied == before && q.Movie && !q.Request {
 			before = copied
 			var have bool
 			found, stop, have = s.searchDirect(ctx, q, &searches, &copied)
 			notes = append(notes, stepNote{"direct", found, copied > before})
 			if stop {
 				s.logSteps(ctx, q, notes)
-				return
+				return handled
 			}
 			if copied == before && !have {
 				found, stop = s.searchNews(ctx, q, &searches, &copied)
 				notes = append(notes, stepNote{"news", found, copied > before})
 				if stop {
 					s.logSteps(ctx, q, notes)
-					return
+					return handled
 				}
 			}
 		}
 		s.noteSearched(ctx, q)
 		s.logSteps(ctx, q, notes)
+		handled = append(handled, q.Text())
 	}
+	return handled
 }
 
 type stepNote struct {

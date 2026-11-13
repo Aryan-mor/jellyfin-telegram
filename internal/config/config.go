@@ -52,7 +52,11 @@ type Config struct {
 	// Empty leaves the choice to the browser.
 	UILanguage      string
 	SubtitlesOnline bool
-	FFprobePath     string
+	// SubDLKeys are subdl.com API keys. Empty leaves that provider off.
+	SubDLKeys []string
+	// GeminiAPIKey is the user's AI Studio key. Empty leaves translation off.
+	GeminiAPIKey string
+	FFprobePath  string
 
 	// ExtractBytesPerSecond limits background subtitle extraction. Zero turns it off.
 	ExtractBytesPerSecond int64
@@ -204,8 +208,14 @@ func Load(envPath string) (Config, error) {
 		JellyfinAPIKey:   get("JELLYFIN_API_KEY", ""),
 		SubtitlesOnline:  !strings.EqualFold(get("SUBTITLES_ONLINE", "true"), "false"),
 		FFprobePath:      get("FFPROBE_PATH", ""),
+		GeminiAPIKey:     strings.TrimSpace(get("GEMINI_API_KEY", "")),
 	}
 
+	for _, key := range strings.Split(get("SUBDL_API_KEYS", ""), ",") {
+		if key = strings.TrimSpace(key); key != "" {
+			c.SubDLKeys = append(c.SubDLKeys, key)
+		}
+	}
 	if c.APIHash == "" {
 		fail("TELEGRAM_API_HASH is required")
 	}

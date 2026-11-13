@@ -55,7 +55,7 @@ func (s *Seerr) Queries(ctx context.Context) ([]Query, error) {
 	}
 	var out []Query
 	for _, t := range titles {
-		q := Query{TMDB: t.TMDB, Movie: !t.Series}
+		q := Query{TMDB: t.TMDB, Movie: !t.Series, Request: true}
 		if d, ok := s.detail(ctx, t.TMDB, t.Series); ok {
 			q.Title = d.Title
 			if !strings.EqualFold(d.OriginalTitle, d.Title) {

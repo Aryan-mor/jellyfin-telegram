@@ -65,6 +65,7 @@ func startSearch(cfg config.Config, envPath string, cat *catalog.Catalog, source
 			req.Store = cat
 		}
 		want = append(want, req)
+		svc.Requests = req
 	}
 	if cfg.TrendingSearch && strings.TrimSpace(cfg.TMDBAPIKey) != "" {
 		// Only trending is filtered. Seerr requests above are always searched.

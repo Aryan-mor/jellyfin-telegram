@@ -47,6 +47,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subarchive"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgpool"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsearch"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsetup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tgsource"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -383,7 +384,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		}
 		prober = jellyfin.NewProber(jf, cat, engine, log)
 		prober.StreamURL = lib.StreamURL
-		if err := setupSubtitles(ctx, cfg, cat, pool, prober, log); err != nil {
+		if err := setupSubtitles(ctx, cfg, cat, pool, users, jf, prober, log); err != nil {
 			return err
 		}
 	} else {
@@ -993,7 +994,7 @@ func openBrowser(address string) {
 	_ = cmd.Start()
 }
 
-func setupSubtitles(ctx context.Context, cfg config.Config, cat *catalog.Catalog, pool *tgpool.Pool, prober *jellyfin.Prober, log *slog.Logger) error {
+func setupSubtitles(ctx context.Context, cfg config.Config, cat *catalog.Catalog, pool *tgpool.Pool, users *tguser.Manager, jf *jellyfin.Client, prober *jellyfin.Prober, log *slog.Logger) error {
 	if cfg.SubtitleLanguage == "" {
 		log.Info("SUBTITLE_LANGUAGE is not set, so subtitles are not handled")
 		return nil
@@ -1017,8 +1018,21 @@ func setupSubtitles(ctx context.Context, cfg config.Config, cat *catalog.Catalog
 		if provider, ok := subtitles.NewSubPlus(cfg.SubtitleLanguage); ok {
 			resolver.Provider = provider
 		} else {
-			log.Warn("sub-plus.ir does not offer this language, so online subtitles are off", "language", cfg.SubtitleLanguage)
+			log.Warn("sub-plus.ir does not offer this language, so that source is off", "language", cfg.SubtitleLanguage)
 		}
+		if cfg.SubtitleLanguage != "en" {
+			if english, ok := subtitles.NewSubPlus("en"); ok {
+				resolver.English = english
+			}
+		}
+		if len(cfg.SubDLKeys) > 0 {
+			resolver.SubDL = subtitles.NewSubDL(cfg.SubDLKeys)
+		}
+		resolver.Gemini = subtitles.NewGemini(cfg.GeminiAPIKey)
+		resolver.Remote = tgsearch.Remote(users)
+		resolver.Saved = (&savedTitles{
+			jf: jf, root: savedRoot(cfg.DataDir), log: log,
+		}).allows
 	}
 	prober.Subtitles = resolver
 	prober.SubtitleLanguage = lang.ISO3(cfg.SubtitleLanguage)

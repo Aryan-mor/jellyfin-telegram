@@ -529,16 +529,35 @@ export function Subtitles() {
   const { data: s } = usePanel()
   const refresh = useRefreshState()
   const draft = useDirty((s?.language || "").split(/[,;\s]+/).filter(Boolean))
+  const [subdl, setSubdl] = useState("")
+  const [gemini, setGemini] = useState("")
   const { busy, run } = useBusy()
   if (!s) return null
   return (
     <Page title={t("Subtitles")} text={t("Pick every language to keep. The first one is preferred; drag or use the arrows to change the order. Leave none to skip subtitles.")}>
       <Section>
         <MultiSelect value={draft.value} onChange={draft.set} />
-        <div className="flex justify-end"><Button size="sm" disabled={!draft.dirty || busy === "save"} onClick={() => void run("save", async () => {
-          await api("/panel/settings", { language: draft.value.join(",") })
-          draft.saved(); toast(t("Saved. Restart to use it.")); await refresh()
-        })}>{t("Save")}</Button></div>
+        <div className="space-y-3 border-t pt-4">
+          <p className="text-sm text-muted-foreground">{t("A title saved in Jellyfin or on the Seerr watchlist is searched on Telegram for a subtitle in your language at the same quality, then on SubDL. If neither has it, an English subtitle is translated with your Gemini key. Other titles stay on the usual lookup. Restart to apply a new key.")}</p>
+          <div className="space-y-1.5">
+            <FieldLabel htmlFor="subdl-key">{t("SubDL API key")}</FieldLabel>
+            <Input id="subdl-key" type="password" autoComplete="off" value={subdl} onChange={(e) => setSubdl(e.target.value)} placeholder={s.subdl_set ? t("A key is saved.") : ""} />
+          </div>
+          <div className="space-y-1.5">
+            <FieldLabel htmlFor="gemini-key">{t("Gemini API key")}</FieldLabel>
+            <Input id="gemini-key" type="password" autoComplete="off" value={gemini} onChange={(e) => setGemini(e.target.value)} placeholder={s.gemini_set ? t("A key is saved.") : ""} />
+          </div>
+        </div>
+        <div className="flex justify-end gap-2">
+          {(s.subdl_set || s.gemini_set) && <Button size="sm" variant="ghost" disabled={busy === "clear"} onClick={() => void run("clear", async () => {
+            await api("/panel/settings", { subdl: s.subdl_set ? "" : undefined, gemini: s.gemini_set ? "" : undefined })
+            setSubdl(""); setGemini(""); toast(t("Saved. Restart to use it.")); await refresh()
+          })}>{t("Remove keys")}</Button>}
+          <Button size="sm" disabled={(!draft.dirty && !subdl && !gemini) || busy === "save"} onClick={() => void run("save", async () => {
+            await api("/panel/settings", { language: draft.value.join(","), ...(subdl ? { subdl } : {}), ...(gemini ? { gemini } : {}) })
+            draft.saved(); setSubdl(""); setGemini(""); toast(t("Saved. Restart to use it.")); await refresh()
+          })}>{t("Save")}</Button>
+        </div>
       </Section>
     </Page>
   )

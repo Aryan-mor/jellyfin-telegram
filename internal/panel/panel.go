@@ -332,6 +332,8 @@ type state struct {
 	ChannelTitle   string    `json:"channel_title,omitempty"`
 	Language       string    `json:"language"`
 	UILanguage     string    `json:"ui_language,omitempty"`
+	SubDLSet       bool      `json:"subdl_set"`
+	GeminiSet      bool      `json:"gemini_set"`
 	Bots           []botView `json:"bots"`
 	Addresses      []address `json:"addresses"`
 	Seerr          bool      `json:"seerr"`
@@ -797,6 +799,8 @@ type settingsBody struct {
 	APIHash  *string `json:"api_hash"`
 	Channel  *string `json:"channel"`
 	Language *string `json:"language"`
+	SubDL    *string `json:"subdl"`
+	Gemini   *string `json:"gemini"`
 }
 
 func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
@@ -854,9 +858,29 @@ func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
 			language = strings.Join(codes, ",")
 		}
 	}
+	if body.Gemini != nil {
+		key := strings.TrimSpace(*body.Gemini)
+		if key != "" && (strings.ContainsAny(key, " \t") || len(key) < 20 || len(key) > 200) {
+			writeError(w, http.StatusBadRequest, "the Gemini key does not look right")
+			return
+		}
+	}
 	if err := p.commit(r, apiID, hash, channel, language, cur.tokens); err != nil {
 		writePanelError(w, err)
 		return
+	}
+	keys := map[string]string{}
+	if body.SubDL != nil {
+		keys["SUBDL_API_KEYS"] = strings.TrimSpace(*body.SubDL)
+	}
+	if body.Gemini != nil {
+		keys["GEMINI_API_KEY"] = strings.TrimSpace(*body.Gemini)
+	}
+	if len(keys) > 0 {
+		if err := setup.UpdateEnv(p.o.EnvPath, keys); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restart": true})
 }
@@ -977,6 +1001,8 @@ type fileSettings struct {
 	uiLanguage     string
 	tokens         []string
 	telegramSearch bool
+	subdlSet       bool
+	geminiSet      bool
 }
 
 func readFile(path string) (fileSettings, error) {
@@ -1001,6 +1027,8 @@ func readFile(path string) (fileSettings, error) {
 		return fileSettings{}, fmt.Errorf("TELEGRAM_BOT_TOKENS: %w", err)
 	}
 	s.language = m["SUBTITLE_LANGUAGE"]
+	s.subdlSet = strings.TrimSpace(m["SUBDL_API_KEYS"]) != ""
+	s.geminiSet = strings.TrimSpace(m["GEMINI_API_KEY"]) != ""
 	if code, ok := config.NormalizeUILanguage(m["UI_LANGUAGE"]); ok {
 		s.uiLanguage = code
 	}
@@ -1022,7 +1050,7 @@ func (p *panel) snapshot() (state, error) {
 			live[b.ID] = b
 		}
 	}
-	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, Bots: []botView{}, Seerr: p.o.Seerr, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
+	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, SubDLSet: cur.subdlSet, GeminiSet: cur.geminiSet, Bots: []botView{}, Seerr: p.o.Seerr, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
 	// The API this build ships with is not a value the person chose. The panel says "default"
 	// and never sends that id, even when only the hash was replaced.
 	if defID, defHash, ok := config.DefaultAPI(); ok && cur.apiID == defID && cur.hash == defHash {
