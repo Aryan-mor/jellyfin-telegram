@@ -531,8 +531,21 @@ export function Subtitles() {
   const draft = useDirty((s?.language || "").split(/[,;\s]+/).filter(Boolean))
   const [subdl, setSubdl] = useState("")
   const [gemini, setGemini] = useState("")
+  const [replaceSubdl, setReplaceSubdl] = useState(false)
+  const [replaceGemini, setReplaceGemini] = useState(false)
   const { busy, run } = useBusy()
   if (!s) return null
+  const keyPending = (!s.subdl_set || replaceSubdl) && !!subdl || (!s.gemini_set || replaceGemini) && !!gemini
+  async function removeKey(which: "subdl" | "gemini") {
+    const name = which === "subdl" ? t("SubDL API key") : t("Gemini API key")
+    if (!(await confirmDialog(t("Remove {{name}}?", { name }), t("Saved titles stop using it after a restart."), t("Remove")))) return
+    await run("clear", async () => {
+      await api("/panel/settings", { [which]: "" })
+      if (which === "subdl") { setSubdl(""); setReplaceSubdl(false) } else { setGemini(""); setReplaceGemini(false) }
+      toast(t("Saved. Restart to use it."))
+      await refresh()
+    })
+  }
   return (
     <Page title={t("Subtitles")} text={t("Pick every language to keep. The first one is preferred; drag or use the arrows to change the order. Leave none to skip subtitles.")}>
       <Section>
@@ -541,25 +554,81 @@ export function Subtitles() {
           <p className="text-sm text-muted-foreground">{t("A title saved in Jellyfin or on the Seerr watchlist is searched on Telegram for a subtitle in your language at the same quality, then on SubDL. If neither has it, an English subtitle is translated with your Gemini key. Other titles stay on the usual lookup. Restart to apply a new key.")}</p>
           <div className="space-y-1.5">
             <FieldLabel htmlFor="subdl-key">{t("SubDL API key")}</FieldLabel>
-            <Input id="subdl-key" type="password" autoComplete="off" value={subdl} onChange={(e) => setSubdl(e.target.value)} placeholder={s.subdl_set ? t("A key is saved.") : ""} />
+            <KeyField
+              id="subdl-key"
+              saved={!!s.subdl_set}
+              replacing={replaceSubdl}
+              value={subdl}
+              onChange={setSubdl}
+              onReplace={() => { setReplaceSubdl(true); setSubdl("") }}
+              onCancel={() => { setReplaceSubdl(false); setSubdl("") }}
+              onRemove={() => void removeKey("subdl")}
+              busy={busy}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("SubDL is a subtitle site. This key lets the program download a finished subtitle in your language for a saved title. Make a free account, open the API page, generate a key and paste it here. One key is enough. Extra keys go in the same box, separated by commas, and share the work when one key reaches its daily limit. Remove the key to skip SubDL.")}{" "}
+              <a className="font-medium underline-offset-2 hover:underline" href="https://subdl.com/panel/api" target="_blank" rel="noreferrer">{t("Open the SubDL API page")}</a>
+            </p>
           </div>
           <div className="space-y-1.5">
             <FieldLabel htmlFor="gemini-key">{t("Gemini API key")}</FieldLabel>
-            <Input id="gemini-key" type="password" autoComplete="off" value={gemini} onChange={(e) => setGemini(e.target.value)} placeholder={s.gemini_set ? t("A key is saved.") : ""} />
+            <KeyField
+              id="gemini-key"
+              saved={!!s.gemini_set}
+              replacing={replaceGemini}
+              value={gemini}
+              onChange={setGemini}
+              onReplace={() => { setReplaceGemini(true); setGemini("") }}
+              onCancel={() => { setReplaceGemini(false); setGemini("") }}
+              onRemove={() => void removeKey("gemini")}
+              busy={busy}
+            />
+            <p className="text-xs text-muted-foreground">
+              {t("Gemini is Google's model. This key is used only when no subtitle in your language was found: an English subtitle is translated into your language. Sign in with a Google account, create an API key and paste it here. The key stays in this install's settings file and is not shown again. Remove the key to skip translation. A new key is checked, then applied after a restart.")}{" "}
+              <a className="font-medium underline-offset-2 hover:underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">{t("Open Google AI Studio")}</a>
+            </p>
           </div>
         </div>
         <div className="flex justify-end gap-2">
-          {(s.subdl_set || s.gemini_set) && <Button size="sm" variant="ghost" disabled={busy === "clear"} onClick={() => void run("clear", async () => {
-            await api("/panel/settings", { subdl: s.subdl_set ? "" : undefined, gemini: s.gemini_set ? "" : undefined })
-            setSubdl(""); setGemini(""); toast(t("Saved. Restart to use it.")); await refresh()
-          })}>{t("Remove keys")}</Button>}
-          <Button size="sm" disabled={(!draft.dirty && !subdl && !gemini) || busy === "save"} onClick={() => void run("save", async () => {
-            await api("/panel/settings", { language: draft.value.join(","), ...(subdl ? { subdl } : {}), ...(gemini ? { gemini } : {}) })
-            draft.saved(); setSubdl(""); setGemini(""); toast(t("Saved. Restart to use it.")); await refresh()
-          })}>{t("Save")}</Button>
+          <Button size="sm" disabled={(!draft.dirty && !keyPending) || busy === "save"} onClick={() => void run("save", async () => {
+            const body: Record<string, string> = { language: draft.value.join(",") }
+            if ((!s.subdl_set || replaceSubdl) && subdl) body.subdl = subdl
+            if ((!s.gemini_set || replaceGemini) && gemini) body.gemini = gemini
+            await api("/panel/settings", body)
+            draft.saved(); setSubdl(""); setGemini(""); setReplaceSubdl(false); setReplaceGemini(false)
+            toast(t("Saved. Restart to use it.")); await refresh()
+          })}>{busy === "save" && keyPending ? t("Checking the keys…") : t("Save")}</Button>
         </div>
       </Section>
     </Page>
+  )
+}
+
+function KeyField({ id, saved, replacing, value, onChange, onReplace, onCancel, onRemove, busy }: {
+  id: string
+  saved: boolean
+  replacing: boolean
+  value: string
+  onChange: (value: string) => void
+  onReplace: () => void
+  onCancel: () => void
+  onRemove: () => void
+  busy: string | null
+}) {
+  if (saved && !replacing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <StatusBadge tone="ok">{t("Entered")}</StatusBadge>
+        <Button size="sm" variant="ghost" disabled={!!busy} onClick={onReplace}>{t("Replace")}</Button>
+        <Button size="sm" variant="ghost" disabled={busy === "clear"} onClick={onRemove}>{t("Remove")}</Button>
+      </div>
+    )
+  }
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <Input id={id} className="max-w-md" type="password" autoComplete="off" value={value} onChange={(e) => onChange(e.target.value)} />
+      {saved && <Button size="sm" variant="ghost" disabled={!!busy} onClick={onCancel}>{t("Cancel")}</Button>}
+    </div>
   )
 }
 

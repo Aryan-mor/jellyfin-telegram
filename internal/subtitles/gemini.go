@@ -105,7 +105,7 @@ func (g *Gemini) generate(ctx context.Context, prompt string) (string, error) {
 			return text, nil
 		}
 		last = err
-		if strings.Contains(err.Error(), "HTTP 401") || strings.Contains(err.Error(), "HTTP 403") {
+		if strings.Contains(err.Error(), "HTTP 401") || strings.Contains(err.Error(), "HTTP 403") || strings.Contains(err.Error(), "api key rejected") {
 			return "", err
 		}
 	}
@@ -146,6 +146,9 @@ func (g *Gemini) post(ctx context.Context, base, model, prompt string) (string, 
 		return "", err
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		if res.StatusCode == http.StatusBadRequest && strings.Contains(strings.ToLower(string(raw)), "api key") {
+			return "", fmt.Errorf("gemini: api key rejected")
+		}
 		return "", fmt.Errorf("gemini: HTTP %d model=%s", res.StatusCode, model)
 	}
 	text := geminiText(raw)

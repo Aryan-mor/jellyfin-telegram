@@ -21,6 +21,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/version"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/webui"
 )
@@ -865,6 +866,10 @@ func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	if err := checkSubtitleKeys(r.Context(), body.SubDL, body.Gemini); err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
 	if err := p.commit(r, apiID, hash, channel, language, cur.tokens); err != nil {
 		writePanelError(w, err)
 		return
@@ -883,6 +888,26 @@ func (p *panel) handleSettings(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "restart": true})
+}
+
+// checkSubtitleKeys tries each new key against its service. An empty value removes a saved key
+// and is not called. The key itself is never put in the error.
+func checkSubtitleKeys(ctx context.Context, subdl, gemini *string) error {
+	var problems []string
+	if subdl != nil && strings.TrimSpace(*subdl) != "" {
+		if err := subtitles.CheckSubDL(ctx, *subdl); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
+	if gemini != nil && strings.TrimSpace(*gemini) != "" {
+		if err := subtitles.CheckGemini(ctx, *gemini); err != nil {
+			problems = append(problems, err.Error())
+		}
+	}
+	if len(problems) == 0 {
+		return nil
+	}
+	return errors.New(strings.Join(problems, ". "))
 }
 
 type botsBody struct {
