@@ -292,7 +292,7 @@ function IndexQuality({ picked }: { picked: string[] }) {
   })
   const label = (id: string) => id === "2k" || id === "4k" ? id.toUpperCase() : id
   return (
-    <Section title={t("Index quality")} text={t("Pick which picture sizes are indexed. All keeps every file. A picked list leaves other sizes out of the library, out of subtitle extraction, and out of mirrors. They return if you widen the list. A file with no size in the name is measured, and kept only when that size is picked. Music stays.")}>
+    <Section title={t("Index quality")} text={t("Pick which picture sizes are indexed. All keeps every file. A picked list leaves other sizes out of the library, out of subtitle extraction, out of mirrors, and out of copies from other channels. They return if you widen the list. A file with no size in the name is measured, and kept only when that size is picked. Music stays.")}>
       <div className="flex flex-wrap gap-x-4 gap-y-2">
         <Checkbox label={t("All")} disabled={!!busy} checked={all} onCheckedChange={(on) => { if (on) save([]) }} />
         {indexSizes.map((id) => (

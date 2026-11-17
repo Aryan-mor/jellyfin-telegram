@@ -43,17 +43,19 @@ type StartHit struct {
 
 // Post is one document in a source channel.
 type Post struct {
-	ID        int
-	Date      time.Time
-	DocID     int64
-	Size      int64
-	Name      string
-	Caption   string
-	MIME      string
-	Duration  time.Duration
-	Round     bool
-	Animated  bool
-	NoForward bool
+	ID       int
+	Date     time.Time
+	DocID    int64
+	Size     int64
+	Name     string
+	Caption  string
+	MIME     string
+	Duration time.Duration
+	// Width and Height are the picture size Telegram stored on the video. Zero means unknown.
+	Width, Height int
+	Round         bool
+	Animated      bool
+	NoForward     bool
 	// ReplyTo is the message this document replies to, or zero.
 	ReplyTo int
 }
@@ -322,6 +324,7 @@ func postFrom(msg *tg.Message) (Post, bool) {
 		case *tg.DocumentAttributeVideo:
 			p.Duration = time.Duration(a.Duration * float64(time.Second))
 			p.Round = a.RoundMessage
+			p.Width, p.Height = a.W, a.H
 		case *tg.DocumentAttributeAnimated:
 			p.Animated = true
 		}

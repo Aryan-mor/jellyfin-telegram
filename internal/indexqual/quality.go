@@ -193,6 +193,28 @@ func (s Set) AllowsSize(fileName, caption string, width, height int) bool {
 	return false
 }
 
+// Forwards reports that a source channel may copy this file into the library.
+// The name wins. With no size in the name, the picture size is used.
+// A file with neither is still copied, so the library can measure it.
+func (s Set) Forwards(fileName, caption string, width, height int) bool {
+	if s.All() {
+		return true
+	}
+	b := Bucket(fileName, caption)
+	if b == "" {
+		b = BucketOf(width, height)
+	}
+	if b == "" {
+		return true
+	}
+	for _, id := range s.ids {
+		if id == b {
+			return true
+		}
+	}
+	return false
+}
+
 // BucketOf maps a real picture to a size id. The name still wins when it has one.
 // A wide short frame, such as 1920x800, counts as 1080. Zero stays unknown.
 func BucketOf(width, height int) string {

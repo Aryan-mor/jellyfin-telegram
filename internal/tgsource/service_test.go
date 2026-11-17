@@ -3,6 +3,7 @@ package tgsource
 import (
 	"context"
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"testing"
@@ -107,6 +108,37 @@ func newService(t *testing.T, tg *fakeTG, now time.Time) (*Service, catalog.Sour
 		t.Fatal(err)
 	}
 	return s, src
+}
+
+func TestCopyLeavesOtherQualitiesUntilTheListWidens(t *testing.T) {
+	now := time.Date(2026, 11, 17, 9, 0, 0, 0, time.UTC)
+	tg := &fakeTG{free: true}
+	low := movie(10, now)
+	low.Name = "FilmPokVip.Recep.Ivedik.7.2022.480p.WEB-DL.mp4"
+	high := movie(11, now)
+	high.Name = "Film.2022.1080p.mkv"
+	plain := movie(12, now)
+	tg.posts = []tguser.Post{low, high, plain}
+	s, _ := newService(t, tg, now)
+	env := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(env, []byte("INDEX_QUALITIES=1080,4k\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s.EnvPath = env
+	enable(t, s, func(set *Settings) { set.MaxPerDay = 0 })
+	if s.Pass(context.Background()) {
+		t.Fatal("pass did not finish")
+	}
+	if got := tg.all(); len(got) != 2 || got[0] != 11 || got[1] != 12 {
+		t.Fatalf("copied %v", got)
+	}
+	if err := os.WriteFile(env, []byte("INDEX_QUALITIES=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	drain(t, s)
+	if got := tg.all(); len(got) != 3 || got[0] != 10 {
+		t.Fatalf("widened %v", got)
+	}
 }
 
 func enable(t *testing.T, s *Service, mod func(*Settings)) {

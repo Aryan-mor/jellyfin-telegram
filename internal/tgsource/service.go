@@ -15,6 +15,7 @@ import (
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/indexqual"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/pace"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/tguser"
@@ -55,6 +56,8 @@ type Service struct {
 	Now   func() time.Time
 	// InReady reports that the library already has this lookup hashtag. Nil skips the check.
 	InReady func(ctx context.Context, tag string) (bool, error)
+	// EnvPath is the settings file. The index quality list is read from it on every pass.
+	EnvPath string
 
 	mu       sync.Mutex
 	loaded   bool
@@ -225,6 +228,10 @@ func (s *Service) Pass(parent context.Context) bool {
 	}
 	s.setNote("")
 	if ctx.Err() != nil {
+		return false
+	}
+	if err := s.noteQuality(ctx); err != nil {
+		s.setNote(err.Error())
 		return false
 	}
 	sources, err := s.Cat.Sources(ctx)
@@ -501,6 +508,45 @@ func covers(have, want int) bool {
 	}
 }
 
+// keepsQuality reports that this post matches the picture sizes in the settings file.
+// With no file, or no list, every video may be copied.
+func (s *Service) keepsQuality(p tguser.Post) bool {
+	if s.EnvPath == "" {
+		return true
+	}
+	return indexqual.Load(s.EnvPath).Forwards(p.Name, p.Caption, p.Width, p.Height)
+}
+
+// noteQuality rewinds the source walks once when the size list changes, so a wider list
+// can copy posts that were left behind. A library that has never stored a choice is treated
+// as "all", and is not walked again for that.
+func (s *Service) noteQuality(ctx context.Context) error {
+	if s.EnvPath == "" || s.Cat == nil {
+		return nil
+	}
+	key := indexqual.Load(s.EnvPath).Key()
+	const stateKey = "index.qualities.copy"
+	stored, err := s.Cat.StateValue(ctx, stateKey)
+	if err != nil {
+		return err
+	}
+	prev := stored
+	if prev == "" {
+		prev = "all"
+	}
+	if prev == key {
+		if stored == key {
+			return nil
+		}
+		return s.Cat.SetStateValue(ctx, stateKey, key)
+	}
+	if err := s.Cat.RestartSourceWalk(ctx); err != nil {
+		return err
+	}
+	s.logf("index quality changed, reading source channels again", "from", prev, "to", key)
+	return s.Cat.SetStateValue(ctx, stateKey, key)
+}
+
 // copyPosts forwards the posts that pass the rules, oldest first, a few at a time.
 // subs maps a video message to the subtitle document posted directly under it.
 func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tguser.Post, set Settings, subs map[int]tguser.Post) error {
@@ -509,10 +555,15 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 	}
 	var want []tguser.Post
 	inPage := map[string]bool{}
-	notWanted, copiedBefore := 0, 0
+	notWanted, copiedBefore, skippedQuality := 0, 0, 0
 	for _, p := range posts {
 		if ok, _ := set.Wanted(p); !ok {
 			notWanted++
+			continue
+		}
+		if !s.keepsQuality(p) {
+			skippedQuality++
+			s.logf("skipped quality", "channel", src.Title, "file", p.Name)
 			continue
 		}
 		key := fmt.Sprintf("%s|%d", p.Name, p.Size)
@@ -540,7 +591,7 @@ func (s *Service) copyPosts(ctx context.Context, src catalog.Source, posts []tgu
 		for _, p := range want {
 			total += p.Size
 		}
-		s.logf("checked posts", "channel", src.Title, "posts", len(posts), "to copy", len(want), "size", humanSize(total), "skipped, not a wanted file", notWanted, "skipped, already copied", copiedBefore)
+		s.logf("checked posts", "channel", src.Title, "posts", len(posts), "to copy", len(want), "size", humanSize(total), "skipped, not a wanted file", notWanted, "skipped, already copied", copiedBefore, "skipped, quality", skippedQuality)
 	}
 	sort.Slice(want, func(i, j int) bool { return want[i].ID < want[j].ID })
 	ref := tguser.SourceRef{ChannelID: src.ChannelID, Username: src.Username}
