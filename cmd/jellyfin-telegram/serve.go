@@ -354,7 +354,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 		go news.Run(ctx)
 	}
 	go (&mirror.Service{
-		Cat: cat, Copy: pool.CopyToMirror, Log: log,
+		Cat: cat, Copy: pool.CopyToMirror, Log: log, Settings: envPath,
 		Width:     pool.ReadyCount,
 		ReadyOnly: func() bool { return hub.Get() != nil },
 		Replace: func(ctx context.Context, m catalog.Mirror) error {
@@ -383,6 +383,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 			cancel()
 		}
 		prober = jellyfin.NewProber(jf, cat, engine, log)
+		prober.Settings = envPath
 		prober.StreamURL = lib.StreamURL
 		if err := setupSubtitles(ctx, cfg, cat, pool, users, jf, prober, log); err != nil {
 			return err
@@ -414,6 +415,7 @@ func run(ctx context.Context, cfg config.Config, envPath string, wizard *setup.W
 	}
 
 	idx := indexer.New(pool, cat, lib, store, log)
+	idx.SetSettings(envPath)
 	var seerrScanLib func(context.Context) error
 	if cfg.SeerrManaged {
 		if key, err := seerr.EnsureAPIKey(filepath.Join(cfg.DataDir, "seerr")); err != nil {
@@ -1367,7 +1369,7 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 		Open: func(ctx context.Context, f media.File) io.ReaderAt {
 			return pool.Open(ctx, f.MessageID, f.DocID, f.Size)
 		},
-		StreamURL: lib.StreamURL, Log: log,
+		StreamURL: lib.StreamURL, Log: log, Settings: envPath,
 	}
 	if cfg.SignedLibrary {
 		w.Forum = lazyForum{hub}

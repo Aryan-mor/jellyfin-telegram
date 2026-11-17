@@ -28,6 +28,7 @@ export type PanelState = {
   seerr: boolean
   pace?: Record<string, unknown> | null
   telegram_search: boolean
+  index_qualities?: string[]
   mirrors?: { id: number; channel_id: number; title: string; bot_id: number; kinds: string[]; error: string; sent: number; username?: string }[]
   local: boolean
   sources: boolean

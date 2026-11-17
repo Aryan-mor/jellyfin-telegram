@@ -275,7 +275,38 @@ export function Channel() {
           <SwitchBox label={t("Telegram search")} checked={search} onCheckedChange={(on) => void api("/panel/search", { on }).then(refresh).catch(fail)} />
         </Row>
       </Section>
+      <IndexQuality picked={s.index_qualities ?? []} />
     </Page>
+  )
+}
+
+const indexSizes = ["480", "720", "1080", "2k", "4k"] as const
+
+function IndexQuality({ picked }: { picked: string[] }) {
+  const refresh = useRefreshState()
+  const { busy, run } = useBusy()
+  const all = picked.length === 0
+  const save = (next: string[]) => void run("quality", async () => {
+    await api("/panel/index-quality", { qualities: next })
+    await refresh()
+  })
+  const label = (id: string) => id === "2k" || id === "4k" ? id.toUpperCase() : id
+  return (
+    <Section title={t("Index quality")} text={t("Pick which picture sizes are indexed. All keeps every file. A picked list leaves other sizes out of the library, out of subtitle extraction, and out of mirrors. They return if you widen the list. Music stays.")}>
+      <div className="flex flex-wrap gap-x-4 gap-y-2">
+        <Checkbox label={t("All")} disabled={!!busy} checked={all} onCheckedChange={(on) => { if (on) save([]) }} />
+        {indexSizes.map((id) => (
+          <Checkbox key={id} label={label(id)} disabled={!!busy} checked={!all && picked.includes(id)} onCheckedChange={(on) => {
+            if (all) {
+              if (on) save([id])
+              return
+            }
+            const next = on ? [...picked, id] : picked.filter((x) => x !== id)
+            save(next.length === indexSizes.length ? [] : next)
+          }} />
+        ))}
+      </div>
+    </Section>
   )
 }
 

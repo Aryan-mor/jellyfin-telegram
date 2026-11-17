@@ -15,6 +15,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/autofilter"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/idscan"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/indexqual"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/library"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
@@ -96,7 +97,13 @@ type Indexer struct {
 	// the auto-add filter is read from. Together they keep an excluded country out of the library.
 	countries  func(ctx context.Context, tmdb int, episode bool) ([]string, error)
 	countryEnv string
+
+	// settings is the settings file. The index quality list is read from it on every pass.
+	settings string
 }
+
+// SetSettings is the settings file. A change of index quality applies on the next scan.
+func (x *Indexer) SetSettings(envPath string) { x.settings = envPath }
 
 // SetCountryFilter keeps titles whose country the auto-add filter excludes out of the library.
 // lookup asks Seerr. envPath is the settings file, read again on every pass.
@@ -156,6 +163,9 @@ func (x *Indexer) wrote(ctx context.Context) {
 func (x *Indexer) Sync(ctx context.Context, window int) (int, error) {
 	added := 0
 	if err := x.dropExcluded(ctx); err != nil {
+		return added, err
+	}
+	if err := x.syncQuality(ctx); err != nil {
 		return added, err
 	}
 	scan := &idscan.Scan{
@@ -371,6 +381,10 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	}
 	if naming.Section(f.FileName, f.Caption, f.MIME) == naming.SectionMusic {
 		return x.addMusic(ctx, f)
+	}
+	if x.qualitySkipped(f) {
+		x.log.Info("skipped quality", "message", f.MessageID, "file", f.FileName)
+		return errSkip
 	}
 	p := naming.Parse(f.FileName, f.Caption)
 	fromTitle := 0
@@ -721,6 +735,78 @@ func (x *Indexer) countryBlocked(ctx context.Context, tmdb int, episode bool) (b
 		return false, err
 	}
 	return f.BlocksCountry(codes), nil
+}
+
+// qualitySkipped reports that this file is outside the sizes chosen in the settings file.
+// Music is kept. With no list, every file is kept.
+func (x *Indexer) qualitySkipped(f media.File) bool {
+	if x.personal || x.settings == "" {
+		return false
+	}
+	return !indexqual.Load(x.settings).Allows(f.FileName, f.Caption)
+}
+
+// syncQuality drops sizes that are no longer wanted and, when the list changes, walks the
+// channel again so a wider list can pick up posts that were left out.
+func (x *Indexer) syncQuality(ctx context.Context) error {
+	if x.personal || x.settings == "" {
+		return nil
+	}
+	sel := indexqual.Load(x.settings)
+	if err := x.rewindQuality(ctx, sel.Key()); err != nil {
+		return err
+	}
+	if sel.All() {
+		return nil
+	}
+	all, err := x.cat.All(ctx)
+	if err != nil {
+		return err
+	}
+	for _, f := range all {
+		if strings.HasPrefix(f.RelPath, "Music/") || strings.HasPrefix(f.RelPath, "Home/") {
+			continue
+		}
+		if sel.Allows(f.FileName, f.Caption) {
+			continue
+		}
+		if err := x.remove(ctx, f); err != nil {
+			return err
+		}
+		x.log.Info("removed quality", "message", f.MessageID, "file", f.FileName)
+	}
+	return nil
+}
+
+// rewindQuality moves the backfill mark when the size list changes, so older posts are read again.
+// A library that has never stored a choice is treated as "all", and is not walked again for that.
+func (x *Indexer) rewindQuality(ctx context.Context, key string) error {
+	const stateKey = "index.qualities"
+	stored, err := x.cat.StateValue(ctx, stateKey)
+	if err != nil {
+		return err
+	}
+	prev := stored
+	if prev == "" {
+		prev = "all"
+	}
+	if prev == key {
+		if stored == key {
+			return nil
+		}
+		return x.cat.SetStateValue(ctx, stateKey, key)
+	}
+	high, err := x.cat.StateValue(ctx, "scan.main.high")
+	if err != nil {
+		return err
+	}
+	if n, err := strconv.Atoi(high); err == nil && n > 0 {
+		if err := x.cat.SetStateValue(ctx, "scan.main.low", strconv.Itoa(n+1)); err != nil {
+			return err
+		}
+		x.log.Info("index quality changed, reading the channel again", "from", prev, "to", key)
+	}
+	return x.cat.SetStateValue(ctx, stateKey, key)
 }
 
 // dropExcluded removes titles already in the catalog whose country is now excluded.

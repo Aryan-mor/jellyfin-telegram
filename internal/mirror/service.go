@@ -18,6 +18,7 @@ import (
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/hold"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/indexqual"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
 )
@@ -47,6 +48,9 @@ type Service struct {
 	// Width is how many copies run at once. Nil, or a number below 2, keeps one copy at a time.
 	// Each copy still takes the next free bot, so the width is the bot count.
 	Width func() int
+	// Settings is the settings file. When a picture-size list is set, other sizes are left
+	// uncopied, so widening the list later still sends them. Empty means every size.
+	Settings string
 	// replaced remembers a mirror that was just replaced or that failed to be replaced, so a banned
 	// channel does not create a new one on every pass.
 	replaced map[int64]time.Time
@@ -100,6 +104,10 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 	}
 	var units []copyUnit
 	room := mirrorBurst
+	sel := indexqual.Set{}
+	if s.Settings != "" {
+		sel = indexqual.Load(s.Settings)
+	}
 	push := func(reply int, ids ...int) {
 		if room <= 0 || len(ids) == 0 {
 			return
@@ -118,6 +126,9 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		}
 		kind := naming.Section(it.FileName, it.Caption, it.MIME)
 		if !m.Wants(kind) {
+			continue
+		}
+		if !sel.Keeps(it.FileName, it.Caption, it.MIME) {
 			continue
 		}
 		if s.ReadyOnly != nil && s.ReadyOnly() && kind != naming.SectionMusic && !sign.IsReady(it.Caption) {

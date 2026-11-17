@@ -19,6 +19,7 @@ import (
 	"github.com/joho/godotenv"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/config"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/indexqual"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/lang"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/setup"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
@@ -173,6 +174,7 @@ func New(o Options) http.Handler {
 	mux.HandleFunc("GET /panel/series", p.guard(p.handleSeries))
 	mux.HandleFunc("POST /panel/forum/{action}", p.guard(p.handleForumAction))
 	mux.HandleFunc("POST /panel/search", p.guard(p.handleSearch))
+	mux.HandleFunc("POST /panel/index-quality", p.guard(p.handleIndexQuality))
 	mux.HandleFunc("POST /panel/restart", p.guard(p.handleRestart))
 	mux.HandleFunc("POST /panel/automation", p.guard(p.handleAutomation))
 	mux.HandleFunc("GET /panel/update", p.guard(func(w http.ResponseWriter, r *http.Request) {
@@ -340,6 +342,7 @@ type state struct {
 	Seerr          bool      `json:"seerr"`
 	Pace           any       `json:"pace,omitempty"`
 	TelegramSearch bool      `json:"telegram_search"`
+	IndexQualities []string  `json:"index_qualities,omitempty"`
 	Mirrors        any       `json:"mirrors,omitempty"`
 	Local          bool      `json:"local"`
 	Sources        bool      `json:"sources"`
@@ -383,6 +386,26 @@ func (p *panel) handleSearch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+}
+
+func (p *panel) handleIndexQuality(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Qualities []string `json:"qualities"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "bad request")
+		return
+	}
+	picked, err := indexqual.Clean(body.Qualities)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if err := setup.UpdateEnv(p.o.EnvPath, map[string]string{indexqual.Key: picked.Env()}); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"ok": true, "qualities": picked.IDs()})
 }
 
 func (p *panel) handleState(w http.ResponseWriter, r *http.Request) {
@@ -1036,6 +1059,7 @@ type fileSettings struct {
 	uiLanguage     string
 	tokens         []string
 	telegramSearch bool
+	indexQualities []string
 	subdlSet       bool
 	geminiSet      bool
 }
@@ -1071,6 +1095,9 @@ func readFile(path string) (fileSettings, error) {
 	if v, ok := m["TELEGRAM_SEARCH"]; ok && strings.EqualFold(strings.TrimSpace(v), "false") {
 		s.telegramSearch = false
 	}
+	if q, err := indexqual.Parse(m[indexqual.Key]); err == nil {
+		s.indexQualities = q.IDs()
+	}
 	return s, nil
 }
 
@@ -1085,7 +1112,7 @@ func (p *panel) snapshot() (state, error) {
 			live[b.ID] = b
 		}
 	}
-	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, SubDLSet: cur.subdlSet, GeminiSet: cur.geminiSet, Bots: []botView{}, Seerr: p.o.Seerr, Accounts: []Account{}, TelegramSearch: cur.telegramSearch}
+	s := state{ChannelID: cur.channel, Language: cur.language, UILanguage: cur.uiLanguage, SubDLSet: cur.subdlSet, GeminiSet: cur.geminiSet, Bots: []botView{}, Seerr: p.o.Seerr, Accounts: []Account{}, TelegramSearch: cur.telegramSearch, IndexQualities: cur.indexQualities}
 	// The API this build ships with is not a value the person chose. The panel says "default"
 	// and never sends that id, even when only the hash was replaced.
 	if defID, defHash, ok := config.DefaultAPI(); ok && cur.apiID == defID && cur.hash == defHash {

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/indexqual"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/naming"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/subtitles"
@@ -42,6 +43,9 @@ type Prober struct {
 	// SubtitleLanguage is the three-letter code uploaded subtitles are labelled with.
 	SubtitleLanguage string
 	StreamURL        func(messageID int) string
+	// Settings is the settings file. When a picture-size list is set, other sizes are not
+	// searched for a subtitle. The outcome stays empty, so widening the list searches them later.
+	Settings string
 }
 
 // Replacements returns the resolver when one is set, for finding replacement subtitles.
@@ -119,7 +123,7 @@ func (p *Prober) Run(ctx context.Context, refresh bool) error {
 // handle reports whether no work is left for this file in this run.
 func (p *Prober) handle(ctx context.Context, f *media.File, m match, userID string) bool {
 	// Only a path match proves this is the current item. An old item may share the stream URL.
-	if p.Subtitles != nil && f.SubtitleOutcome == "" && (m.byPath || !f.ProbedAt.IsZero()) {
+	if p.Subtitles != nil && f.SubtitleOutcome == "" && (m.byPath || !f.ProbedAt.IsZero()) && indexqual.LoadKeeps(p.Settings, f.FileName, f.Caption, f.MIME) {
 		p.resolveSubtitle(ctx, f, m, userID)
 	}
 	if !f.ProbedAt.IsZero() {

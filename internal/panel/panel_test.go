@@ -680,3 +680,44 @@ func TestAutomationPause(t *testing.T) {
 		t.Fatalf("resume: %d paused=%v", rec.Code, g.Paused())
 	}
 }
+
+func TestIndexQualitySetting(t *testing.T) {
+	srv, path := serve(t, nil, nil)
+	post := func(body string) *http.Response {
+		t.Helper()
+		res, err := http.Post(srv.URL+"/panel/index-quality?code=secret", "application/json", strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		return res
+	}
+	res := post(`{"qualities":["4K","1080","nope"]}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusBadRequest {
+		t.Fatalf("bad quality: %d", res.StatusCode)
+	}
+	res = post(`{"qualities":["4K","1080"]}`)
+	res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("save: %d", res.StatusCode)
+	}
+	raw, err := os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "INDEX_QUALITIES=1080,4k") {
+		t.Fatalf("file: %v %s", err, raw)
+	}
+	res, err = http.Get(srv.URL + "/panel/state?code=secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	body, _ := io.ReadAll(res.Body)
+	res.Body.Close()
+	if !strings.Contains(string(body), `"index_qualities":["1080","4k"]`) {
+		t.Fatalf("state: %s", body)
+	}
+	res = post(`{"qualities":[]}`)
+	res.Body.Close()
+	raw, err = os.ReadFile(path)
+	if err != nil || !strings.Contains(string(raw), "INDEX_QUALITIES=") || strings.Contains(string(raw), "INDEX_QUALITIES=1080") {
+		t.Fatalf("cleared: %v %s", err, raw)
+	}
+}

@@ -209,6 +209,64 @@ func TestSyncLeavesOutAnExcludedCountry(t *testing.T) {
 	}
 }
 
+func TestSyncKeepsOnlyTheChosenQuality(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	env := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(env, []byte("INDEX_QUALITIES=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.idx.SetSettings(env)
+	r.src.video(1, "Heat.1995.1080p.mkv", "")
+	r.src.video(2, "Lost.S01E02.720p.mkv", "")
+	r.src.video(3, "Dune.2021.2160p.mkv", "")
+	r.src.msgs[4] = media.Message{ID: 4, Exists: true, File: &media.File{
+		MessageID: 4, ChannelID: 5, DocID: 9, Size: 10,
+		MIME: "audio/mpeg", FileName: "Song.720p.mp3", Date: time.Unix(1700000000, 0),
+	}}
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(env, []byte("INDEX_QUALITIES=1080,4k\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.src.video(5, "Plain.2020.mkv", "")
+	r.src.video(6, "Blade.1998.1440p.mkv", "")
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.cat.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int
+	for _, f := range all {
+		ids = append(ids, f.MessageID)
+	}
+	slices.Sort(ids)
+	if len(ids) != 3 || ids[0] != 1 || ids[1] != 3 || ids[2] != 4 {
+		t.Fatalf("kept %v", ids)
+	}
+	if err := os.WriteFile(env, []byte("INDEX_QUALITIES=\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	all, err = r.cat.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids = nil
+	for _, f := range all {
+		ids = append(ids, f.MessageID)
+	}
+	slices.Sort(ids)
+	if len(ids) != 6 || ids[0] != 1 || ids[5] != 6 {
+		t.Fatalf("widened %v", ids)
+	}
+}
+
 func TestSyncSkipsDeletedRunsAndResumes(t *testing.T) {
 	r := newRig(t)
 	ctx := context.Background()

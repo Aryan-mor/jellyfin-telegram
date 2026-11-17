@@ -12,6 +12,7 @@ import (
 	"strings"
 
 	"github.com/Aryan-mor/jellyfin-telegram/internal/catalog"
+	"github.com/Aryan-mor/jellyfin-telegram/internal/indexqual"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/jellyfin"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/media"
 	"github.com/Aryan-mor/jellyfin-telegram/internal/sign"
@@ -54,6 +55,9 @@ type Worker struct {
 	// Forum claims a file before extraction and signs the caption again once the archive exists.
 	// Nil keeps channel mode, where there is no claim.
 	Forum Forum
+	// Settings is the settings file. When a picture-size list is set, other sizes stay pending
+	// and are not extracted. Empty means every size, so widening the list picks them up later.
+	Settings string
 }
 
 // Forum is the supergroup claim. Claim is false when another installation holds the file.
@@ -76,6 +80,10 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	pending, err := w.Catalog.ExtractPending(ctx, maxTries)
 	if err != nil || len(pending) == 0 {
 		return false, err
+	}
+	pending = w.kept(pending)
+	if len(pending) == 0 {
+		return false, nil
 	}
 	userID, err := w.Client.AdminUserID(ctx)
 	if err != nil {
@@ -107,6 +115,24 @@ func (w *Worker) RunOnce(ctx context.Context) (bool, error) {
 	return false, nil
 }
 
+// kept drops sizes the settings file does not want. They stay pending.
+func (w *Worker) kept(files []media.File) []media.File {
+	if w.Settings == "" {
+		return files
+	}
+	sel := indexqual.Load(w.Settings)
+	if sel.All() {
+		return files
+	}
+	out := make([]media.File, 0, len(files))
+	for _, f := range files {
+		if sel.Keeps(f.FileName, f.Caption, f.MIME) {
+			out = append(out, f)
+		}
+	}
+	return out
+}
+
 // Verify puts back archived subtitles that Jellyfin's cache has lost. It reads only the archive.
 func (w *Worker) Verify(ctx context.Context) error {
 	done, err := w.Catalog.ExtractDone(ctx)
@@ -122,6 +148,9 @@ func (w *Worker) Verify(ctx context.Context) error {
 		return err
 	}
 	for _, f := range done {
+		if !indexqual.LoadKeeps(w.Settings, f.FileName, f.Caption, f.MIME) {
+			continue
+		}
 		match, ok := index.Locate(f)
 		if !ok {
 			continue
