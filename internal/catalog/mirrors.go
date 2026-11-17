@@ -71,6 +71,8 @@ type MirrorItem struct {
 	FileName  string
 	Caption   string
 	MIME      string
+	Width     int
+	Height    int
 }
 
 // NormalizeKinds keeps known parts, in MirrorKinds order. An empty or unknown list is an error.
@@ -265,7 +267,7 @@ func (c *Catalog) MirrorSent(ctx context.Context, id int64) (int, error) {
 // Unmirrored returns main-channel files that have not been copied to this mirror yet.
 func (c *Catalog) Unmirrored(ctx context.Context, id int64) ([]MirrorItem, error) {
 	rows, err := c.db.QueryContext(ctx, `
-		SELECT message_id, file_name, caption, mime FROM files f
+		SELECT message_id, file_name, caption, mime, width, height FROM files f
 		WHERE NOT EXISTS (SELECT 1 FROM mirror_sent s WHERE s.mirror_id=? AND s.message_id=f.message_id)
 		ORDER BY message_id`, id)
 	if err != nil {
@@ -275,7 +277,7 @@ func (c *Catalog) Unmirrored(ctx context.Context, id int64) ([]MirrorItem, error
 	var out []MirrorItem
 	for rows.Next() {
 		var it MirrorItem
-		if err := rows.Scan(&it.MessageID, &it.FileName, &it.Caption, &it.MIME); err != nil {
+		if err := rows.Scan(&it.MessageID, &it.FileName, &it.Caption, &it.MIME, &it.Width, &it.Height); err != nil {
 			return nil, err
 		}
 		out = append(out, it)

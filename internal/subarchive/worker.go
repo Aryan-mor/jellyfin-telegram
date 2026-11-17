@@ -126,7 +126,7 @@ func (w *Worker) kept(files []media.File) []media.File {
 	}
 	out := make([]media.File, 0, len(files))
 	for _, f := range files {
-		if sel.Keeps(f.FileName, f.Caption, f.MIME) {
+		if sel.KeepsSize(f.FileName, f.Caption, f.MIME, f.Width, f.Height) {
 			out = append(out, f)
 		}
 	}
@@ -148,7 +148,7 @@ func (w *Worker) Verify(ctx context.Context) error {
 		return err
 	}
 	for _, f := range done {
-		if !indexqual.LoadKeeps(w.Settings, f.FileName, f.Caption, f.MIME) {
+		if !indexqual.LoadKeepsSize(w.Settings, f.FileName, f.Caption, f.MIME, f.Width, f.Height) {
 			continue
 		}
 		match, ok := index.Locate(f)

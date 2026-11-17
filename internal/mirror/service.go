@@ -128,7 +128,7 @@ func (s *Service) one(ctx context.Context, m catalog.Mirror) error {
 		if !m.Wants(kind) {
 			continue
 		}
-		if !sel.Keeps(it.FileName, it.Caption, it.MIME) {
+		if !sel.KeepsSize(it.FileName, it.Caption, it.MIME, it.Width, it.Height) {
 			continue
 		}
 		if s.ReadyOnly != nil && s.ReadyOnly() && kind != naming.SectionMusic && !sign.IsReady(it.Caption) {

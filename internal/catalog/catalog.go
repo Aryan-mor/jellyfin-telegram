@@ -48,9 +48,11 @@ var migrations = []struct{ column, ddl string }{
 	{"subtitle_outcome", `ALTER TABLE files ADD COLUMN subtitle_outcome TEXT NOT NULL DEFAULT ''`},
 	{"extract_state", `ALTER TABLE files ADD COLUMN extract_state TEXT NOT NULL DEFAULT ''`},
 	{"extract_tries", `ALTER TABLE files ADD COLUMN extract_tries INTEGER NOT NULL DEFAULT 0`},
+	{"width", `ALTER TABLE files ADD COLUMN width INTEGER NOT NULL DEFAULT 0`},
+	{"height", `ALTER TABLE files ADD COLUMN height INTEGER NOT NULL DEFAULT 0`},
 }
 
-const columns = `message_id, channel_id, doc_id, size, mime, file_name, caption, date_unix, has_thumb, rel_path, probed_at, duration_sec, subtitle_outcome, extract_state`
+const columns = `message_id, channel_id, doc_id, size, mime, file_name, caption, date_unix, has_thumb, rel_path, probed_at, duration_sec, subtitle_outcome, extract_state, width, height`
 
 // Catalog wraps the database.
 type Catalog struct{ db *sql.DB }
@@ -153,7 +155,7 @@ func (c *Catalog) Close() error { return c.db.Close() }
 // Put inserts a file or updates it. A changed document resets everything learned about the old one.
 func (c *Catalog) Put(ctx context.Context, f media.File) error {
 	_, err := c.db.ExecContext(ctx, `
-		INSERT INTO files (`+columns+`) VALUES (?,?,?,?,?,?,?,?,?,?,0,0,'','')
+		INSERT INTO files (`+columns+`) VALUES (?,?,?,?,?,?,?,?,?,?,0,0,'','',?,?)
 		ON CONFLICT(message_id) DO UPDATE SET
 			channel_id=excluded.channel_id, doc_id=excluded.doc_id, size=excluded.size,
 			mime=excluded.mime, file_name=excluded.file_name, caption=excluded.caption,
@@ -163,9 +165,11 @@ func (c *Catalog) Put(ctx context.Context, f media.File) error {
 			duration_sec=CASE WHEN files.doc_id=excluded.doc_id THEN files.duration_sec ELSE 0 END,
 			subtitle_outcome=CASE WHEN files.doc_id=excluded.doc_id THEN files.subtitle_outcome ELSE '' END,
 			extract_state=CASE WHEN files.doc_id=excluded.doc_id THEN files.extract_state ELSE '' END,
-			extract_tries=CASE WHEN files.doc_id=excluded.doc_id THEN files.extract_tries ELSE 0 END`,
+			extract_tries=CASE WHEN files.doc_id=excluded.doc_id THEN files.extract_tries ELSE 0 END,
+			width=CASE WHEN files.doc_id<>excluded.doc_id THEN excluded.width WHEN excluded.width>0 THEN excluded.width ELSE files.width END,
+			height=CASE WHEN files.doc_id<>excluded.doc_id THEN excluded.height WHEN excluded.height>0 THEN excluded.height ELSE files.height END`,
 		f.MessageID, f.ChannelID, f.DocID, f.Size, f.MIME, f.FileName, f.Caption,
-		f.Date.Unix(), f.HasThumb, f.RelPath)
+		f.Date.Unix(), f.HasThumb, f.RelPath, f.Width, f.Height)
 	return err
 }
 
@@ -333,7 +337,8 @@ func scan(s scanner) (media.File, error) {
 	var f media.File
 	var date, probed int64
 	err := s.Scan(&f.MessageID, &f.ChannelID, &f.DocID, &f.Size, &f.MIME, &f.FileName, &f.Caption,
-		&date, &f.HasThumb, &f.RelPath, &probed, &f.DurationSeconds, &f.SubtitleOutcome, &f.ExtractState)
+		&date, &f.HasThumb, &f.RelPath, &probed, &f.DurationSeconds, &f.SubtitleOutcome, &f.ExtractState,
+		&f.Width, &f.Height)
 	if err != nil {
 		return f, err
 	}

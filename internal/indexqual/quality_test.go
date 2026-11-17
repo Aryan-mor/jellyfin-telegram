@@ -54,6 +54,16 @@ func TestBucketMapsReleaseNames(t *testing.T) {
 	if !only.Keeps("Song.mp3", "", "audio/mpeg") || !only.Keeps("A.1080p.mkv", "", "video/mp4") || only.Keeps("A.720p.mkv", "", "video/mp4") {
 		t.Fatal("keeps")
 	}
+	if !only.AllowsSize("Plain.mkv", "", 1920, 800) || only.AllowsSize("Plain.mkv", "", 1280, 720) || only.AllowsSize("Plain.mkv", "", 0, 0) {
+		t.Fatal("pixels")
+	}
+	if BucketOf(1920, 1080) != "1080" || BucketOf(1280, 536) != "720" || BucketOf(2560, 1440) != "2k" || BucketOf(3840, 1600) != "4k" || BucketOf(720, 480) != "480" || BucketOf(1080, 1920) != "1080" || BucketOf(0, 0) != "" {
+		t.Fatal("bucket of pixels")
+	}
+	// The printed size wins over the real frame.
+	if only.AllowsSize("A.720p.mkv", "", 1920, 1080) {
+		t.Fatal("name lost to pixels")
+	}
 }
 
 func TestLoadPrefersTheFile(t *testing.T) {

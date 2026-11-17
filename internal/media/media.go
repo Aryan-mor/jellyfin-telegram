@@ -12,11 +12,15 @@ type File struct {
 	ChannelID int64
 	DocID     int64
 	Size      int64
-	MIME      string
-	FileName  string
-	Caption   string
-	Date      time.Time
-	HasThumb  bool
+	// Width and Height are the picture size in pixels. Telegram sends them for a video,
+	// and a header read fills them when the name does not say. Zero means unknown.
+	Width    int
+	Height   int
+	MIME     string
+	FileName string
+	Caption  string
+	Date     time.Time
+	HasThumb bool
 
 	// RelPath is the .strm location inside the library, using forward slashes.
 	RelPath string

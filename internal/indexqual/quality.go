@@ -131,18 +131,28 @@ func Bucket(fileName, caption string) string {
 // Keeps reports that subtitle work and mirror copies may use this file.
 // Music is always kept, because it has no picture size. With no list, every file is kept.
 func (s Set) Keeps(fileName, caption, mime string) bool {
+	return s.KeepsSize(fileName, caption, mime, 0, 0)
+}
+
+// KeepsSize is Keeps, using the real picture size when the name does not say.
+func (s Set) KeepsSize(fileName, caption, mime string, width, height int) bool {
 	if s.All() || musicFile(mime, fileName) {
 		return true
 	}
-	return s.Allows(fileName, caption)
+	return s.AllowsSize(fileName, caption, width, height)
 }
 
 // LoadKeeps reads the settings file and applies Keeps. A missing path keeps every file.
 func LoadKeeps(envPath, fileName, caption, mime string) bool {
+	return LoadKeepsSize(envPath, fileName, caption, mime, 0, 0)
+}
+
+// LoadKeepsSize is LoadKeeps with a known picture size.
+func LoadKeepsSize(envPath, fileName, caption, mime string, width, height int) bool {
 	if envPath == "" {
 		return true
 	}
-	return Load(envPath).Keeps(fileName, caption, mime)
+	return Load(envPath).KeepsSize(fileName, caption, mime, width, height)
 }
 
 func musicFile(mime, name string) bool {
@@ -158,12 +168,20 @@ func musicFile(mime, name string) bool {
 }
 
 // Allows reports that this file may be indexed. With no list, every file may.
-// A file with no size is left out once a list is set.
+// A file with no size in its name and no known picture size is left out once a list is set.
 func (s Set) Allows(fileName, caption string) bool {
+	return s.AllowsSize(fileName, caption, 0, 0)
+}
+
+// AllowsSize is Allows, then the real picture size when the name and caption do not say.
+func (s Set) AllowsSize(fileName, caption string, width, height int) bool {
 	if s.All() {
 		return true
 	}
 	b := Bucket(fileName, caption)
+	if b == "" {
+		b = BucketOf(width, height)
+	}
 	if b == "" {
 		return false
 	}
@@ -173,4 +191,61 @@ func (s Set) Allows(fileName, caption string) bool {
 		}
 	}
 	return false
+}
+
+// BucketOf maps a real picture to a size id. The name still wins when it has one.
+// A wide short frame, such as 1920x800, counts as 1080. Zero stays unknown.
+func BucketOf(width, height int) string {
+	if width <= 0 && height <= 0 {
+		return ""
+	}
+	if width <= 0 {
+		return bucketHeight(height)
+	}
+	if height <= 0 {
+		return bucketWidth(width)
+	}
+	long, short := width, height
+	if height > width {
+		long, short = height, width
+	}
+	// 2:1 and wider is a scope frame: the long side is the width of the size.
+	if long*10 >= short*20 {
+		return bucketWidth(long)
+	}
+	return bucketHeight(short)
+}
+
+func bucketHeight(v int) string {
+	switch {
+	case v >= 1800:
+		return "4k"
+	case v >= 1300:
+		return "2k"
+	case v >= 900:
+		return "1080"
+	case v >= 600:
+		return "720"
+	case v >= 400:
+		return "480"
+	default:
+		return ""
+	}
+}
+
+func bucketWidth(v int) string {
+	switch {
+	case v >= 3000:
+		return "4k"
+	case v >= 2200:
+		return "2k"
+	case v >= 1600:
+		return "1080"
+	case v >= 1100:
+		return "720"
+	case v >= 640:
+		return "480"
+	default:
+		return ""
+	}
 }

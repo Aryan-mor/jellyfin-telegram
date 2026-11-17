@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"io"
 	"log/slog"
@@ -24,6 +25,7 @@ type fakeSource struct {
 	thumbErr error
 	lookups  int
 	deleted  []int
+	heads    map[int][]byte
 }
 
 func (s *fakeSource) Messages(_ context.Context, ids []int) ([]media.Message, error) {
@@ -51,6 +53,23 @@ func (s *fakeSource) DeleteMessages(_ context.Context, ids []int) error {
 		delete(s.msgs, id)
 	}
 	return nil
+}
+
+func (s *fakeSource) FetchBlock(_ context.Context, messageID int, _, block, size int64) ([]byte, error) {
+	if block > 0 {
+		return []byte{0}, nil
+	}
+	if b, ok := s.heads[messageID]; ok {
+		return b, nil
+	}
+	n := int(size)
+	if n > 32 {
+		n = 32
+	}
+	if n < 0 {
+		n = 0
+	}
+	return make([]byte, n), nil
 }
 
 func (s *fakeSource) video(id int, name, caption string) {
@@ -265,6 +284,76 @@ func TestSyncKeepsOnlyTheChosenQuality(t *testing.T) {
 	if len(ids) != 6 || ids[0] != 1 || ids[5] != 6 {
 		t.Fatalf("widened %v", ids)
 	}
+}
+
+func TestSyncKeepsAMeasuredPicture(t *testing.T) {
+	r := newRig(t)
+	ctx := context.Background()
+	env := filepath.Join(t.TempDir(), ".env")
+	if err := os.WriteFile(env, []byte("INDEX_QUALITIES=1080,4k\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	r.idx.SetSettings(env)
+	r.src.video(1, "Scope.2020.mkv", "")
+	r.src.msgs[1].File.Width = 1920
+	r.src.msgs[1].File.Height = 800
+	r.src.video(2, "Small.2020.mkv", "")
+	r.src.msgs[2].File.Width = 1280
+	r.src.msgs[2].File.Height = 720
+	r.src.video(3, "Header.2020.mkv", "")
+	r.src.heads = map[int][]byte{3: measuredMP4(1920, 1080)}
+	r.src.video(4, "NoSize.2020.mkv", "")
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	all, err := r.cat.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int
+	for _, f := range all {
+		ids = append(ids, f.MessageID)
+	}
+	slices.Sort(ids)
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
+		t.Fatalf("kept %v", ids)
+	}
+	got, err := r.cat.Get(ctx, 3)
+	if err != nil || got.Width != 1920 || got.Height != 1080 {
+		t.Fatalf("stored %+v %v", got, err)
+	}
+	if _, err := r.idx.Sync(ctx, FullWindow); err != nil {
+		t.Fatal(err)
+	}
+	all, err = r.cat.All(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ids = nil
+	for _, f := range all {
+		ids = append(ids, f.MessageID)
+	}
+	slices.Sort(ids)
+	if len(ids) != 2 || ids[0] != 1 || ids[1] != 3 {
+		t.Fatalf("second pass %v", ids)
+	}
+}
+
+func measuredMP4(width, height uint32) []byte {
+	tkhd := make([]byte, 84)
+	binary.BigEndian.PutUint32(tkhd[76:], width<<16)
+	binary.BigEndian.PutUint32(tkhd[80:], height<<16)
+	hdlr := make([]byte, 12)
+	copy(hdlr[8:], "vide")
+	trak := mp4Box("trak", append(mp4Box("tkhd", tkhd), mp4Box("mdia", mp4Box("hdlr", hdlr))...))
+	return append(mp4Box("ftyp", []byte("isom")), mp4Box("moov", trak)...)
+}
+
+func mp4Box(typ string, body []byte) []byte {
+	out := make([]byte, 4)
+	binary.BigEndian.PutUint32(out, uint32(8+len(body)))
+	out = append(out, typ...)
+	return append(out, body...)
 }
 
 func TestSyncSkipsDeletedRunsAndResumes(t *testing.T) {

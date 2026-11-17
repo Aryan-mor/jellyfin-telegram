@@ -123,7 +123,7 @@ func (p *Prober) Run(ctx context.Context, refresh bool) error {
 // handle reports whether no work is left for this file in this run.
 func (p *Prober) handle(ctx context.Context, f *media.File, m match, userID string) bool {
 	// Only a path match proves this is the current item. An old item may share the stream URL.
-	if p.Subtitles != nil && f.SubtitleOutcome == "" && (m.byPath || !f.ProbedAt.IsZero()) && indexqual.LoadKeeps(p.Settings, f.FileName, f.Caption, f.MIME) {
+	if p.Subtitles != nil && f.SubtitleOutcome == "" && (m.byPath || !f.ProbedAt.IsZero()) && indexqual.LoadKeepsSize(p.Settings, f.FileName, f.Caption, f.MIME, f.Width, f.Height) {
 		p.resolveSubtitle(ctx, f, m, userID)
 	}
 	if !f.ProbedAt.IsZero() {

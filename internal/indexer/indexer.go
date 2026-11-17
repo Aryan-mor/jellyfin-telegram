@@ -382,7 +382,9 @@ func (x *Indexer) add(ctx context.Context, f media.File) error {
 	if naming.Section(f.FileName, f.Caption, f.MIME) == naming.SectionMusic {
 		return x.addMusic(ctx, f)
 	}
-	if x.qualitySkipped(f) {
+	if skip, err := x.qualitySkip(ctx, &f); err != nil {
+		return err
+	} else if skip {
 		x.log.Info("skipped quality", "message", f.MessageID, "file", f.FileName)
 		return errSkip
 	}
@@ -737,13 +739,85 @@ func (x *Indexer) countryBlocked(ctx context.Context, tmdb int, episode bool) (b
 	return f.BlocksCountry(codes), nil
 }
 
-// qualitySkipped reports that this file is outside the sizes chosen in the settings file.
-// Music is kept. With no list, every file is kept.
-func (x *Indexer) qualitySkipped(f media.File) bool {
+// qualitySkip reports that this file is outside the sizes chosen in the settings file.
+// The name wins. With no size in the name, Telegram's picture size is used, then a short
+// read of the file header. Music is kept. With no list, every file is kept.
+// A header that cannot be read returns the error so the same post is tried again.
+// A header with no picture size is skipped.
+func (x *Indexer) qualitySkip(ctx context.Context, f *media.File) (bool, error) {
 	if x.personal || x.settings == "" {
-		return false
+		return false, nil
 	}
-	return !indexqual.Load(x.settings).Allows(f.FileName, f.Caption)
+	sel := indexqual.Load(x.settings)
+	if sel.All() {
+		return false, nil
+	}
+	if indexqual.Bucket(f.FileName, f.Caption) != "" {
+		return !sel.Allows(f.FileName, f.Caption), nil
+	}
+	if indexqual.BucketOf(f.Width, f.Height) == "" {
+		w, h, ok, err := x.measure(ctx, *f)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
+			return true, nil
+		}
+		f.Width, f.Height = w, h
+		x.log.Info("measured picture", "message", f.MessageID, "file", f.FileName, "width", w, "height", h)
+	}
+	return !sel.AllowsSize(f.FileName, f.Caption, f.Width, f.Height), nil
+}
+
+// blockReader reads one slice of a document. The pool does this without taking the whole file.
+type blockReader interface {
+	FetchBlock(ctx context.Context, messageID int, docID, block, size int64) ([]byte, error)
+}
+
+const measureBlocks = 2
+
+func (x *Indexer) measure(ctx context.Context, f media.File) (int, int, bool, error) {
+	src, ok := x.src.(blockReader)
+	if !ok || f.Size <= 0 || f.MessageID <= 0 {
+		return 0, 0, false, nil
+	}
+	head, err := x.readBlocks(ctx, src, f, 0, measureBlocks)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	if w, h, ok := indexqual.PictureSize(head); ok {
+		return w, h, true, nil
+	}
+	total := int((f.Size + media.BlockSize - 1) / media.BlockSize)
+	start := total - measureBlocks
+	if start < measureBlocks {
+		start = measureBlocks
+	}
+	if start >= total {
+		return 0, 0, false, nil
+	}
+	tail, err := x.readBlocks(ctx, src, f, start, total-start)
+	if err != nil {
+		return 0, 0, false, err
+	}
+	w, h, ok := indexqual.PictureSize(tail)
+	return w, h, ok, nil
+}
+
+func (x *Indexer) readBlocks(ctx context.Context, src blockReader, f media.File, start, n int) ([]byte, error) {
+	var buf []byte
+	for i := 0; i < n; i++ {
+		block := start + i
+		if int64(block)*media.BlockSize >= f.Size {
+			break
+		}
+		part, err := src.FetchBlock(ctx, f.MessageID, f.DocID, int64(block), f.Size)
+		if err != nil {
+			return nil, err
+		}
+		buf = append(buf, part...)
+	}
+	return buf, nil
 }
 
 // syncQuality drops sizes that are no longer wanted and, when the list changes, walks the
@@ -754,6 +828,9 @@ func (x *Indexer) syncQuality(ctx context.Context) error {
 	}
 	sel := indexqual.Load(x.settings)
 	if err := x.rewindQuality(ctx, sel.Key()); err != nil {
+		return err
+	}
+	if err := x.markPixels(ctx, !sel.All()); err != nil {
 		return err
 	}
 	if sel.All() {
@@ -767,7 +844,7 @@ func (x *Indexer) syncQuality(ctx context.Context) error {
 		if strings.HasPrefix(f.RelPath, "Music/") || strings.HasPrefix(f.RelPath, "Home/") {
 			continue
 		}
-		if sel.Allows(f.FileName, f.Caption) {
+		if sel.AllowsSize(f.FileName, f.Caption, f.Width, f.Height) {
 			continue
 		}
 		if err := x.remove(ctx, f); err != nil {
@@ -807,6 +884,32 @@ func (x *Indexer) rewindQuality(ctx context.Context, key string) error {
 		x.log.Info("index quality changed, reading the channel again", "from", prev, "to", key)
 	}
 	return x.cat.SetStateValue(ctx, stateKey, key)
+}
+
+// markPixels rewinds once, so posts that were skipped for having no size in the name are
+// measured. A library that keeps every size is not walked again for that.
+func (x *Indexer) markPixels(ctx context.Context, rewind bool) error {
+	const key = "index.quality.pixels"
+	stored, err := x.cat.StateValue(ctx, key)
+	if err != nil {
+		return err
+	}
+	if stored == "1" {
+		return nil
+	}
+	if rewind {
+		high, err := x.cat.StateValue(ctx, "scan.main.high")
+		if err != nil {
+			return err
+		}
+		if n, err := strconv.Atoi(high); err == nil && n > 0 {
+			if err := x.cat.SetStateValue(ctx, "scan.main.low", strconv.Itoa(n+1)); err != nil {
+				return err
+			}
+			x.log.Info("measuring picture size, reading the channel again")
+		}
+	}
+	return x.cat.SetStateValue(ctx, key, "1")
 }
 
 // dropExcluded removes titles already in the catalog whose country is now excluded.

@@ -805,12 +805,14 @@ func fileFromMessage(m *tg.Message, channelID int64, photos bool) *media.File {
 	isVideoAttr := false
 	isAudio := false
 	voice := false
+	width, height := 0, 0
 	for _, a := range doc.Attributes {
 		switch v := a.(type) {
 		case *tg.DocumentAttributeFilename:
 			name = v.FileName
 		case *tg.DocumentAttributeVideo:
 			isVideoAttr = !v.RoundMessage
+			width, height = v.W, v.H
 		case *tg.DocumentAttributeAudio:
 			if v.Voice {
 				voice = true
@@ -838,6 +840,8 @@ func fileFromMessage(m *tg.Message, channelID int64, photos bool) *media.File {
 		ChannelID: channelID,
 		DocID:     doc.ID,
 		Size:      doc.Size,
+		Width:     width,
+		Height:    height,
 		MIME:      doc.MimeType,
 		FileName:  name,
 		Caption:   m.Message,
