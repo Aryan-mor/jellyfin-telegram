@@ -1369,7 +1369,7 @@ func archiveLoop(ctx context.Context, cfg config.Config, cat *catalog.Catalog, p
 		Open: func(ctx context.Context, f media.File) io.ReaderAt {
 			return pool.Open(ctx, f.MessageID, f.DocID, f.Size)
 		},
-		StreamURL: lib.StreamURL, Log: log, Settings: envPath,
+		StreamURL: lib.StreamURL, Log: log, Settings: prober.Settings,
 	}
 	if cfg.SignedLibrary {
 		w.Forum = lazyForum{hub}
